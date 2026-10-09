@@ -1,0 +1,13 @@
+# dependencies
+node_modules/
+
+# build output (attached to GitHub releases, not committed)
+main.js
+*.js.map
+*.zip
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+data.json
