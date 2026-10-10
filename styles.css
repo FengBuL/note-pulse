@@ -692,11 +692,6 @@
   fill: transparent;
   cursor: crosshair;
 }
-.vp-foot-note {
-  margin-top: var(--vp-s2);
-  font-size: 11.5px;
-  color: var(--vp-subtle);
-}
 
 /* 悬浮提示 */
 .vp-tooltip {
@@ -852,9 +847,6 @@
   width: 11px;
   height: 11px;
   border-radius: 3px;
-}
-.vp-heat-mode {
-  cursor: help;
 }
 
 .vp-day-detail {
@@ -1303,23 +1295,23 @@
   background: color-mix(in srgb, var(--vp-accent) 88%, black) !important;
 }
 
-/* 提示条 */
+/* 提示条：紧凑的一行，可关闭；关闭后不再出现 */
 .vp-hints {
   display: flex;
   flex-direction: column;
   gap: var(--vp-s2);
 }
 .vp-hints:not(:empty) {
-  margin-bottom: var(--vp-s4);
+  margin-bottom: var(--vp-s3);
 }
 .vp-hint {
   display: flex;
   align-items: center;
-  gap: var(--vp-s3);
-  padding: var(--vp-s3) var(--vp-s4);
-  border: 1px solid color-mix(in srgb, var(--vp-accent) 28%, var(--vp-border));
-  border-radius: var(--vp-radius);
-  background: var(--vp-accent-soft);
+  gap: var(--vp-s2);
+  padding: 6px var(--vp-s2) 6px var(--vp-s3);
+  border: 1px solid color-mix(in srgb, var(--vp-accent) 24%, var(--vp-border));
+  border-radius: var(--vp-radius-sm);
+  background: var(--vp-accent-softer);
 }
 .vp-hint-icon {
   display: inline-flex;
@@ -1327,41 +1319,39 @@
   color: var(--vp-accent);
 }
 .vp-hint-icon svg {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
 }
 .vp-hint-main {
   flex: 1 1 auto;
   min-width: 0;
 }
 .vp-hint-text {
-  font-size: 13px;
-  line-height: 1.55;
+  font-size: 12.5px;
+  line-height: 1.5;
   color: var(--text-normal);
 }
 .vp-hint-actions {
   display: flex;
   flex: none;
   flex-wrap: wrap;
+  align-items: center;
   justify-content: flex-end;
-  gap: var(--vp-s2);
+  gap: var(--vp-s1) var(--vp-s2);
+}
+.vp-btn.is-compact {
+  height: 24px;
+  padding: 0 10px !important;
+  font-size: 12px;
 }
 
-/* 趋势卡下方：排除开关与说明 */
+/* 趋势卡下方：排除开关（说明都在旁边的问号里） */
 .vp-annot {
   display: flex;
-  flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--vp-s2) var(--vp-s4);
-  margin-top: var(--vp-s3);
-  padding-top: var(--vp-s3);
-  border-top: 1px dashed var(--vp-border);
-}
-.vp-annot-note {
-  font-size: 12px;
-  color: var(--vp-subtle);
-  cursor: help;
+  gap: var(--vp-s1);
+  min-height: 28px;
+  margin-top: var(--vp-s2);
 }
 .vp-switch {
   display: inline-flex;
@@ -1406,12 +1396,6 @@
   transform: translateX(12px);
 }
 
-.vp-kpi-note {
-  margin-top: var(--vp-s2);
-  font-size: 11.5px;
-  line-height: 1.4;
-  color: var(--vp-subtle);
-}
 
 .vp-fullempty {
   display: flex;
@@ -1423,14 +1407,15 @@
 
 @container vd (max-width: 760px) {
   .vp-hint {
-    flex-direction: column;
-    align-items: stretch;
+    flex-wrap: wrap;
   }
-  .vp-hint-icon {
-    display: none;
+  .vp-hint-main {
+    flex-basis: calc(100% - 100px);
   }
   .vp-hint-actions {
+    flex: 1 1 100%;
     justify-content: flex-start;
+    padding-left: 24px;
   }
 }
 
@@ -1446,4 +1431,90 @@
 }
 .vp-group-row .vp-meter.is-inline {
   width: 100%;
+}
+
+/* ---------------- 问号说明 ---------------- */
+
+.vp-help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  min-width: 0;
+  min-height: 0;
+  margin: 0 0 0 2px;
+  padding: 0 !important;
+  border: none !important;
+  border-radius: 50%;
+  background: transparent !important;
+  box-shadow: none !important;
+  color: var(--vp-subtle);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: help;
+  transition: color 0.15s var(--vp-ease);
+}
+.vp-help svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 2;
+}
+.vp-help:hover,
+.vp-help:focus-visible {
+  color: var(--vp-accent);
+}
+.vp-help:focus-visible {
+  outline: 2px solid var(--vp-accent);
+  outline-offset: 1px;
+}
+.vp-kpi-top .vp-label {
+  min-width: 0;
+}
+.vp-hint-text .vp-help {
+  vertical-align: -3px;
+  margin-left: 4px;
+}
+
+/* 气泡挂在 body 上、fixed 定位：不受卡片 overflow 影响，也不占版面 */
+.vp-help-pop {
+  position: fixed;
+  z-index: 1000;
+  top: 0;
+  left: 0;
+  box-sizing: border-box;
+  width: max-content;
+  max-width: min(260px, calc(100vw - 12px));
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.55;
+  text-align: left;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.12s ease, visibility 0.12s;
+}
+.theme-dark .vp-help-pop {
+  background: color-mix(in srgb, var(--background-secondary) 60%, #000);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+}
+.vp-help-pop.is-visible {
+  opacity: 1;
+  visibility: visible;
+}
+@media (prefers-reduced-motion: reduce) {
+  .vp-help-pop,
+  .vp-help {
+    transition: none;
+  }
 }

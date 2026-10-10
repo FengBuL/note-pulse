@@ -57,6 +57,8 @@ export class DashboardView extends ItemView {
   private partObservers = new Map<string, ResizeObserver[]>();
   private currentPart = "";
   private bodyHost!: HTMLElement;
+  private helpPop: HTMLElement | null = null;
+  private helpAnchor: HTMLElement | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: NotePulsePlugin) {
     super(leaf);
@@ -98,6 +100,12 @@ export class DashboardView extends ItemView {
       }, 60000)
     );
 
+    // 说明气泡：滚动或点击别处时收起（触屏没有悬停，靠点击问号查看）
+    this.registerDomEvent(root, "scroll", () => this.hideHelp(), { capture: true } as AddEventListenerOptions);
+    this.registerDomEvent(root.ownerDocument, "pointerdown", (e: Event) => {
+      if (!(e.target as HTMLElement | null)?.closest?.(".vp-help")) this.hideHelp();
+    });
+
     if (this.plugin.lastStats) this.render(this.plugin.lastStats);
     else this.showLoading("正在统计…");
     this.plugin.requestRefresh(false);
@@ -105,6 +113,8 @@ export class DashboardView extends ItemView {
 
   async onClose() {
     this.disconnectObservers();
+    this.helpPop?.remove();
+    this.helpPop = null;
     this.contentEl.empty();
   }
 
@@ -168,6 +178,7 @@ export class DashboardView extends ItemView {
 
   render(stats: VaultStats) {
     const scrollTop = this.contentEl.scrollTop;
+    this.hideHelp();
     this.stats = stats;
     this.disconnectObservers();
     this.parts.clear();
@@ -246,12 +257,80 @@ export class DashboardView extends ItemView {
 
   /* ---------- 通用组件 ---------- */
 
-  private card(parent: HTMLElement, cls: string, title: string, icon: string): { el: HTMLElement; head: HTMLElement; body: HTMLElement } {
+  /**
+   * 小问号：悬停或键盘聚焦时在气泡里显示说明，不占版面。
+   * 气泡挂在 body 上、用 fixed 定位，所以不会被卡片的 overflow 裁掉，也不会引起布局抖动。
+   */
+  private help(parent: HTMLElement, text: string): HTMLElement {
+    const b = parent.createEl("button", {
+      cls: "vp-help",
+      attr: { type: "button", "aria-label": `说明：${text.replace(/\n+/g, " ")}` },
+    });
+    setIcon(b, "circle-help");
+    if (!b.querySelector("svg")) setIcon(b, "help-circle");
+    if (!b.querySelector("svg")) b.setText("?");
+    const show = () => this.showHelp(b, text);
+    b.addEventListener("mouseenter", show);
+    b.addEventListener("focus", show);
+    b.addEventListener("mouseleave", () => this.hideHelp(b));
+    b.addEventListener("blur", () => this.hideHelp(b));
+    b.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      show();
+    });
+    b.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") this.hideHelp(b);
+    });
+    return b;
+  }
+
+  private showHelp(anchor: HTMLElement, text: string) {
+    const doc = anchor.ownerDocument;
+    if (!this.helpPop || !this.helpPop.isConnected) {
+      this.helpPop = doc.body.createDiv({ cls: "vp-help-pop", attr: { role: "tooltip", id: "vp-help-pop" } });
+    }
+    const pop = this.helpPop;
+    pop.setText(text);
+    pop.removeClass("is-visible");
+    pop.style.left = "0px";
+    pop.style.top = "0px";
+    this.helpAnchor = anchor;
+    anchor.setAttr("aria-describedby", "vp-help-pop");
+    const a = anchor.getBoundingClientRect();
+    const vw = doc.documentElement.clientWidth;
+    const card = (anchor.closest(".vp-card") as HTMLElement | null)?.getBoundingClientRect();
+    const pw = pop.offsetWidth,
+      ph = pop.offsetHeight;
+    // 尽量留在所在卡片范围内；卡片太窄时退而求其次，保证不超出窗口
+    let minX = 6,
+      maxX = vw - pw - 6;
+    if (card && card.width >= pw + 12) {
+      minX = Math.max(minX, card.left + 6);
+      maxX = Math.min(maxX, card.right - pw - 6);
+    }
+    const left = Math.max(minX, Math.min(maxX, a.left + a.width / 2 - pw / 2));
+    let top = a.top - ph - 8;
+    if (top < 6) top = a.bottom + 8;
+    pop.style.left = `${Math.round(left)}px`;
+    pop.style.top = `${Math.round(top)}px`;
+    pop.addClass("is-visible");
+  }
+
+  private hideHelp(anchor?: HTMLElement) {
+    if (anchor && this.helpAnchor !== anchor) return;
+    this.helpPop?.removeClass("is-visible");
+    this.helpAnchor?.removeAttribute("aria-describedby");
+    this.helpAnchor = null;
+  }
+
+  private card(parent: HTMLElement, cls: string, title: string, icon: string, help?: string): { el: HTMLElement; head: HTMLElement; body: HTMLElement } {
     const el = parent.createDiv({ cls: `vp-card ${cls}` });
     const head = el.createDiv({ cls: "vp-card-head" });
     const h = head.createDiv({ cls: "vp-card-title" });
     setIcon(h.createSpan({ cls: "vp-card-icon", attr: { "aria-hidden": "true" } }), icon);
     h.createSpan({ text: title });
+    if (help) this.help(h, help);
     const body = el.createDiv({ cls: "vp-card-body" });
     return { el, head, body };
   }
@@ -365,34 +444,61 @@ export class DashboardView extends ItemView {
     const wrap = parent.createDiv({ cls: "vp-hints" });
     const thr = fmtNum(s.outliers.threshold);
     const goal = this.plugin.settings.dailyWordGoal;
-    const make = (h: Hint, icon: string, text: string) => {
+    const make = (h: Hint, icon: string, text: string, detail: string) => {
       const el = wrap.createDiv({ cls: "vp-hint", attr: { role: "note" } });
       setIcon(el.createSpan({ cls: "vp-hint-icon", attr: { "aria-hidden": "true" } }), icon);
       const t = el.createDiv({ cls: "vp-hint-main" });
-      t.createDiv({ cls: "vp-hint-text", text });
+      const line = t.createDiv({ cls: "vp-hint-text" });
+      line.createSpan({ text });
+      this.help(line, detail);
       const acts = el.createDiv({ cls: "vp-hint-actions" });
       const btn = (label: string, title: string, fn: () => void, primary = false) => {
-        const b = acts.createEl("button", { cls: "vp-btn" + (primary ? " is-primary" : ""), text: label, attr: { title } });
+        const b = acts.createEl("button", { cls: "vp-btn is-compact" + (primary ? " is-primary" : ""), text: label, attr: { title } });
         b.addEventListener("click", fn);
       };
-      return { btn, el, h };
+      // 右上角的 × 等同于“忽略”，关闭后不再出现，也不会再占位
+      const close = (title: string) => {
+        const x = acts.createEl("button", { cls: "vp-icon-btn is-small", attr: { "aria-label": title, title } });
+        setIcon(x, "x");
+        x.addEventListener("click", () => {
+          this.hideHelp();
+          el.remove();
+          this.plugin.dismissHint(h.key);
+        });
+      };
+      return { btn, close };
     };
     for (const h of s.hints) {
       if (h.kind === "onboarding") {
-        const m = make(h, "sparkles", `欢迎使用 Note Pulse。默认每天写 ${goal > 0 ? fmtFull(goal) : "任意"} 字算打卡；超过 ${thr} 字的超大笔记不计入写作统计。自动采集、网页剪藏之类的文件夹建议在设置里标记为“采集文件夹”。`);
+        const m = make(
+          h,
+          "sparkles",
+          `欢迎使用 Note Pulse：每天写 ${goal > 0 ? fmtFull(goal) : "任意"} 字算打卡。`,
+          `超过 ${thr} 字的超大笔记不计入写作统计。自动采集、网页剪藏之类的文件夹，建议在设置里标记为“采集文件夹”。`
+        );
         m.btn("打开设置", "调整每日目标、采集文件夹、超大笔记阈值等", () => this.plugin.openSettings(), true);
-        m.btn("知道了", "不再显示", () => this.plugin.dismissHint(h.key));
+        m.close("知道了，不再显示");
       } else if (h.kind === "folder" && h.target) {
         const f = h.target;
-        const m = make(h, "lightbulb", `“${f}/” 里${h.count === h.total ? `的 ${h.total} 篇笔记都` : ` ${h.total} 篇笔记有 ${h.count} 篇`}超过 ${thr} 字，看起来是自动采集的内容，会让字数趋势和热力图失真。`);
+        const m = make(
+          h,
+          "lightbulb",
+          `“${f}/” 里${h.count === h.total ? `${h.total} 篇笔记都` : ` ${h.total} 篇有 ${h.count} 篇`}超过 ${thr} 字，像是自动采集的内容。`,
+          "这类笔记会让字数趋势和热力图失真。“不计入写作统计”后，笔记仍计入总数；“完全排除”则整个文件夹不参与任何统计。"
+        );
         m.btn("不计入写作统计", "笔记仍计入总数，但不计入字数趋势、热力图和打卡", () => this.plugin.setClippingFolder(f), true);
         m.btn("完全排除", "整个文件夹不参与任何统计", () => this.plugin.excludeFolder(f));
-        m.btn("忽略", "不再提示这个文件夹", () => this.plugin.dismissHint(h.key));
+        m.close("忽略，不再提示这个文件夹");
       } else if (h.kind === "spike" && h.target) {
         const [, mm, dd] = h.target.split("-").map(Number);
-        const m = make(h, "calendar-clock", `有 ${h.count} 篇笔记的创建日期都是 ${mm} 月 ${dd} 日（占 ${Math.round(((h.count || 0) / Math.max(1, h.total || 1)) * 100)}%），可能是同步或导入重置了文件创建时间，趋势图会在这天陡升。给笔记加上 created 字段可以修正。`);
+        const m = make(
+          h,
+          "calendar-clock",
+          `${h.count} 篇笔记的创建日期都是 ${mm} 月 ${dd} 日（占 ${Math.round(((h.count || 0) / Math.max(1, h.total || 1)) * 100)}%），趋势图会在这天陡升。`,
+          "可能是同步或导入重置了文件创建时间。给笔记加上 created 字段，再在设置里指定它作为创建日期，就能修正。"
+        );
         m.btn("设置创建日期字段", "在设置里指定用哪个 frontmatter 字段作为创建日期", () => this.plugin.openSettings(), true);
-        m.btn("忽略", "不再提示这一天", () => this.plugin.dismissHint(h.key));
+        m.close("忽略，不再提示这一天");
       }
     }
   }
@@ -408,6 +514,10 @@ export class DashboardView extends ItemView {
     const ht = head.createDiv({ cls: "vp-card-title" });
     setIcon(ht.createSpan({ cls: "vp-card-icon" }), "pencil");
     ht.createSpan({ text: "今日写作" });
+    this.help(
+      ht,
+      `${goal > 0 ? `当天新增字数达到每日目标（${fmtFull(goal)} 字，可在设置里改）` : "当天写了任何字"}就算打卡，写了当天的日记也算。\n连续打卡从今天往前数；今天还没写不会中断，到明天才断。`
+    );
     const pill = head.createDiv({ cls: "vp-pill " + (todayDone ? "is-success" : "is-muted") });
     setIcon(pill.createSpan({ cls: "vp-pill-icon" }), todayDone ? "check" : "clock");
     pill.createSpan({ text: todayDone ? "今日已打卡" : "今天还没打卡" });
@@ -499,11 +609,12 @@ export class DashboardView extends ItemView {
       cumWords.push(cw);
     }
 
-    const kpi = (icon: string, label: string) => {
+    const kpi = (icon: string, label: string, help: string) => {
       const c = wrap.createDiv({ cls: "vp-card vp-kpi", attr: { role: "group", "aria-label": label } });
       const top = c.createDiv({ cls: "vp-kpi-top" });
       setIcon(top.createSpan({ cls: "vp-kpi-icon" }), icon);
       top.createSpan({ cls: "vp-label", text: label });
+      this.help(top, help);
       return c;
     };
     const delta = (parent: HTMLElement, cur: number, prev: number, caption: string) => {
@@ -520,29 +631,28 @@ export class DashboardView extends ItemView {
     };
 
     // 笔记
-    const a = kpi("files", "笔记");
+    const a = kpi("files", "笔记", "统计所有未被排除的 Markdown 笔记。曲线是近 12 周的累计新建数（不含采集文件夹）；百分比是近 30 天与前 30 天相比的变化。");
     bigNumber(a, s.totalNotes, "篇");
     delta(a, n30, nPrev, `近 30 天新建 ${fmtFull(n30)} 篇`);
     drawSparkline(a.createDiv({ cls: "vp-kpi-viz" }), cumNotes);
 
     // 字数
-    const b = kpi("type", "总字数");
+    const skipped = s.totalWords - s.writeWordsTotal;
+    const b = kpi(
+      "type",
+      "总字数",
+      `所有笔记的字数合计。曲线是近 12 周累计的写作字数；百分比是近 30 天与前 30 天相比的变化。${
+        skipped > 0 ? `\n其中 ${fmtNum(skipped)} 字来自采集文件夹或超大笔记，不计入趋势图、热力图和“新增字数”，可在设置里调整。` : ""
+      }`
+    );
     bigNumber(b, s.totalWords, "字");
     delta(b, w30, wPrev, `近 30 天新增 ${fmtNum(w30)} 字`);
     drawSparkline(b.createDiv({ cls: "vp-kpi-viz" }), cumWords);
-    const skipped = s.totalWords - s.writeWordsTotal;
-    if (skipped > 0) {
-      b.createDiv({
-        cls: "vp-kpi-note",
-        text: `其中 ${fmtNum(skipped)} 字（采集 / 超大笔记）不计入写作统计`,
-        attr: { title: "趋势图、热力图和“新增字数”都不含这部分。可在设置里调整。" },
-      });
-    }
 
     // 任务
     const t = s.tasks;
     const rate = t.total ? Math.round((t.done / t.total) * 100) : 0;
-    const c = kpi("list-checks", "任务完成率");
+    const c = kpi("list-checks", "任务完成率", "已完成任务占全部任务的比例，已取消的任务不计。逾期指截止日期（📅 或 [due::]）早于今天、还没完成的任务。");
     bigNumber(c, t.total ? String(rate) : "—", t.total ? "%" : "");
     const cd = c.createDiv({ cls: "vp-kpi-delta" });
     const op = cd.createSpan({ cls: "vp-delta " + (t.overdue.length ? "is-down" : "is-up") });
@@ -554,7 +664,11 @@ export class DashboardView extends ItemView {
     // 链接
     const linked = s.totalNotes - s.links.orphans.length;
     const conn = s.totalNotes ? linked / s.totalNotes : 0;
-    const dd = kpi("link", "链接");
+    const dd = kpi(
+      "link",
+      "链接",
+      `笔记之间的链接总数。孤立指没有任何链接指向它、它也没有链到别处的笔记。\n底部进度条是连通率：有链接的笔记占全部笔记的比例，现在是 ${Math.round(conn * 100)}%。`
+    );
     bigNumber(dd, s.totalLinks, "条");
     const ld = dd.createDiv({ cls: "vp-kpi-delta" });
     const lp = ld.createSpan({ cls: "vp-delta is-flat" });
@@ -564,7 +678,7 @@ export class DashboardView extends ItemView {
       cls: "vp-kpi-caption",
       text: `平均每篇 ${(s.totalLinks / Math.max(1, s.totalNotes)).toFixed(1)} 条`,
     });
-    this.meter(dd.createDiv({ cls: "vp-kpi-viz" }), conn, "", `连通率 ${Math.round(conn * 100)}%`);
+    this.meter(dd.createDiv({ cls: "vp-kpi-viz" }), conn, "");
   }
 
   private meter(parent: HTMLElement, ratio: number, cls: string, label?: string) {
@@ -577,7 +691,26 @@ export class DashboardView extends ItemView {
   /* ---------- 3. 热力图 ---------- */
 
   private renderHeatmap(grid: HTMLElement, s: VaultStats, ck: Checkin) {
-    const { el, head, body } = this.card(grid, "vp-heat-card", "写作热力图", "calendar-days");
+    const goal = this.plugin.settings.dailyWordGoal;
+    const hm = this.plugin.settings.heatmapMode;
+    let modeTip: string;
+    if (hm === "auto") {
+      const st = s.logStartDay ? s.logStartDay.slice(5).replace("-", "/") : "今天";
+      modeTip = `${st} 起是实测值：从启用插件那天起，按每天实际新增的字数记录（看板关着也会记）。更早的日子按笔记最后修改日估算，悬停格子会标注“估算”。`;
+    } else if (hm === "delta") {
+      modeTip = "按每日新增字数：从启用插件那天开始累积。";
+    } else {
+      modeTip = "按笔记修改日：笔记全文字数计入其最后修改日，较粗略，可在设置中切换为“智能”或“每日新增字数”。";
+    }
+    const skippedN = s.outliers.count;
+    const heatHelp = [
+      modeTip,
+      `颜色越深写得越多${goal > 0 ? `，目标 ${fmtNum(goal)} 字/天` : ""}。写了日记的日子也算打卡。`,
+      skippedN > 0 ? `已排除 ${skippedN} 篇超大或采集笔记。` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+    const { el, head, body } = this.card(grid, "vp-heat-card", "写作热力图", "calendar-days", heatHelp);
     const rangeLabel = head.createDiv({ cls: "vp-card-aside" });
     const summary = body.createDiv({ cls: "vp-trend-summary" });
     const wrap = body.createDiv({ cls: "vp-heatmap-wrap" });
@@ -616,26 +749,6 @@ export class DashboardView extends ItemView {
     legend.createSpan({ text: "少" });
     for (let i = 0; i <= 4; i++) legend.createSpan({ cls: `vp-heat-swatch vp-l${i}` });
     legend.createSpan({ text: "多" });
-    const goal = this.plugin.settings.dailyWordGoal;
-    const hm = this.plugin.settings.heatmapMode;
-    let modeText: string, modeTip: string;
-    if (hm === "auto") {
-      const st = s.logStartDay ? s.logStartDay.slice(5).replace("-", "/") : "今天";
-      modeText = `${st} 起实测 · 更早为估算`;
-      modeTip = "从启用插件那天起，按每天实际新增的字数记录（看板关着也会记）；更早的日子按笔记最后修改日估算，估算值在悬浮提示里会标注。";
-    } else if (hm === "delta") {
-      modeText = "按每日新增字数";
-      modeTip = "每日新增字数：从启用插件那天开始累积。";
-    } else {
-      modeText = "按笔记修改日";
-      modeTip = "笔记全文字数计入其最后修改日，较粗略，可在设置中切换为“智能”或“每日新增字数”。";
-    }
-    const skippedN = s.outliers.count;
-    const goalText = goal > 0 ? ` · 目标 ${fmtNum(goal)} 字/天` : "";
-    foot
-      .createDiv({ cls: "vp-heat-mode", text: `${modeText}${goalText}${skippedN > 0 ? ` · 已排除 ${skippedN} 篇` : ""}` })
-      .setAttr("title", `${modeTip}写了日记的日子也算打卡。`);
-
     if (this.selectedDay) {
       const k = this.selectedDay;
       const det = el.createDiv({ cls: "vp-day-detail" });
@@ -814,7 +927,12 @@ export class DashboardView extends ItemView {
   /* ---------- 4. 趋势 ---------- */
 
   private renderTrend(grid: HTMLElement, s: VaultStats) {
-    const { head, body } = this.card(grid, "vp-trend-card", "增长趋势", "trending-up");
+    const gran0: Gran = this.range === 365 ? "week" : "day";
+    const trendHelp =
+      this.metric === "words"
+        ? "按笔记的创建日期累计，用的是笔记“当前”的字数：之后修改旧笔记会改变历史曲线。"
+        : `每${gran0 === "day" ? "天" : "周"}新建的笔记数（不含采集文件夹）。`;
+    const { head, body } = this.card(grid, "vp-trend-card", "增长趋势", "trending-up", trendHelp);
     const ctrls = head.createDiv({ cls: "vp-ctrls" });
     this.segmented<Metric>(
       ctrls,
@@ -870,42 +988,33 @@ export class DashboardView extends ItemView {
         drawTrendChart(host, points, { width: w, height: 236, kind: isWords ? "area" : "bar", tooltip: tip });
       });
     }
-    body.createDiv({
-      cls: "vp-foot-note",
-      text: isWords
-        ? "按笔记的创建日期累计，用的是笔记“当前”的字数：之后修改旧笔记会改变历史曲线。"
-        : `每${unitText}新建的笔记数（不含采集文件夹）。`,
-    });
     this.renderOutlierRow(body, s);
   }
 
-  /** 趋势卡下方：说明有哪些笔记没算进写作统计，并提供一键开关 */
+  /** 趋势卡下方：一键开关；说明文字都收进旁边的问号里 */
   private renderOutlierRow(body: HTMLElement, s: VaultStats) {
     const big = s.files.filter((f) => f.big && !f.collected);
     const collected = s.files.filter((f) => f.collected && f.words > 0);
-    if (big.length === 0 && collected.length === 0) return;
+    if (big.length === 0) return;
     const on = this.plugin.settings.outlierMode === "exclude";
     const row = body.createDiv({ cls: "vp-annot" });
+    const sw = row.createEl("button", {
+      cls: "vp-switch" + (on ? " is-on" : ""),
+      attr: { role: "switch", "aria-checked": String(on), "data-fid": "trend:outlier" },
+    });
+    sw.createSpan({ cls: "vp-switch-track" }).createSpan({ cls: "vp-switch-thumb" });
+    sw.createSpan({ cls: "vp-switch-label", text: `排除超大笔记（> ${fmtNum(s.outliers.threshold)} 字）` });
+    sw.addEventListener("click", () => this.plugin.setOutlierExclusion(!on));
 
-    if (big.length > 0) {
-      const sw = row.createEl("button", {
-        cls: "vp-switch" + (on ? " is-on" : ""),
-        attr: { role: "switch", "aria-checked": String(on), "data-fid": "trend:outlier", title: "字数超过阈值的笔记（多为自动采集或整段粘贴）会让趋势和热力图失真" },
-      });
-      sw.createSpan({ cls: "vp-switch-track" }).createSpan({ cls: "vp-switch-thumb" });
-      sw.createSpan({ cls: "vp-switch-label", text: `排除超大笔记（> ${fmtNum(s.outliers.threshold)} 字）` });
-      sw.addEventListener("click", () => this.plugin.setOutlierExclusion(!on));
-    }
-    const note = row.createDiv({ cls: "vp-annot-note" });
-    const parts: string[] = [];
-    if (big.length > 0) {
-      const w = big.reduce((a, f) => a + f.words, 0);
-      parts.push(on ? `已排除 ${big.length} 篇 · ${fmtNum(w)} 字` : `含 ${big.length} 篇超大笔记 · ${fmtNum(w)} 字`);
-    }
-    if (collected.length > 0) parts.push(`采集文件夹 ${collected.length} 篇不计入`);
-    note.setText(parts.join("　"));
-    const top = [...big, ...collected].sort((a, b) => b.words - a.words).slice(0, 5);
-    note.setAttr("title", top.map((f) => `${f.file.path}（${fmtNum(f.words)} 字）`).join("\n"));
+    const w = big.reduce((a, f) => a + f.words, 0);
+    const top = [...big, ...collected].sort((a, b) => b.words - a.words).slice(0, 3);
+    const lines = [
+      `字数超过 ${fmtNum(s.outliers.threshold)} 字的笔记（多为自动采集或整段粘贴）会让趋势和热力图失真。`,
+      on ? `已排除 ${big.length} 篇 · ${fmtNum(w)} 字。` : `目前含 ${big.length} 篇超大笔记 · ${fmtNum(w)} 字。`,
+    ];
+    if (collected.length > 0) lines.push(`另有 ${collected.length} 篇在采集文件夹里，始终不计入。`);
+    lines.push(`字数最多：\n${top.map((f) => `${f.file.path}（${fmtNum(f.words)} 字）`).join("\n")}`);
+    this.help(row, lines.join("\n"));
   }
 
   private rangeText(): string {
@@ -985,7 +1094,13 @@ export class DashboardView extends ItemView {
   /* ---------- 5. 任务 ---------- */
 
   private renderTasks(grid: HTMLElement, s: VaultStats) {
-    const { head, body } = this.card(grid, "vp-tasks-card", "任务", "list-todo");
+    const { head, body } = this.card(
+      grid,
+      "vp-tasks-card",
+      "任务",
+      "list-todo",
+      "统计笔记里的待办（- [ ] / - [x]）。完成率不含已取消的任务。逾期指截止日期（📅 或 [due::]）早于今天；7 天内到期指截止日期在今天起 7 天内。"
+    );
     const t = s.tasks;
     if (t.total === 0 && t.cancelled === 0) {
       head.createDiv({ cls: "vp-card-aside", text: "0 项" });
@@ -1058,7 +1173,13 @@ export class DashboardView extends ItemView {
   /* ---------- 6. 标签 / 文件夹 ---------- */
 
   private renderTags(grid: HTMLElement, s: VaultStats) {
-    const { head, body } = this.card(grid, "vp-tags-card", this.tagTab === "tags" ? "标签" : "文件夹", this.tagTab === "tags" ? "tag" : "folder");
+    const { head, body } = this.card(
+      grid,
+      "vp-tags-card",
+      this.tagTab === "tags" ? "标签" : "文件夹",
+      this.tagTab === "tags" ? "tag" : "folder",
+      this.tagTab === "tags" ? "统计笔记里的 #标签，点击标签可在搜索里查看对应的笔记。" : "按顶层文件夹统计笔记数和字数，点击可在文件列表里定位。"
+    );
     head.createDiv({
       cls: "vp-card-aside",
       text: this.tagTab === "tags" ? `${fmtFull(s.uniqueTags)} 个 · 使用 ${fmtFull(s.tagOccurrences)} 次` : `${s.folders.length} 个顶层文件夹`,
@@ -1092,13 +1213,19 @@ export class DashboardView extends ItemView {
       (el) => setIcon(el.createDiv({ cls: "vp-empty-icon" }), this.tagTab === "tags" ? "tag" : "folder")
     );
     const total = this.tagTab === "tags" ? s.tags.length : s.folders.length;
-    if (total > limit) body.createDiv({ cls: "vp-more", text: this.tagTab === "tags" ? `还有 ${total - limit} 个标签 · 点击标签可搜索` : `还有 ${total - limit} 个文件夹` });
+    if (total > limit) body.createDiv({ cls: "vp-more", text: this.tagTab === "tags" ? `还有 ${total - limit} 个标签` : `还有 ${total - limit} 个文件夹` });
   }
 
   /* ---------- 7. 链接 ---------- */
 
   private renderLinks(grid: HTMLElement, s: VaultStats) {
-    const { head, body } = this.card(grid, "vp-links-card", "链接", "network");
+    const { head, body } = this.card(
+      grid,
+      "vp-links-card",
+      "链接",
+      "network",
+      "孤立笔记：没有任何链接指向它、它也没有链到别处。未解析：指向尚不存在的笔记的链接（断链）。孤立列表按最近修改排序。"
+    );
     head.createDiv({ cls: "vp-card-aside", text: `${fmtFull(s.totalLinks)} 条` });
     const L = s.links;
     const orphanPct = s.totalNotes ? Math.round((L.orphans.length / s.totalNotes) * 100) : 0;
@@ -1127,7 +1254,7 @@ export class DashboardView extends ItemView {
       if (L.orphans.length === 0) return this.empty(list, "sparkles", "没有孤立笔记，每篇都连上了");
       const sorted = [...L.orphans].sort((a, b) => b.stat.mtime - a.stat.mtime);
       for (const f of sorted.slice(0, LIST_LIMIT)) this.noteRow(list, f, f.parent && f.parent.path !== "/" ? f.parent.path : "根目录");
-      if (sorted.length > LIST_LIMIT) list.createDiv({ cls: "vp-more", text: `还有 ${sorted.length - LIST_LIMIT} 篇（按最近修改排序）` });
+      if (sorted.length > LIST_LIMIT) list.createDiv({ cls: "vp-more", text: `还有 ${sorted.length - LIST_LIMIT} 篇` });
     } else {
       if (L.topUnresolved.length === 0) return this.empty(list, "sparkles", "没有断开的链接");
       for (const [name, n] of L.topUnresolved.slice(0, LIST_LIMIT)) {

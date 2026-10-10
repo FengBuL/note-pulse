@@ -106,6 +106,14 @@ To release, run `npm version <patch|minor|major>` (updates `manifest.json` and `
 
 ## Changelog
 
+### 1.1.1
+
+- **Explanations moved into "?" icons.** The footnote lines under cards (for example "14.9万 words of collected / oversized notes are not counted" under Total words, the notes under the trend chart, and the heatmap mode line) are gone. Each card now has a small "?" next to its title; hover it or focus it with the keyboard (Tab) to read the explanation in a tooltip. The cards keep a uniform height and the charts are no longer pushed up.
+- The switch that excludes oversized notes stays, with its details (counts, largest files) in its own "?".
+- Welcome and suggestion banners are now a compact single row with a × to dismiss them for good.
+
+![Help tooltip on a stat card](docs/preview-tooltip.png)
+
 ### 1.1.0
 
 - **Fix: auto-collected files distorted the trend.** Notes over a threshold (default 20,000 words) are excluded from word trends, the heatmap and streaks, with a visible note of what was excluded and a switch to include them. New "collection folders" setting; a banner suggests folders that look auto-collected, with one-click buttons.
@@ -193,6 +201,12 @@ Note Pulse（笔记脉搏）是一个 Obsidian 插件，在一个页面里集中
 - 插件只在本地读取笔记，不联网，不收集任何数据。
 
 ### 更新日志
+
+**1.1.1**
+
+- **说明文字改成“?”小图标。** 卡片下方的注释行（比如“总字数”下面的“其中 14.9万 字（采集 / 超大笔记）不计入写作统计”、趋势图下方的说明、热力图的模式提示）全部去掉了。现在每张卡片标题旁有一个小问号，鼠标悬停或用键盘 Tab 聚焦，就会在气泡里显示说明。卡片高度统一，图表也不会再被顶上去。
+- “排除超大笔记”开关保留，它的篇数、最大文件等细节收进了它自己的问号里。
+- 欢迎提示和建议提示改成紧凑的一行，点右侧的 × 就不再显示。
 
 **1.1.0**
 
