@@ -20,6 +20,9 @@
   /* 次要文字：比 --text-faint 对比度更高（浅色主题下 --text-faint 约 2.3:1，达不到 WCAG AA） */
   --vp-subtle: color-mix(in srgb, var(--text-muted) 85%, var(--background-primary));
   --vp-track: color-mix(in srgb, var(--text-normal) 7%, transparent);
+  /* 热力图：空格用中性灰，1-4 级是强调色叠在卡片底色上的不透明深浅，两种主题下都分得开 */
+  --vp-heat-base: var(--vp-surface);
+  --vp-heat-empty: color-mix(in srgb, var(--text-normal) 9%, var(--vp-surface));
   --vp-hover: var(--background-modifier-hover, color-mix(in srgb, var(--text-normal) 6%, transparent));
   --vp-shadow: 0 1px 2px rgba(15, 20, 30, 0.04), 0 4px 16px rgba(15, 20, 30, 0.05);
   --vp-shadow-hover: 0 2px 4px rgba(15, 20, 30, 0.05), 0 8px 24px rgba(15, 20, 30, 0.08);
@@ -45,6 +48,7 @@
   --vp-page: var(--background-primary);
   --vp-surface: color-mix(in srgb, var(--background-secondary) 70%, var(--background-primary));
   --vp-track: color-mix(in srgb, var(--text-normal) 9%, transparent);
+  --vp-heat-empty: color-mix(in srgb, var(--text-normal) 11%, var(--vp-surface));
   --vp-shadow: 0 1px 2px rgba(0, 0, 0, 0.25), 0 4px 16px rgba(0, 0, 0, 0.18);
   --vp-shadow-hover: 0 2px 4px rgba(0, 0, 0, 0.3), 0 10px 28px rgba(0, 0, 0, 0.28);
 }
@@ -803,20 +807,20 @@
   stroke-width: 2;
 }
 .vp-l0 {
-  fill: var(--vp-track);
-  background: var(--vp-track);
+  fill: var(--vp-heat-empty);
+  background: var(--vp-heat-empty);
 }
 .vp-l1 {
-  fill: color-mix(in srgb, var(--vp-accent) 25%, transparent);
-  background: color-mix(in srgb, var(--vp-accent) 25%, transparent);
+  fill: color-mix(in srgb, var(--vp-accent) 28%, var(--vp-heat-base));
+  background: color-mix(in srgb, var(--vp-accent) 28%, var(--vp-heat-base));
 }
 .vp-l2 {
-  fill: color-mix(in srgb, var(--vp-accent) 48%, transparent);
-  background: color-mix(in srgb, var(--vp-accent) 48%, transparent);
+  fill: color-mix(in srgb, var(--vp-accent) 48%, var(--vp-heat-base));
+  background: color-mix(in srgb, var(--vp-accent) 48%, var(--vp-heat-base));
 }
 .vp-l3 {
-  fill: color-mix(in srgb, var(--vp-accent) 72%, transparent);
-  background: color-mix(in srgb, var(--vp-accent) 72%, transparent);
+  fill: color-mix(in srgb, var(--vp-accent) 70%, var(--vp-heat-base));
+  background: color-mix(in srgb, var(--vp-accent) 70%, var(--vp-heat-base));
 }
 .vp-l4 {
   fill: var(--vp-accent);

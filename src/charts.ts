@@ -118,6 +118,24 @@ function monotonePath(xs: number[], ys: number[]): string {
 
 export type TipRow = { label: string; value: string; dot?: string };
 
+let srSeq = 0;
+/**
+ * 给元素加一个无障碍名称，但不会触发 Obsidian 自带的悬停提示
+ * （Obsidian 会给所有带 aria-label 属性的元素弹提示，会和我们自己的气泡重复）。
+ * 做法：在 holder 里放一段视觉隐藏的文字，再用 aria-labelledby 指向它。
+ */
+export function srLabel(el: Element, text: string, holder?: Element): void {
+  const doc = el.ownerDocument;
+  const id = `vp-sr-${++srSeq}`;
+  const span = doc.createElement("span");
+  span.className = "vp-sr-only";
+  span.id = id;
+  span.textContent = text;
+  if (holder) holder.appendChild(span);
+  else el.appendChild(span);
+  el.setAttribute("aria-labelledby", id);
+}
+
 export class Tooltip {
   el: HTMLElement;
   constructor(private host: HTMLElement) {
@@ -373,7 +391,7 @@ export function drawBarList(container: HTMLElement, items: BarItem[], emptyText:
       row.addClass("is-clickable");
       row.setAttribute("role", "button");
       row.setAttribute("tabindex", "0");
-      row.setAttribute("aria-label", `${it.label}，${it.valueText ?? fmtNum(it.value)}`);
+      srLabel(row, `${it.label}，${it.valueText ?? fmtNum(it.value)}`);
       row.addEventListener("click", (e) => cb(e));
       row.addEventListener("keydown", (e) => {
         if (e.key === "Enter" || e.key === " ") {

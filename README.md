@@ -106,6 +106,11 @@ To release, run `npm version <patch|minor|major>` (updates `manifest.json` and `
 
 ## Changelog
 
+### 1.1.2
+
+- **Fix: hovering a "?" showed two tooltips.** Obsidian pops up its own tooltip for any element that has an `aria-label`, on top of Note Pulse's own bubble. Accessible names now live in visually hidden text (`aria-labelledby`), so only one tooltip appears. The same cleanup was applied to the heatmap, trend chart, KPI cards, ring, lists, and tab buttons; only the icon-only buttons (refresh, settings, close) keep Obsidian's own tooltip, as their single one.
+- **Fix: the writing heatmap had lost its gradient.** Levels were tied to your daily goal, so if you usually write far more than the goal almost every day landed in the top two shades. Levels now come from percentiles of your own writing days (about 30% / 60% / 85%), so all four shades get used whatever your pace; with very little data it falls back to ratios of your daily goal. Colours were also redone: a clearer five-step ramp, and empty days are now a neutral grey so the lightest level no longer blends in.
+
 ### 1.1.1
 
 - **Explanations moved into "?" icons.** The footnote lines under cards (for example "14.9万 words of collected / oversized notes are not counted" under Total words, the notes under the trend chart, and the heatmap mode line) are gone. Each card now has a small "?" next to its title; hover it or focus it with the keyboard (Tab) to read the explanation in a tooltip. The cards keep a uniform height and the charts are no longer pushed up.
@@ -201,6 +206,11 @@ Note Pulse（笔记脉搏）是一个 Obsidian 插件，在一个页面里集中
 - 插件只在本地读取笔记，不联网，不收集任何数据。
 
 ### 更新日志
+
+**1.1.2**
+
+- **修复：悬停“?”会同时弹出两个提示。** Obsidian 会给所有带 `aria-label` 属性的元素自动弹一个提示，和插件自己的气泡叠在一起。现在无障碍名称改放在视觉隐藏的文字里，只会出现一个提示。热力图、趋势图、统计卡片、圆环、列表和标签页按钮也做了同样处理；只有纯图标按钮（刷新、设置、关闭）保留 Obsidian 自带的提示，且是它们唯一的提示。
+- **修复：写作热力图的深浅渐变没了。** 以前深浅按每日目标字数划分，平时写得远超目标时，几乎每天都落在最深的两档。现在按你自己有写作那些天的分位数划分（约 30% / 60% / 85%），不管写多写少，四档深浅都会用到；数据很少时才退回按目标字数的比例。配色也重做了：五档层次更分明，没写的日子改成中性灰，最浅一档不会再和空格混在一起。
 
 **1.1.1**
 

@@ -12,6 +12,7 @@ import {
   drawTrendChart,
   fmtFull,
   fmtNum,
+  srLabel,
   svgEl,
 } from "./charts";
 
@@ -137,7 +138,7 @@ export class DashboardView extends ItemView {
   }
 
   private iconButton(parent: HTMLElement, icon: string, label: string, onClick: () => void): HTMLElement {
-    const b = parent.createEl("button", { cls: "vp-icon-btn", attr: { "aria-label": label, title: label } });
+    const b = parent.createEl("button", { cls: "vp-icon-btn", attr: { "aria-label": label } });
     setIcon(b, icon);
     b.addEventListener("click", onClick);
     return b;
@@ -187,7 +188,7 @@ export class DashboardView extends ItemView {
     const d = new Date(stats.generatedAt);
     this.renderedDay = dayKey(Date.now());
     this.statusEl.setText(`更新于 ${pad2(d.getHours())}:${pad2(d.getMinutes())}`);
-    this.statusEl.setAttr("title", `统计耗时 ${stats.durationMs} ms`);
+    this.statusEl.setAttr("aria-label", `统计耗时 ${stats.durationMs} ms`);
     this.updateSubtitle();
 
     const body = this.bodyEl;
@@ -264,8 +265,10 @@ export class DashboardView extends ItemView {
   private help(parent: HTMLElement, text: string): HTMLElement {
     const b = parent.createEl("button", {
       cls: "vp-help",
-      attr: { type: "button", "aria-label": `说明：${text.replace(/\n+/g, " ")}` },
+      attr: { type: "button" },
     });
+    // 名称放在隐藏文字里，不用 aria-label：否则 Obsidian 会再弹一个自带的提示
+    srLabel(b, "说明");
     setIcon(b, "circle-help");
     if (!b.querySelector("svg")) setIcon(b, "help-circle");
     if (!b.querySelector("svg")) b.setText("?");
@@ -336,7 +339,8 @@ export class DashboardView extends ItemView {
   }
 
   private segmented<T extends string | number>(parent: HTMLElement, options: [T, string][], current: T, onChange: (v: T) => void, label?: string) {
-    const seg = parent.createDiv({ cls: "vp-seg", attr: { role: "tablist", ...(label ? { "aria-label": label } : {}) } });
+    const seg = parent.createDiv({ cls: "vp-seg", attr: { role: "tablist" } });
+    if (label) srLabel(seg, label);
     for (const [v, text] of options) {
       const b = seg.createEl("button", {
         cls: "vp-seg-btn" + (v === current ? " is-active" : ""),
@@ -361,7 +365,7 @@ export class DashboardView extends ItemView {
     el.addClass("is-clickable");
     el.setAttr("role", "button");
     el.setAttr("tabindex", "0");
-    if (label) el.setAttr("aria-label", label);
+    if (label) srLabel(el, label);
     el.addEventListener("click", (e) => handler(e));
     el.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") {
@@ -453,12 +457,12 @@ export class DashboardView extends ItemView {
       this.help(line, detail);
       const acts = el.createDiv({ cls: "vp-hint-actions" });
       const btn = (label: string, title: string, fn: () => void, primary = false) => {
-        const b = acts.createEl("button", { cls: "vp-btn is-compact" + (primary ? " is-primary" : ""), text: label, attr: { title } });
+        const b = acts.createEl("button", { cls: "vp-btn is-compact" + (primary ? " is-primary" : ""), text: label });
         b.addEventListener("click", fn);
       };
       // 右上角的 × 等同于“忽略”，关闭后不再出现，也不会再占位
       const close = (title: string) => {
-        const x = acts.createEl("button", { cls: "vp-icon-btn is-small", attr: { "aria-label": title, title } });
+        const x = acts.createEl("button", { cls: "vp-icon-btn is-small", attr: { "aria-label": title } });
         setIcon(x, "x");
         x.addEventListener("click", () => {
           this.hideHelp();
@@ -529,7 +533,7 @@ export class DashboardView extends ItemView {
     const center = drawRing(main, ratio, 132, 12, "vp-hero-ring" + (ratio >= 1 ? " is-complete" : ""));
     const ringWrap = center.parentElement as HTMLElement;
     ringWrap.setAttr("role", "img");
-    ringWrap.setAttr("aria-label", goal > 0 ? `今日 ${fmtFull(ck.todayWords)} 字，目标 ${fmtFull(goal)} 字` : `今日 ${fmtFull(ck.todayWords)} 字`);
+    srLabel(ringWrap, goal > 0 ? `今日 ${fmtFull(ck.todayWords)} 字，目标 ${fmtFull(goal)} 字` : `今日 ${fmtFull(ck.todayWords)} 字`);
     bigNumber(center, ck.todayWords, undefined, "vp-num vp-ring-num");
     center.createDiv({ cls: "vp-ring-caption", text: goal > 0 ? `目标 ${fmtNum(goal)} 字` : "今日字数" });
 
@@ -545,7 +549,7 @@ export class DashboardView extends ItemView {
     const week = streak.createDiv({ cls: "vp-week" });
     for (const day of ck.last7) {
       const c = week.createDiv({ cls: "vp-week-day" + (day.active ? " is-active" : "") + (day.isToday ? " is-today" : "") });
-      const dot = c.createDiv({ cls: "vp-week-dot", attr: { role: "img", "aria-label": `${day.key}${day.active ? " 已打卡" : " 未打卡"}` } });
+      const dot = c.createDiv({ cls: "vp-week-dot", attr: { role: "img", "aria-label": `${day.key}${day.active ? " 已打卡" : " 未打卡"}` } }); // 小圆点没有别的气泡，保留 Obsidian 自带提示
       if (day.active) setIcon(dot, "check");
       c.createDiv({ cls: "vp-week-label", text: day.isToday ? "今" : day.label });
     }
@@ -610,7 +614,8 @@ export class DashboardView extends ItemView {
     }
 
     const kpi = (icon: string, label: string, help: string) => {
-      const c = wrap.createDiv({ cls: "vp-card vp-kpi", attr: { role: "group", "aria-label": label } });
+      const c = wrap.createDiv({ cls: "vp-card vp-kpi", attr: { role: "group" } });
+      srLabel(c, label);
       const top = c.createDiv({ cls: "vp-kpi-top" });
       setIcon(top.createSpan({ cls: "vp-kpi-icon" }), icon);
       top.createSpan({ cls: "vp-label", text: label });
@@ -795,18 +800,12 @@ export class DashboardView extends ItemView {
       if (v > 0) values.push(v);
     }
     values.sort((a, b) => a - b);
-    const q = (p: number) => (values.length ? values[Math.min(values.length - 1, Math.floor(values.length * p))] : 1);
+    const cuts = heatCuts(values, goal);
     const levelOf = (w: number, k: string): number => {
       if (w <= 0) return s.dailyNotes[k] ? 1 : 0;
-      if (goal > 0) {
-        if (w < goal / 2) return 1;
-        if (w < goal) return 2;
-        if (w < goal * 3) return 3;
-        return 4;
-      }
-      if (w <= q(0.25)) return 1;
-      if (w <= q(0.5)) return 2;
-      if (w <= q(0.75)) return 3;
+      if (w <= cuts[0]) return 1;
+      if (w <= cuts[1]) return 2;
+      if (w <= cuts[2]) return 3;
       return 4;
     };
 
@@ -886,7 +885,7 @@ export class DashboardView extends ItemView {
     svg.setAttribute("tabindex", "0");
     svg.setAttribute("role", "application");
     svg.setAttribute("data-fid", "heat:grid");
-    svg.setAttribute("aria-label", "写作热力图。用左右方向键切换周，上下方向键切换日，回车查看当天的笔记。");
+    srLabel(svg, "写作热力图。用左右方向键切换周，上下方向键切换日，回车查看当天的笔记。", host);
     const live = host.createDiv({ cls: "vp-sr-only", attr: { "aria-live": "polite" } });
     let cursor: string | null = null;
     const move = (k: string | null) => {
@@ -977,11 +976,12 @@ export class DashboardView extends ItemView {
       const host = chartWrap.createDiv({ cls: "vp-chart-host" });
       const last = points[points.length - 1];
       host.setAttr("role", "img");
-      host.setAttr(
-        "aria-label",
+      srLabel(
+        host,
         isWords
           ? `累计字数曲线，近 ${this.rangeText()}新增 ${fmtFull(added)} 字，当前累计 ${fmtFull(last.value)} 字`
-          : `新建笔记柱状图，近 ${this.rangeText()}共新建 ${fmtFull(added)} 篇`
+          : `新建笔记柱状图，近 ${this.rangeText()}共新建 ${fmtFull(added)} 篇`,
+        chartWrap
       );
       this.responsive(chartWrap, (w) => {
         host.empty();
@@ -1281,4 +1281,21 @@ function cleanTaskText(t: string): string {
 export function noticeError(e: unknown) {
   console.error("[note-pulse]", e);
   new Notice("Note Pulse：统计出错，详情见开发者控制台");
+}
+
+
+/**
+ * 热力图的 3 个分档阈值（1-2、2-3、3-4 级的分界）。
+ * 数据够多时按“有写作的那些天”的分位数（约 30% / 60% / 85%）来分，这样不管用户平时写多少，
+ * 四个深浅都会被用到；数据太少时，退回到相对目标字数（或相对最大值）的固定比例。
+ * 入参 values 必须是升序的、大于 0 的每日字数。
+ */
+export function heatCuts(values: number[], goal: number): [number, number, number] {
+  const n = values.length;
+  if (n >= 8) {
+    const q = (p: number) => values[Math.min(n - 1, Math.floor(n * p))];
+    return [q(0.3), q(0.6), q(0.85)];
+  }
+  const ref = goal > 0 ? goal : n ? values[n - 1] : 1;
+  return [ref * 0.25, ref * 0.6, ref * 1.2];
 }
