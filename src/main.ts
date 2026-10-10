@@ -1,23 +1,35 @@
-import { Notice, Plugin, TAbstractFile, TFile, TFolder, WorkspaceLeaf, debounce, Debouncer } from "obsidian";
-import { DashboardSettings, DEFAULT_SETTINGS, DashboardSettingTab } from "./settings";
-import { ContentInfo, PersistentData, VaultStats, computeStats } from "./stats";
+import { Notice, Plugin, TAbstractFile, TFile, TFolder, WorkspaceLeaf, debounce, Debouncer, normalizePath } from "obsidian";
+import { DashboardSettings, DEFAULT_SETTINGS, DashboardSettingTab, SETTINGS_VERSION, normalizeFolder, splitList } from "./settings";
+import { ContentInfo, PersistentData, VaultStats, computeStats, includedFiles, syncContent, dayKey } from "./stats";
 import { DashboardView, VIEW_TYPE_PULSE, noticeError } from "./view";
 
 interface SavedData {
   settings: DashboardSettings;
   wordLog: Record<string, number>;
-  fileWords: Record<string, number>;
+  wordLogBig?: Record<string, number>;
   logInitialized: boolean;
+  logStartDay?: string;
+  /** ≤1.0.0 的遗留字段 */
+  fileWords?: Record<string, number>;
 }
+
+const CACHE_FILE = "cache.json";
+const CACHE_VERSION = 1;
 
 export default class NotePulsePlugin extends Plugin {
   settings: DashboardSettings = { ...DEFAULT_SETTINGS };
-  data: PersistentData = { wordLog: {}, fileWords: {}, logInitialized: false };
+  data: PersistentData = { wordLog: {}, wordLogBig: {}, logInitialized: false, logStartDay: "" };
   lastStats: VaultStats | null = null;
   private contentCache = new Map<string, ContentInfo>();
   private running = false;
   private rerun = false;
+  /** 所有写入内容缓存 / 每日记录的任务串行执行，避免并发重复计数 */
+  private queue: Promise<unknown> = Promise.resolve();
+  private stale = false;
+  private dirtyPaths = new Set<string>();
   private autoRefresh!: Debouncer<[], void>;
+  private trackDebounced = debounce(() => this.trackDirty(), 8000, true);
+  private persistDebounced = debounce(() => this.persist(), 30000, true);
 
   async onload() {
     await this.loadAll();
@@ -46,13 +58,47 @@ export default class NotePulsePlugin extends Plugin {
       const trigger = () => this.onVaultChanged();
       this.registerEvent(this.app.metadataCache.on("changed", trigger));
       this.registerEvent(this.app.vault.on("create", (f: TAbstractFile) => f instanceof TFile && trigger()));
-      this.registerEvent(this.app.vault.on("delete", trigger));
-      this.registerEvent(this.app.vault.on("rename", trigger));
+      this.registerEvent(
+        this.app.vault.on("modify", (f: TAbstractFile) => {
+          if (f instanceof TFile && f.extension === "md") {
+            this.dirtyPaths.add(f.path);
+            this.trackDebounced();
+          }
+        })
+      );
+      this.registerEvent(
+        this.app.vault.on("delete", (f: TAbstractFile) => {
+          if (f instanceof TFile && this.contentCache.delete(f.path)) this.data.cacheDirty = true;
+          trigger();
+        })
+      );
+      this.registerEvent(
+        this.app.vault.on("rename", (f: TAbstractFile, oldPath: string) => {
+          const c = this.contentCache.get(oldPath);
+          if (c && f instanceof TFile) {
+            this.contentCache.delete(oldPath);
+            this.contentCache.set(f.path, c);
+            this.data.cacheDirty = true;
+          }
+          trigger();
+        })
+      );
+      // 切回看板标签页时，补上它不可见期间错过的刷新
+      this.registerEvent(
+        this.app.workspace.on("active-leaf-change", (leaf) => {
+          if (this.stale && leaf && leaf.view instanceof DashboardView) this.requestRefresh(false);
+        })
+      );
+      // 启动后在后台补记一次（只会读取上次之后改动过的文件），这样看板没打开时写的字数也不会丢
+      window.setTimeout(() => {
+        if (this.getViews().length === 0) void this.enqueue(() => this.silentSync());
+      }, 4000);
     });
   }
 
   onunload() {
-    // 视图会被 Obsidian 自动卸载
+    // 视图会被 Obsidian 自动卸载；把还没落盘的记录写出去
+    void this.persist();
   }
 
   private buildDebouncer() {
@@ -62,8 +108,10 @@ export default class NotePulsePlugin extends Plugin {
 
   private onVaultChanged() {
     if (!this.settings.autoRefresh) return;
-    if (this.getViews().length === 0) {
-      // 看板未打开时只标记数据过期，下次打开再统计
+    const views = this.getViews();
+    if (views.length === 0) return; // 看板未打开：下次打开再统计
+    if (!views.some((v) => v.isVisible())) {
+      this.stale = true; // 看板开着但被别的标签页盖住：不做无谓计算
       return;
     }
     this.autoRefresh();
@@ -86,6 +134,47 @@ export default class NotePulsePlugin extends Plugin {
     workspace.revealLeaf(leaf);
   }
 
+  private enqueue<T>(fn: () => Promise<T>): Promise<T> {
+    const p = this.queue.then(fn, fn);
+    this.queue = p.catch(() => undefined);
+    return p;
+  }
+
+  /** 看板没打开时：只同步改动过的文件并记录字数增量 */
+  private async silentSync() {
+    try {
+      const files = includedFiles(this.app, this.settings);
+      await syncContent(this.app, files, this.settings, this.contentCache, this.data);
+      if (this.data.legacyFileWords || this.data.seedOnly) {
+        this.data.legacyFileWords = undefined; // 所有文件都已建立基线，迁移完成
+        this.data.seedOnly = false;
+        this.data.dirty = true;
+      }
+      this.schedulePersist();
+    } catch (e) {
+      console.error("[note-pulse] 后台记录失败", e);
+    }
+  }
+
+  /** 编辑笔记时在后台记录字数增量（不依赖看板是否打开） */
+  private async trackDirty() {
+    // 首次完整统计 / 迁移还没做完时先不要只记一部分文件
+    if (!this.data.logInitialized || this.data.seedOnly || this.data.legacyFileWords) return;
+    const paths = Array.from(this.dirtyPaths);
+    this.dirtyPaths.clear();
+    if (paths.length === 0) return;
+    await this.enqueue(async () => {
+      try {
+        const all = includedFiles(this.app, this.settings);
+        const set = new Set(paths);
+        await syncContent(this.app, all.filter((f) => set.has(f.path)), this.settings, this.contentCache, this.data);
+        this.schedulePersist();
+      } catch (e) {
+        console.error("[note-pulse] 后台记录失败", e);
+      }
+    });
+  }
+
   /** 重新统计并刷新所有打开的看板。force=true 时会提示完成。 */
   async requestRefresh(force: boolean) {
     if (this.running) {
@@ -96,23 +185,27 @@ export default class NotePulsePlugin extends Plugin {
     try {
       do {
         this.rerun = false;
+        this.stale = false;
         for (const v of this.getViews()) v.showLoading("正在统计…");
-        const stats = await computeStats(this.app, this.settings, this.contentCache, this.data, (d, t) => {
-          for (const v of this.getViews()) v.setProgress(d, t);
-        });
+        const stats = await this.enqueue(() =>
+          computeStats(this.app, this.settings, this.contentCache, this.data, (d, t) => {
+            for (const v of this.getViews()) v.setProgress(d, t);
+          })
+        );
         this.lastStats = stats;
-        await this.persist();
+        this.schedulePersist();
         for (const v of this.getViews()) v.render(stats);
       } while (this.rerun);
       if (force) new Notice("Note Pulse：看板已刷新");
     } catch (e) {
       noticeError(e);
+      for (const v of this.getViews()) v.showError();
     } finally {
       this.running = false;
     }
   }
 
-  async openFile(file: TFile, line?: number, evt?: MouseEvent) {
+  async openFile(file: TFile, line?: number, evt?: MouseEvent | KeyboardEvent) {
     const newTab = this.settings.openInNewTab || (evt && (evt.ctrlKey || evt.metaKey));
     const leaf = this.app.workspace.getLeaf(newTab ? "tab" : false);
     await leaf.openFile(file, line !== undefined ? { eState: { line } } : undefined);
@@ -129,6 +222,15 @@ export default class NotePulsePlugin extends Plugin {
     }
   }
 
+  openSettings() {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const setting = (this.app as any).setting;
+    if (setting) {
+      setting.open();
+      setting.openTabById(this.manifest.id);
+    }
+  }
+
   revealFolder(path: string) {
     const folder = this.app.vault.getAbstractFileByPath(path);
     if (!(folder instanceof TFolder)) return;
@@ -141,36 +243,137 @@ export default class NotePulsePlugin extends Plugin {
     }
   }
 
+  /* ---------------- 看板上的一键操作 ---------------- */
+
+  private addToList(key: "excludedFolders" | "clippingFolders", folder: string) {
+    const list = splitList(this.settings[key]).map(normalizeFolder);
+    if (!list.includes(folder)) list.push(folder);
+    this.settings[key] = list.join("\n");
+  }
+
+  async setClippingFolder(folder: string) {
+    this.addToList("clippingFolders", folder);
+    await this.saveSettings();
+  }
+
+  async excludeFolder(folder: string) {
+    this.addToList("excludedFolders", folder);
+    await this.saveSettings();
+  }
+
+  async dismissHint(key: string) {
+    if (key === "onboarding") this.settings.onboarded = true;
+    else if (!this.settings.dismissedHints.includes(key)) this.settings.dismissedHints.push(key);
+    await this.saveSettings();
+  }
+
+  async setOutlierExclusion(on: boolean) {
+    this.settings.outlierMode = on ? "exclude" : "off";
+    await this.saveSettings();
+  }
+
+  /** 清空每日新增字数记录，并从今天重新开始 */
+  async resetLog() {
+    this.data.wordLog = {};
+    this.data.wordLogBig = {};
+    this.data.logInitialized = false;
+    this.data.logStartDay = "";
+    this.data.legacyFileWords = undefined;
+    for (const c of this.contentCache.values()) c.logged = undefined;
+    this.data.dirty = this.data.cacheDirty = true;
+    await this.persist();
+    await this.requestRefresh(true);
+  }
+
+  /* ---------------- 持久化 ---------------- */
+
+  private get cachePath(): string {
+    return normalizePath(`${this.manifest.dir ?? `${this.app.vault.configDir}/plugins/${this.manifest.id}`}/${CACHE_FILE}`);
+  }
+
   async loadAll() {
     const raw = ((await this.loadData()) || {}) as Partial<SavedData>;
     this.settings = Object.assign({}, DEFAULT_SETTINGS, raw.settings || {});
+    if (!Array.isArray(this.settings.dismissedHints)) this.settings.dismissedHints = [];
     // 0.2.0 起移除了“类型/主题”统计，清理旧版本遗留的设置项
     const legacy = this.settings as unknown as Record<string, unknown>;
     delete legacy.typeFields;
     delete legacy.themeFields;
+    // 1.1.0 迁移：旧默认值“按修改日”会让改动旧笔记的那天被严重夸大，改为智能模式
+    if ((raw.settings?.settingsVersion ?? 1) < 2) {
+      if (this.settings.heatmapMode === "mtime") this.settings.heatmapMode = "auto";
+      if (raw.settings) this.settings.onboarded = true; // 老用户不需要欢迎提示
+    }
+    this.settings.settingsVersion = SETTINGS_VERSION;
+
+    const wordLog = raw.wordLog || {};
+    const logDays = Object.keys(wordLog).sort();
     this.data = {
-      wordLog: raw.wordLog || {},
-      fileWords: raw.fileWords || {},
+      wordLog,
+      wordLogBig: raw.wordLogBig || {},
       logInitialized: !!raw.logInitialized,
+      logStartDay: raw.logStartDay || (raw.logInitialized ? logDays[0] || dayKey(Date.now()) : ""),
+      legacyFileWords: raw.fileWords && Object.keys(raw.fileWords).length ? raw.fileWords : undefined,
+      dirty: !!raw.fileWords || (raw.settings?.settingsVersion ?? 1) < 2,
     };
+
+    // 内容缓存：[mtime, size, words, logged, taskLines]
+    let cacheOk = false;
+    try {
+      const adapter = this.app.vault.adapter;
+      if (await adapter.exists(this.cachePath)) {
+        const c = JSON.parse(await adapter.read(this.cachePath));
+        if (c && c.v === CACHE_VERSION && c.files) {
+          for (const [p, e] of Object.entries(c.files as Record<string, [number, number, number, number | null, Record<number, string>]>)) {
+            this.contentCache.set(p, { mtime: e[0], size: e[1], words: e[2], logged: e[3] ?? undefined, taskLines: e[4] || {} });
+          }
+          cacheOk = true;
+        }
+      }
+    } catch (e) {
+      console.warn("[note-pulse] 读取缓存失败，将重新统计", e);
+    }
+    if (!cacheOk && this.data.logInitialized && !this.data.legacyFileWords) this.data.seedOnly = true;
+  }
+
+  schedulePersist() {
+    if (this.data.dirty || this.data.cacheDirty) this.persistDebounced();
   }
 
   async persist() {
-    const out: SavedData = {
-      settings: this.settings,
-      wordLog: this.data.wordLog,
-      fileWords: this.data.fileWords,
-      logInitialized: this.data.logInitialized,
-    };
-    await this.saveData(out);
+    try {
+      if (this.data.dirty) {
+        const out: SavedData = {
+          settings: this.settings,
+          wordLog: this.data.wordLog,
+          wordLogBig: this.data.wordLogBig,
+          logInitialized: this.data.logInitialized,
+          logStartDay: this.data.logStartDay,
+          // 迁移完成前保留旧字段，保证中途退出不丢基线
+          fileWords: this.data.legacyFileWords,
+        };
+        await this.saveData(out);
+        this.data.dirty = false;
+      }
+      if (this.data.cacheDirty) {
+        const files: Record<string, unknown> = {};
+        for (const [p, c] of this.contentCache) {
+          files[p] = [c.mtime, c.size, c.words, c.logged ?? null, Object.keys(c.taskLines).length ? c.taskLines : undefined];
+        }
+        await this.app.vault.adapter.write(this.cachePath, JSON.stringify({ v: CACHE_VERSION, files }));
+        this.data.cacheDirty = false;
+      }
+    } catch (e) {
+      console.error("[note-pulse] 保存失败", e);
+    }
   }
 
   private settingsRefresh = debounce(() => this.requestRefresh(false), 800, true);
 
   async saveSettings() {
+    this.data.dirty = true;
     await this.persist();
     this.buildDebouncer();
     this.settingsRefresh();
   }
 }
-

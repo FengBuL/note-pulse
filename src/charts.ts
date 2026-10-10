@@ -358,7 +358,7 @@ export function drawBarList(container: HTMLElement, items: BarItem[], emptyText:
   }
   const max = Math.max(...items.map((i) => i.value), 1);
   items.forEach((it, idx) => {
-    const row = list.createDiv({ cls: "vp-barrow" + (it.onClick ? " is-clickable" : "") });
+    const row = list.createDiv({ cls: "vp-barrow" });
     const top = row.createDiv({ cls: "vp-barrow-top" });
     top.createSpan({ cls: "vp-barlabel", text: it.label, attr: { title: it.title ?? it.label } });
     top.createSpan({ cls: "vp-barvalue", text: it.valueText ?? fmtNum(it.value) });
@@ -370,7 +370,17 @@ export function drawBarList(container: HTMLElement, items: BarItem[], emptyText:
     fill.style.background = `color-mix(in srgb, var(--vp-accent) ${strength}%, transparent)`;
     if (it.onClick) {
       const cb = it.onClick;
+      row.addClass("is-clickable");
+      row.setAttribute("role", "button");
+      row.setAttribute("tabindex", "0");
+      row.setAttribute("aria-label", `${it.label}，${it.valueText ?? fmtNum(it.value)}`);
       row.addEventListener("click", (e) => cb(e));
+      row.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          cb(e as unknown as MouseEvent);
+        }
+      });
     }
   });
 }

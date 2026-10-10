@@ -1,9 +1,9 @@
 {
   "id": "note-pulse",
   "name": "Note Pulse",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "minAppVersion": "1.4.0",
-  "description": "A dashboard for your vault: note and word trends, writing streak heatmap, task completion, tags and link stats.",
+  "description": "A dashboard for your vault: writing streak and heatmap, note and word trends, tasks, tags and links.",
   "author": "FengBuL",
   "authorUrl": "https://github.com/FengBuL",
   "isDesktopOnly": false

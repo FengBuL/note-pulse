@@ -1,6 +1,9 @@
 import { App, CachedMetadata, TFile, getAllTags } from "obsidian";
 import { DashboardSettings, normalizeFolder, splitList } from "./settings";
 
+/** 内容少于这个字数的日记（多半是空模板）不算打卡 */
+export const DAILY_MIN_WORDS = 10;
+
 /* ---------------- 日期工具 ---------------- */
 
 export const DAY_MS = 24 * 60 * 60 * 1000;
@@ -31,14 +34,19 @@ export function parseDateStr(s: string): Date | null {
   if (!m) return null;
   const d = new Date(+m[1], +m[2] - 1, +m[3]);
   if (isNaN(d.getTime())) return null;
+  // 拒绝 2026-02-31 这类会被自动进位的非法日期
+  if (d.getMonth() !== +m[2] - 1 || d.getDate() !== +m[3]) return null;
   return d;
 }
 
 /* ---------------- 字数统计 ---------------- */
 
-const CJK_RE = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af\u{20000}-\u{2fa1f}]/gu;
-const WORD_RE = /[A-Za-z0-9\u00C0-\u024F\u0400-\u04FF]+(?:['’.\-][A-Za-z0-9\u00C0-\u024F\u0400-\u04FF]+)*/g;
+/** 汉字 / 假名按字计数；谚文（韩文）有空格分词，按词计数，所以不放在这里 */
+const CJK_RE = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\u{20000}-\u{2fa1f}]/gu;
+/** 其余文字（拉丁、西里尔、希腊、阿拉伯、谚文……）按“词”计数 */
+const WORD_RE = /[\p{L}\p{N}\p{M}]+(?:['’.\-][\p{L}\p{N}\p{M}]+)*/gu;
 
+/** 去掉不算“写作”的内容。所有范围匹配都限制在单行或有限长度内，避免超大文本上的回溯。 */
 export function stripMarkdown(text: string): string {
   let t = text;
   // frontmatter
@@ -52,18 +60,19 @@ export function stripMarkdown(text: string): string {
   // 数学块
   t = t.replace(/\$\$[\s\S]*?\$\$/g, " ");
   // 嵌入
-  t = t.replace(/!\[\[[^\]]*\]\]/g, " ");
-  t = t.replace(/!\[[^\]]*\]\([^)]*\)/g, " ");
+  t = t.replace(/!\[\[[^\]\n]{0,300}\]\]/g, " ");
+  t = t.replace(/!\[[^\]\n]{0,300}\]\([^)\n]{0,2000}\)/g, " ");
   // wiki 链接 [[a|b]] -> b, [[a]] -> a
-  t = t.replace(/\[\[([^\]|]*)\|([^\]]*)\]\]/g, "$2");
-  t = t.replace(/\[\[([^\]]*)\]\]/g, "$1");
+  t = t.replace(/\[\[([^\]|\n]{0,300})\|([^\]\n]{0,300})\]\]/g, "$2");
+  t = t.replace(/\[\[([^\]\n]{0,300})\]\]/g, "$1");
   // markdown 链接 [text](url) -> text
-  t = t.replace(/\[([^\]]*)\]\([^)]*\)/g, "$1");
-  // 裸 URL
-  t = t.replace(/https?:\/\/\S+/g, " ");
-  // HTML 标签
-  t = t.replace(/<[^>]+>/g, " ");
-  // 任务/列表标记、标题、引用、强调等符号
+  t = t.replace(/\[([^\]\n]{0,500})\]\([^)\n]{0,2000}\)/g, "$1");
+  // 裸 URL（含 www. 和 mailto:）
+  t = t.replace(/(?:https?:\/\/|www\.|mailto:)\S+/gi, " ");
+  // HTML 标签（限制长度，避免大量未闭合的 < 造成二次方回溯）
+  t = t.replace(/<[^>\n]{1,300}>/g, " ");
+  // 脚注标记、任务/列表标记、标题、引用、强调等符号
+  t = t.replace(/\[\^[^\]\n]{0,100}\]/g, " ");
   t = t.replace(/^\s*[-*+]\s+\[.\]\s*/gm, " ");
   t = t.replace(/[#*_>~=`|\[\]()^]/g, " ");
   return t;
@@ -86,6 +95,8 @@ export interface ContentInfo {
   words: number;
   /** 行号 -> 任务行原文 */
   taskLines: Record<number, string>;
+  /** 上次计入“每日新增字数”时的字数 */
+  logged?: number;
 }
 
 export interface TaskInfo {
@@ -109,9 +120,26 @@ export interface FileStat {
   created: number;
   mtime: number;
   words: number;
+  /** 计入写作统计的字数：采集文件夹和（开启排除时的）超大笔记为 0 */
+  writeWords: number;
+  /** 位于采集 / 剪藏文件夹 */
+  collected: boolean;
+  /** 字数超过超大笔记阈值 */
+  big: boolean;
   folder: string;
   tags: string[];
   links: number;
+}
+
+export type HintKind = "folder" | "spike" | "onboarding";
+
+export interface Hint {
+  key: string;
+  kind: HintKind;
+  /** folder：文件夹名；spike：日期 */
+  target?: string;
+  count?: number;
+  total?: number;
 }
 
 export interface VaultStats {
@@ -119,6 +147,8 @@ export interface VaultStats {
   durationMs: number;
   totalNotes: number;
   totalWords: number;
+  /** 计入写作统计的总字数 */
+  writeWordsTotal: number;
   created7: number;
   created30: number;
   modified7: number;
@@ -127,12 +157,20 @@ export interface VaultStats {
   uniqueTags: number;
   tagOccurrences: number;
   files: FileStat[];
-  /** 日期 -> 当日写作字数（按设置的模式） */
+  /** 日期 -> 当日写作字数（按设置的模式，已排除超大 / 采集笔记） */
   dayWords: Record<string, number>;
+  /** 智能模式下，这个日期之前的数据是按修改日估算的；其它模式为 null */
+  estimatedBefore: string | null;
+  /** 开始实测记录的日期 */
+  logStartDay: string | null;
   /** 日期 -> 当日修改过的笔记 */
   dayModified: Record<string, TFile[]>;
+  /** 日期 -> 当日新建的笔记数（不含采集文件夹） */
   dayCreated: Record<string, number>;
   dailyNotes: Record<string, TFile>;
+  /** 因“超大”或“采集”而不计入写作字数的笔记 */
+  outliers: { count: number; words: number; top: FileStat[]; threshold: number; mode: "exclude" | "off" };
+  hints: Hint[];
   tasks: {
     total: number;
     done: number;
@@ -154,12 +192,26 @@ export interface VaultStats {
 }
 
 export interface PersistentData {
+  /** 日期 -> 当日新增字数（普通笔记） */
   wordLog: Record<string, number>;
-  fileWords: Record<string, number>;
+  /** 日期 -> 当日新增字数（超大笔记，默认不显示） */
+  wordLogBig: Record<string, number>;
   logInitialized: boolean;
+  /** 开始实测记录的日期（YYYY-MM-DD） */
+  logStartDay: string;
+  /** 旧版本（≤1.0.0）保存在 data.json 里的逐文件字数，仅用于一次性迁移 */
+  legacyFileWords?: Record<string, number>;
+  /** 缓存文件丢失时，只补齐“已记录字数”而不计入新增 */
+  seedOnly?: boolean;
+  /** 内存标记：data.json 有待保存的改动 */
+  dirty?: boolean;
+  /** 内存标记：cache.json 有待保存的改动 */
+  cacheDirty?: boolean;
 }
 
 /* ---------------- 工具 ---------------- */
+
+const yieldToUi = () => new Promise<void>((r) => setTimeout(r, 0));
 
 async function runPool<T>(items: T[], limit: number, fn: (t: T) => Promise<void>): Promise<void> {
   let i = 0;
@@ -231,6 +283,107 @@ export function isExcluded(path: string, excluded: string[]): boolean {
   return false;
 }
 
+function folderLists(settings: DashboardSettings) {
+  return {
+    excluded: splitList(settings.excludedFolders).map(normalizeFolder),
+    clipping: splitList(settings.clippingFolders).map(normalizeFolder),
+  };
+}
+
+/** 被统计的 markdown 文件（已去掉排除文件夹） */
+export function includedFiles(app: App, settings: DashboardSettings): TFile[] {
+  const { excluded } = folderLists(settings);
+  return app.vault.getMarkdownFiles().filter((f) => !isExcluded(f.path, excluded));
+}
+
+function addLog(pdata: PersistentData, big: boolean, day: string, n: number) {
+  const target = big ? (pdata.wordLogBig = pdata.wordLogBig || {}) : pdata.wordLog;
+  target[day] = (target[day] || 0) + n;
+  pdata.dirty = true;
+}
+
+/**
+ * 读取变化过的文件并更新内容缓存，同时把字数增量记入“每日新增字数”。
+ * 只会读取 mtime / size 变化过的文件；看板关着时也会被调用（只处理被修改的文件）。
+ */
+export async function syncContent(
+  app: App,
+  files: TFile[],
+  settings: DashboardSettings,
+  cache: Map<string, ContentInfo>,
+  pdata: PersistentData,
+  onProgress?: (done: number, total: number) => void
+): Promise<void> {
+  const { clipping } = folderLists(settings);
+  const toRead = files.filter((f) => {
+    const c = cache.get(f.path);
+    return !c || c.mtime !== f.stat.mtime || c.size !== f.stat.size;
+  });
+  let doneCount = 0;
+  const total = toRead.length;
+  if (onProgress && total > 0) onProgress(0, total);
+  let lastYield = Date.now();
+  await runPool(toRead, 8, async (f) => {
+    const text = await app.vault.cachedRead(f);
+    const taskLines: Record<number, string> = {};
+    if (text.indexOf("[") >= 0) {
+      const lines = text.split(/\r?\n/);
+      for (let i = 0; i < lines.length; i++) {
+        const l = lines[i];
+        if (l.indexOf("[") >= 0 && TASK_LINE_RE.test(l)) taskLines[i] = l;
+      }
+    }
+    const old = cache.get(f.path);
+    cache.set(f.path, { mtime: f.stat.mtime, size: f.stat.size, words: countWords(text), taskLines, logged: old?.logged });
+    pdata.cacheDirty = true;
+    doneCount++;
+    if (onProgress && (doneCount % 50 === 0 || doneCount === total)) onProgress(doneCount, total);
+    // 大仓库首次统计时，每隔一小段时间把主线程还给界面
+    if (Date.now() - lastYield > 16) {
+      await yieldToUi();
+      lastYield = Date.now();
+    }
+  });
+
+  // 每日新增字数
+  const now = Date.now();
+  const todayKey = dayKey(now);
+  const first = !pdata.logInitialized;
+  if (first) {
+    pdata.logInitialized = true;
+    pdata.logStartDay = todayKey;
+    pdata.dirty = true;
+  }
+  if (!pdata.logStartDay) {
+    const days = Object.keys(pdata.wordLog).sort();
+    pdata.logStartDay = days.length ? days[0] : todayKey;
+    pdata.dirty = true;
+  }
+  const startDay = pdata.logStartDay;
+  const legacy = pdata.legacyFileWords;
+  for (const f of files) {
+    const c = cache.get(f.path);
+    if (!c) continue;
+    let prev = c.logged;
+    if (prev === undefined && legacy && legacy[f.path] !== undefined) prev = legacy[f.path];
+    if (prev === undefined && (first || pdata.seedOnly)) prev = c.words; // 初次运行 / 缓存丢失：只建立基线
+    const collected = isExcluded(f.path, clipping);
+    if (prev === undefined) {
+      // 启用之后才出现的新文件：按创建日计入
+      const day = dayKey(Math.min(f.stat.ctime, now));
+      if (!collected && day >= startDay && c.words > 0) addLog(pdata, c.words > settings.outlierWords, day, c.words);
+    } else if (c.words > prev) {
+      const d = dayKey(Math.min(f.stat.mtime, now));
+      const day = d < startDay ? startDay : d;
+      if (!collected) addLog(pdata, c.words > settings.outlierWords, day, c.words - prev);
+    }
+    if (c.logged !== c.words) {
+      c.logged = c.words;
+      pdata.cacheDirty = true;
+    }
+  }
+}
+
 /* ---------------- 主统计 ---------------- */
 
 export async function computeStats(
@@ -241,68 +394,34 @@ export async function computeStats(
   onProgress?: (done: number, total: number) => void
 ): Promise<VaultStats> {
   const t0 = Date.now();
-  const excluded = splitList(settings.excludedFolders).map(normalizeFolder);
+  const { clipping } = folderLists(settings);
   const createdFields = splitList(settings.createdFields);
   const dailyFolder = normalizeFolder(settings.dailyNoteFolder);
+  const threshold = Math.max(1000, settings.outlierWords || 20000);
+  const excludeBig = settings.outlierMode === "exclude";
 
-  const files = app.vault.getMarkdownFiles().filter((f) => !isExcluded(f.path, excluded));
+  const files = includedFiles(app, settings);
   const included = new Set(files.map((f) => f.path));
 
-  // 1. 读取内容（只读取变化过的文件，限制并发）
-  const toRead = files.filter((f) => {
-    const c = contentCache.get(f.path);
-    return !c || c.mtime !== f.stat.mtime || c.size !== f.stat.size;
-  });
-  let doneCount = 0;
-  const total = toRead.length;
-  if (onProgress && total > 0) onProgress(0, total);
-  await runPool(toRead, 8, async (f) => {
-    const text = await app.vault.cachedRead(f);
-    const taskLines: Record<number, string> = {};
-    const lines = text.split(/\r?\n/);
-    for (let i = 0; i < lines.length; i++) {
-      const l = lines[i];
-      if (l.indexOf("[") >= 0 && TASK_LINE_RE.test(l)) taskLines[i] = l;
-    }
-    contentCache.set(f.path, {
-      mtime: f.stat.mtime,
-      size: f.stat.size,
-      words: countWords(text),
-      taskLines,
-    });
-    doneCount++;
-    if (onProgress && (doneCount % 50 === 0 || doneCount === total)) onProgress(doneCount, total);
-  });
+  // 1. 读取内容 + 记录每日新增
+  await syncContent(app, files, settings, contentCache, pdata, onProgress);
+  if (pdata.legacyFileWords || pdata.seedOnly) pdata.dirty = true;
+  pdata.legacyFileWords = undefined;
+  pdata.seedOnly = false;
   // 清理已删除/已排除文件
-  for (const k of Array.from(contentCache.keys())) if (!included.has(k)) contentCache.delete(k);
+  for (const k of Array.from(contentCache.keys())) {
+    if (!included.has(k)) {
+      contentCache.delete(k);
+      pdata.cacheDirty = true;
+    }
+  }
 
   const now = Date.now();
   const today = startOfDay(now);
-  const todayKey = dayKey(today);
   const d7 = addDays(today, -6).getTime();
   const d30 = addDays(today, -29).getTime();
 
-  // 2. 每日新增字数记录（delta 模式）
-  const logWasInit = pdata.logInitialized;
-  for (const f of files) {
-    const c = contentCache.get(f.path);
-    if (!c) continue;
-    const prev = pdata.fileWords[f.path];
-    if (logWasInit) {
-      if (prev === undefined) {
-        // 新文件：按创建日计入
-        const k = f.stat.ctime >= addDays(today, -1).getTime() ? dayKey(f.stat.ctime) : null;
-        if (k && c.words > 0) pdata.wordLog[k] = (pdata.wordLog[k] || 0) + c.words;
-      } else if (c.words > prev) {
-        pdata.wordLog[todayKey] = (pdata.wordLog[todayKey] || 0) + (c.words - prev);
-      }
-    }
-    pdata.fileWords[f.path] = c.words;
-  }
-  for (const k of Object.keys(pdata.fileWords)) if (!included.has(k)) delete pdata.fileWords[k];
-  pdata.logInitialized = true;
-
-  // 3. 遍历元数据
+  // 2. 遍历元数据
   const fileStats: FileStat[] = [];
   const dayModifiedWords: Record<string, number> = {};
   const dayModified: Record<string, TFile[]> = {};
@@ -311,6 +430,7 @@ export async function computeStats(
   const tagCount = new Map<string, number>();
   const folderNotes = new Map<string, number>();
   const folderWords = new Map<string, number>();
+  const folderBig = new Map<string, number>();
   const folderTasks = new Map<string, GroupStat>();
   const noteTasks: GroupStat[] = [];
   const overdue: TaskInfo[] = [];
@@ -319,6 +439,7 @@ export async function computeStats(
     tPending = 0,
     tCancelled = 0;
   let totalWords = 0,
+    writeTotal = 0,
     totalLinks = 0,
     tagOcc = 0;
   let c7 = 0,
@@ -326,12 +447,16 @@ export async function computeStats(
     m7 = 0,
     m30 = 0;
   const soonLimit = addDays(today, 7).getTime();
+  const outlierFiles: FileStat[] = [];
 
   for (const f of files) {
     const cache: CachedMetadata | null = app.metadataCache.getFileCache(f);
     const content = contentCache.get(f.path);
     const words = content ? content.words : 0;
     const fm = cache?.frontmatter as Record<string, unknown> | undefined;
+    const collected = isExcluded(f.path, clipping);
+    const big = words > threshold;
+    const writeWords = collected || (excludeBig && big) ? 0 : words;
 
     // 创建日期
     let created = f.stat.ctime;
@@ -343,29 +468,33 @@ export async function computeStats(
       }
     }
     const mtime = f.stat.mtime;
-    if (created >= d7) c7++;
-    if (created >= d30) c30++;
+    if (!collected) {
+      if (created >= d7) c7++;
+      if (created >= d30) c30++;
+      const ck = dayKey(created);
+      dayCreated[ck] = (dayCreated[ck] || 0) + 1;
+    }
     if (mtime >= d7) m7++;
     if (mtime >= d30) m30++;
-    const ck = dayKey(created);
-    dayCreated[ck] = (dayCreated[ck] || 0) + 1;
     const mk = dayKey(mtime);
-    dayModifiedWords[mk] = (dayModifiedWords[mk] || 0) + words;
+    dayModifiedWords[mk] = (dayModifiedWords[mk] || 0) + writeWords;
     (dayModified[mk] = dayModified[mk] || []).push(f);
 
-    // 日记
-    if (/^\d{4}-\d{2}-\d{2}$/.test(f.basename)) {
+    // 日记（内容过少的空模板不算）
+    if (/^\d{4}-\d{2}-\d{2}$/.test(f.basename) && words >= DAILY_MIN_WORDS) {
       const inFolder = !dailyFolder || f.path.startsWith(dailyFolder + "/");
       const d = parseDateStr(f.basename);
       if (inFolder && d) dailyNotes[dayKey(d)] = f;
     }
 
     totalWords += words;
+    writeTotal += writeWords;
 
     // 文件夹
     const folder = f.path.includes("/") ? f.path.split("/")[0] : "(根目录)";
     inc(folderNotes, folder);
     inc(folderWords, folder, words);
+    if (big) inc(folderBig, folder);
 
     // 标签
     const tags = cache ? Array.from(new Set((getAllTags(cache) || []).map((t) => t.toLowerCase()))) : [];
@@ -374,8 +503,8 @@ export async function computeStats(
       tagOcc++;
     }
 
-    // 链接
-    const links = (cache?.links?.length || 0) + (cache?.embeds?.length || 0);
+    // 链接（只算笔记间的链接，不含图片 / 附件嵌入）
+    const links = cache?.links?.length || 0;
     totalLinks += links;
 
     // 任务
@@ -423,10 +552,12 @@ export async function computeStats(
       }
     }
 
-    fileStats.push({ file: f, created, mtime, words, folder, tags, links });
+    const fs: FileStat = { file: f, created, mtime, words, writeWords, collected, big, folder, tags, links };
+    fileStats.push(fs);
+    if (words > 0 && writeWords === 0) outlierFiles.push(fs);
   }
 
-  // 4. 链接统计
+  // 3. 链接统计
   const resolved = app.metadataCache.resolvedLinks || {};
   const unresolved = app.metadataCache.unresolvedLinks || {};
   const inbound = new Map<string, number>();
@@ -458,8 +589,19 @@ export async function computeStats(
     }
   }
 
-  // 5. 写作量（热力图）
-  const dayWords = settings.heatmapMode === "delta" ? { ...pdata.wordLog } : dayModifiedWords;
+  // 4. 写作量（热力图 / 打卡）
+  const logStart = pdata.logStartDay || dayKey(now);
+  const mergedLog: Record<string, number> = { ...pdata.wordLog };
+  if (!excludeBig) for (const [k, v] of Object.entries(pdata.wordLogBig || {})) mergedLog[k] = (mergedLog[k] || 0) + v;
+  let dayWords: Record<string, number>;
+  let estimatedBefore: string | null = null;
+  if (settings.heatmapMode === "delta") dayWords = mergedLog;
+  else if (settings.heatmapMode === "mtime") dayWords = dayModifiedWords;
+  else {
+    dayWords = { ...mergedLog };
+    for (const [k, v] of Object.entries(dayModifiedWords)) if (k < logStart) dayWords[k] = v;
+    estimatedBefore = logStart;
+  }
 
   overdue.sort((a, b) => (a.due || "").localeCompare(b.due || ""));
   dueSoon.sort((a, b) => (a.due || "").localeCompare(b.due || ""));
@@ -468,11 +610,42 @@ export async function computeStats(
     .map(([folder, notes]) => ({ folder, notes, words: folderWords.get(folder) || 0 }))
     .sort((a, b) => b.notes - a.notes);
 
+  // 5. 提示：疑似采集文件夹、创建日期集中
+  const hints: Hint[] = [];
+  const dismissed = new Set(settings.dismissedHints || []);
+  if (!settings.onboarded) hints.push({ key: "onboarding", kind: "onboarding" });
+  const clippingSet = new Set(clipping);
+  for (const [folder, n] of folderNotes) {
+    if (folder === "(根目录)" || clippingSet.has(folder)) continue;
+    const nb = folderBig.get(folder) || 0;
+    if (n >= 3 && nb / n >= 0.6 && !dismissed.has("folder:" + folder)) {
+      hints.push({ key: "folder:" + folder, kind: "folder", target: folder, count: nb, total: n });
+    }
+  }
+  if (files.length >= 40) {
+    let spikeDay = "",
+      spikeN = 0;
+    for (const [k, n] of Object.entries(dayCreated)) if (n > spikeN) (spikeDay = k), (spikeN = n);
+    if (spikeN >= Math.max(20, files.length * 0.25) && !dismissed.has("spike:" + spikeDay)) {
+      hints.push({ key: "spike:" + spikeDay, kind: "spike", target: spikeDay, count: spikeN, total: files.length });
+    }
+  }
+
+  outlierFiles.sort((a, b) => b.words - a.words);
+  const outliers = {
+    count: outlierFiles.length,
+    words: outlierFiles.reduce((a, f) => a + f.words, 0),
+    top: outlierFiles.slice(0, 5),
+    threshold,
+    mode: settings.outlierMode,
+  };
+
   return {
     generatedAt: now,
     durationMs: Date.now() - t0,
     totalNotes: files.length,
     totalWords,
+    writeWordsTotal: writeTotal,
     created7: c7,
     created30: c30,
     modified7: m7,
@@ -482,9 +655,13 @@ export async function computeStats(
     tagOccurrences: tagOcc,
     files: fileStats,
     dayWords,
+    estimatedBefore,
+    logStartDay: pdata.logInitialized ? logStart : null,
     dayModified,
     dayCreated,
     dailyNotes,
+    outliers,
+    hints,
     tasks: {
       total: tDone + tPending,
       done: tDone,
