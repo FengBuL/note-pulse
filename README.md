@@ -106,6 +106,11 @@ To release, run `npm version <patch|minor|major>` (updates `manifest.json` and `
 
 ## Changelog
 
+### 1.2.1
+
+- **Removed the pulse line from the header.** The faint decorative line behind the title is gone; the gradient logo badge stays.
+- **Softer glows.** The accent glows are now about half as strong in both light and dark: the corner glows on the page background, the hero card's rings and glow, the card and KPI tints, and the glow under the sparklines and trend line. Layout, colours and text contrast are unchanged.
+
 ### 1.2.0
 
 - **A richer look, same layout.** The dashboard no longer sits on flat white/grey. The page now has a soft vertical wash with faint accent glows in the top corners; cards have a gentle tinted gradient, a 1px highlight along the top edge and layered shadows; the header gets a gradient logo badge and a faint pulse line.
@@ -214,6 +219,11 @@ Note Pulse（笔记脉搏）是一个 Obsidian 插件，在一个页面里集中
 - 插件只在本地读取笔记，不联网，不收集任何数据。
 
 ### 更新日志
+
+**1.2.1**
+
+- **去掉了页头的脉搏线。** 标题后面那条淡淡的装饰线没有了，渐变 Logo 徽章保留。
+- **光晕调淡。** 浅色和深色主题下，强调色光晕都减弱到约原来的一半：页面背景顶部两角的光晕、“今日写作”卡的同心圆和光晕、卡片和 KPI 卡的染色，以及迷你曲线和趋势线下方的光晕。布局、配色和文字对比度不变。
 
 **1.2.0**
 

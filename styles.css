@@ -1532,8 +1532,8 @@
   /* 页面底：基础色 + 极淡的强调色渐变，顶部两角有若有若无的光晕 */
   --vp-page-base: color-mix(in srgb, var(--vp-accent) 2.5%, var(--background-secondary));
   --vp-page-bg:
-    radial-gradient(700px 360px at 0% 0%, color-mix(in srgb, var(--vp-accent) 11%, transparent), transparent 70%),
-    radial-gradient(620px 320px at 100% 0%, color-mix(in srgb, var(--vp-accent) 7%, transparent), transparent 70%),
+    radial-gradient(700px 360px at 0% 0%, color-mix(in srgb, var(--vp-accent) 5.5%, transparent), transparent 70%),
+    radial-gradient(620px 320px at 100% 0%, color-mix(in srgb, var(--vp-accent) 3.5%, transparent), transparent 70%),
     linear-gradient(180deg, color-mix(in srgb, var(--vp-accent) 4.5%, var(--background-secondary)) 0%, var(--vp-page-base) 480px, var(--background-secondary) 100%);
   /* 卡片：不透明（对比度可预测），顶部带一点强调色晕染 */
   --vp-card-bg:
@@ -1545,12 +1545,12 @@
     var(--vp-card-edge),
     0 1px 1px rgba(15, 20, 30, 0.04),
     0 3px 8px rgba(15, 20, 30, 0.04),
-    0 12px 28px color-mix(in srgb, var(--vp-accent) 7%, transparent);
+    0 12px 28px color-mix(in srgb, var(--vp-accent) 3.5%, transparent);
   --vp-shadow-hover:
     var(--vp-card-edge),
     0 1px 2px rgba(15, 20, 30, 0.05),
     0 6px 14px rgba(15, 20, 30, 0.06),
-    0 18px 36px color-mix(in srgb, var(--vp-accent) 12%, transparent);
+    0 18px 36px color-mix(in srgb, var(--vp-accent) 6%, transparent);
   --vp-chip-bg: linear-gradient(135deg, color-mix(in srgb, var(--vp-accent) 26%, var(--vp-surface)), color-mix(in srgb, var(--vp-accent) 9%, var(--vp-surface)));
   --vp-chip-ring: color-mix(in srgb, var(--vp-accent) 22%, transparent);
   --vp-chip-fg: color-mix(in srgb, var(--vp-accent) 72%, var(--text-normal));
@@ -1561,8 +1561,8 @@
 .theme-dark .vp-root {
   --vp-page-base: color-mix(in srgb, var(--vp-accent) 3%, var(--background-primary));
   --vp-page-bg:
-    radial-gradient(720px 380px at 0% 0%, color-mix(in srgb, var(--vp-accent) 20%, transparent), transparent 70%),
-    radial-gradient(620px 340px at 100% 0%, color-mix(in srgb, var(--vp-accent) 12%, transparent), transparent 70%),
+    radial-gradient(720px 380px at 0% 0%, color-mix(in srgb, var(--vp-accent) 10%, transparent), transparent 70%),
+    radial-gradient(620px 340px at 100% 0%, color-mix(in srgb, var(--vp-accent) 6%, transparent), transparent 70%),
     linear-gradient(180deg, color-mix(in srgb, var(--vp-accent) 6%, var(--background-primary)) 0%, var(--vp-page-base) 520px, var(--background-primary) 100%);
   --vp-card-bg:
     linear-gradient(180deg, color-mix(in srgb, var(--vp-accent) 6%, var(--vp-surface)) 0%, var(--vp-surface) 160px),
@@ -1578,33 +1578,16 @@
     var(--vp-card-edge),
     0 2px 4px rgba(0, 0, 0, 0.34),
     0 14px 32px rgba(0, 0, 0, 0.32),
-    0 0 0 1px color-mix(in srgb, var(--vp-accent) 14%, transparent);
+    0 0 0 1px color-mix(in srgb, var(--vp-accent) 7%, transparent);
   --vp-chip-bg: linear-gradient(135deg, color-mix(in srgb, var(--vp-accent) 38%, var(--vp-surface)), color-mix(in srgb, var(--vp-accent) 14%, var(--vp-surface)));
   --vp-chip-fg: color-mix(in srgb, var(--vp-accent) 60%, var(--text-normal));
 }
 
-/* ---- 页头：Logo 徽章 + 淡淡的脉搏线 ---- */
+/* ---- 页头：Logo 徽章 ---- */
 .vp-header {
   position: relative;
   isolation: isolate;
   padding-bottom: var(--vp-s1);
-}
-.vp-header::before {
-  /* 脉搏线：SVG 当遮罩，颜色取自强调色；左端渐隐，右端伸向操作按钮 */
-  content: "";
-  position: absolute;
-  z-index: -1;
-  left: 34%;
-  right: 128px;
-  top: 50%;
-  height: 40px;
-  transform: translateY(-50%);
-  background: linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--vp-accent) 55%, transparent) 100%);
-  opacity: 0.55;
-  pointer-events: none;
-  -webkit-mask: var(--vp-pulse) no-repeat center / 100% 100%;
-  mask: var(--vp-pulse) no-repeat center / 100% 100%;
-  --vp-pulse: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 40' preserveAspectRatio='none'%3E%3Cpath d='M0 20H120L134 20L142 6L154 34L164 12L172 20H260L270 20L278 10L288 28L296 20H400' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round' vector-effect='non-scaling-stroke'/%3E%3C/svg%3E");
 }
 .vp-title {
   display: flex !important;
@@ -1620,7 +1603,7 @@
   background:
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 12h4l2.5-6 5 12 2.5-6h4'/%3E%3C/svg%3E") center / 20px 20px no-repeat,
     linear-gradient(135deg, color-mix(in srgb, var(--vp-accent) 88%, white), color-mix(in srgb, var(--vp-accent) 80%, black));
-  box-shadow: 0 4px 12px color-mix(in srgb, var(--vp-accent) 38%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--vp-accent) 19%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.35);
 }
 .vp-subtitle {
   margin-left: calc(32px + var(--vp-s3));
@@ -1656,21 +1639,21 @@
   isolation: isolate;
   overflow: hidden;
   background:
-    radial-gradient(circle at 100% 0%, transparent 0 74px, color-mix(in srgb, var(--vp-accent) 20%, transparent) 75px 76px, transparent 77px),
-    radial-gradient(circle at 100% 0%, transparent 0 118px, color-mix(in srgb, var(--vp-accent) 14%, transparent) 119px 120px, transparent 121px),
-    radial-gradient(circle at 100% 0%, transparent 0 168px, color-mix(in srgb, var(--vp-accent) 9%, transparent) 169px 170px, transparent 171px),
-    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--vp-accent) 22%, transparent) 0, transparent 190px),
-    radial-gradient(120% 100% at 0% 0%, color-mix(in srgb, var(--vp-accent) 20%, transparent) 0%, transparent 62%),
+    radial-gradient(circle at 100% 0%, transparent 0 74px, color-mix(in srgb, var(--vp-accent) 10%, transparent) 75px 76px, transparent 77px),
+    radial-gradient(circle at 100% 0%, transparent 0 118px, color-mix(in srgb, var(--vp-accent) 7%, transparent) 119px 120px, transparent 121px),
+    radial-gradient(circle at 100% 0%, transparent 0 168px, color-mix(in srgb, var(--vp-accent) 4.5%, transparent) 169px 170px, transparent 171px),
+    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--vp-accent) 11%, transparent) 0, transparent 190px),
+    radial-gradient(120% 100% at 0% 0%, color-mix(in srgb, var(--vp-accent) 10%, transparent) 0%, transparent 62%),
     linear-gradient(160deg, color-mix(in srgb, var(--vp-accent) 12%, var(--vp-surface)) 0%, var(--vp-surface) 70%);
   border-color: color-mix(in srgb, var(--vp-accent) 34%, var(--vp-border));
 }
 .theme-dark .vp-hero {
   background:
-    radial-gradient(circle at 100% 0%, transparent 0 74px, color-mix(in srgb, var(--vp-accent) 34%, transparent) 75px 76px, transparent 77px),
-    radial-gradient(circle at 100% 0%, transparent 0 118px, color-mix(in srgb, var(--vp-accent) 22%, transparent) 119px 120px, transparent 121px),
-    radial-gradient(circle at 100% 0%, transparent 0 168px, color-mix(in srgb, var(--vp-accent) 14%, transparent) 169px 170px, transparent 171px),
-    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--vp-accent) 30%, transparent) 0, transparent 200px),
-    radial-gradient(120% 100% at 0% 0%, color-mix(in srgb, var(--vp-accent) 26%, transparent) 0%, transparent 62%),
+    radial-gradient(circle at 100% 0%, transparent 0 74px, color-mix(in srgb, var(--vp-accent) 17%, transparent) 75px 76px, transparent 77px),
+    radial-gradient(circle at 100% 0%, transparent 0 118px, color-mix(in srgb, var(--vp-accent) 11%, transparent) 119px 120px, transparent 121px),
+    radial-gradient(circle at 100% 0%, transparent 0 168px, color-mix(in srgb, var(--vp-accent) 7%, transparent) 169px 170px, transparent 171px),
+    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--vp-accent) 15%, transparent) 0, transparent 200px),
+    radial-gradient(120% 100% at 0% 0%, color-mix(in srgb, var(--vp-accent) 13%, transparent) 0%, transparent 62%),
     linear-gradient(160deg, color-mix(in srgb, var(--vp-accent) 14%, var(--vp-surface)) 0%, var(--vp-surface) 75%);
   border-color: color-mix(in srgb, var(--vp-accent) 44%, var(--vp-border));
 }
@@ -1721,21 +1704,21 @@
   width: 60%;
   height: 70%;
   border-radius: inherit;
-  background: radial-gradient(100% 100% at 100% 0%, color-mix(in srgb, var(--vp-accent) 9%, transparent), transparent 70%);
+  background: radial-gradient(100% 100% at 100% 0%, color-mix(in srgb, var(--vp-accent) 4.5%, transparent), transparent 70%);
   pointer-events: none;
 }
 .vp-kpi:nth-child(3)::after {
-  background: radial-gradient(100% 100% at 100% 0%, color-mix(in srgb, var(--vp-success) 9%, transparent), transparent 70%);
+  background: radial-gradient(100% 100% at 100% 0%, color-mix(in srgb, var(--vp-success) 4.5%, transparent), transparent 70%);
 }
 .theme-dark .vp-kpi::after {
-  background: radial-gradient(100% 100% at 100% 0%, color-mix(in srgb, var(--vp-accent) 15%, transparent), transparent 70%);
+  background: radial-gradient(100% 100% at 100% 0%, color-mix(in srgb, var(--vp-accent) 7.5%, transparent), transparent 70%);
 }
 .theme-dark .vp-kpi:nth-child(3)::after {
-  background: radial-gradient(100% 100% at 100% 0%, color-mix(in srgb, var(--vp-success) 14%, transparent), transparent 70%);
+  background: radial-gradient(100% 100% at 100% 0%, color-mix(in srgb, var(--vp-success) 7%, transparent), transparent 70%);
 }
 .vp-spark-line {
   stroke-width: 2.25;
-  filter: drop-shadow(0 2px 3px color-mix(in srgb, var(--vp-accent) 30%, transparent));
+  filter: drop-shadow(0 2px 3px color-mix(in srgb, var(--vp-accent) 15%, transparent));
 }
 .vp-grad-top {
   stop-opacity: 0.34;
@@ -1745,20 +1728,20 @@
 .vp-heat-card,
 .vp-trend-card {
   background:
-    radial-gradient(90% 60% at 100% 0%, color-mix(in srgb, var(--vp-accent) 7%, transparent), transparent 70%),
+    radial-gradient(90% 60% at 100% 0%, color-mix(in srgb, var(--vp-accent) 3.5%, transparent), transparent 70%),
     var(--vp-card-bg);
 }
 .theme-dark .vp-heat-card,
 .theme-dark .vp-trend-card {
   background:
-    radial-gradient(90% 60% at 100% 0%, color-mix(in srgb, var(--vp-accent) 11%, transparent), transparent 70%),
+    radial-gradient(90% 60% at 100% 0%, color-mix(in srgb, var(--vp-accent) 5.5%, transparent), transparent 70%),
     var(--vp-card-bg);
 }
 .vp-bar {
   opacity: 0.92;
 }
 .vp-line {
-  filter: drop-shadow(0 3px 4px color-mix(in srgb, var(--vp-accent) 28%, transparent));
+  filter: drop-shadow(0 3px 4px color-mix(in srgb, var(--vp-accent) 14%, transparent));
 }
 .vp-chart .vp-gridline {
   stroke: color-mix(in srgb, var(--text-normal) 9%, transparent);
