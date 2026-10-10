@@ -106,6 +106,10 @@ To release, run `npm version <patch|minor|major>` (updates `manifest.json` and `
 
 ## Changelog
 
+### 1.2.2
+
+- **Removed the decorative concentric arcs from the "today" card.** The faint rings in its top-right corner are gone, along with leftover header pulse-line styles. The progress ring, the card's soft gradient and the gradient logo badge are unchanged.
+
 ### 1.2.1
 
 - **Removed the pulse line from the header.** The faint decorative line behind the title is gone; the gradient logo badge stays.
@@ -219,6 +223,10 @@ Note Pulse（笔记脉搏）是一个 Obsidian 插件，在一个页面里集中
 - 插件只在本地读取笔记，不联网，不收集任何数据。
 
 ### 更新日志
+
+**1.2.2**
+
+- **去掉了“今日写作”卡右上角的装饰弧线。** 那几圈淡淡的同心圆没有了，页头残留的脉搏线样式也一并清掉。进度环、卡片的柔和渐变和渐变 Logo 徽章保持不变。
 
 **1.2.1**
 

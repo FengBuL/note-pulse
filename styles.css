@@ -1634,14 +1634,11 @@
   height: 14px;
 }
 
-/* ---- 焦点卡：更浓的强调色渐变 + 装饰同心圆 ---- */
+/* ---- 焦点卡：更浓的强调色渐变 ---- */
 .vp-hero {
   isolation: isolate;
   overflow: hidden;
   background:
-    radial-gradient(circle at 100% 0%, transparent 0 74px, color-mix(in srgb, var(--vp-accent) 10%, transparent) 75px 76px, transparent 77px),
-    radial-gradient(circle at 100% 0%, transparent 0 118px, color-mix(in srgb, var(--vp-accent) 7%, transparent) 119px 120px, transparent 121px),
-    radial-gradient(circle at 100% 0%, transparent 0 168px, color-mix(in srgb, var(--vp-accent) 4.5%, transparent) 169px 170px, transparent 171px),
     radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--vp-accent) 11%, transparent) 0, transparent 190px),
     radial-gradient(120% 100% at 0% 0%, color-mix(in srgb, var(--vp-accent) 10%, transparent) 0%, transparent 62%),
     linear-gradient(160deg, color-mix(in srgb, var(--vp-accent) 12%, var(--vp-surface)) 0%, var(--vp-surface) 70%);
@@ -1649,9 +1646,6 @@
 }
 .theme-dark .vp-hero {
   background:
-    radial-gradient(circle at 100% 0%, transparent 0 74px, color-mix(in srgb, var(--vp-accent) 17%, transparent) 75px 76px, transparent 77px),
-    radial-gradient(circle at 100% 0%, transparent 0 118px, color-mix(in srgb, var(--vp-accent) 11%, transparent) 119px 120px, transparent 121px),
-    radial-gradient(circle at 100% 0%, transparent 0 168px, color-mix(in srgb, var(--vp-accent) 7%, transparent) 169px 170px, transparent 171px),
     radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--vp-accent) 15%, transparent) 0, transparent 200px),
     radial-gradient(120% 100% at 0% 0%, color-mix(in srgb, var(--vp-accent) 13%, transparent) 0%, transparent 62%),
     linear-gradient(160deg, color-mix(in srgb, var(--vp-accent) 14%, var(--vp-surface)) 0%, var(--vp-surface) 75%);
@@ -1822,18 +1816,6 @@
   }
 }
 
-@container vd (max-width: 760px) {
-  .vp-header::before {
-    left: 46%;
-    right: 100px;
-    opacity: 0.3;
-  }
-}
-@container vd (max-width: 480px) {
-  .vp-header::before {
-    display: none;
-  }
-}
 .vp-bargrad-top {
   stop-color: var(--vp-accent);
   stop-opacity: 1;
