@@ -106,6 +106,11 @@ To release, run `npm version <patch|minor|major>` (updates `manifest.json` and `
 
 ## Changelog
 
+### 1.2.3
+
+- **Mobile: the last card is no longer hidden behind the floating bottom bar.** The dashboard had its padding reset to zero, which also removed the room Obsidian leaves for the mobile navigation bar (back / forward / search / new / tabs / menu). On phones and tablets the scroll area now has bottom padding equal to the navbar height plus the safe area, so the "Links" card can be scrolled fully clear of it.
+- **Mobile: tapping inside a card no longer makes the page jump.** Switching a tab in Tasks, Tags or Links only redraws that card, keeps the scroll position, and the card never gets shorter than it has been (a shorter tab used to shrink the page and push the view up when you were at the bottom). Full refreshes also keep the scroll position, focus no longer scrolls the page, tapping a list row no longer focuses it, and a tap that does not move your finger can no longer change the scroll position. Sticky "hover" shadows on touch screens are disabled.
+
 ### 1.2.2
 
 - **Removed the decorative concentric arcs from the "today" card.** The faint rings in its top-right corner are gone, along with leftover header pulse-line styles. The progress ring, the card's soft gradient and the gradient logo badge are unchanged.
@@ -223,6 +228,11 @@ Note Pulse（笔记脉搏）是一个 Obsidian 插件，在一个页面里集中
 - 插件只在本地读取笔记，不联网，不收集任何数据。
 
 ### 更新日志
+
+**1.2.3**
+
+- **手机端：最后一张卡片不再被底部悬浮栏盖住。** 看板把内边距清成了 0，连带去掉了 Obsidian 给手机导航栏（后退 / 前进 / 搜索 / 新建 / 标签页 / 菜单）留的空间。现在手机和平板上，滚动区域底部会留出导航栏高度加安全区的空白，“链接”卡可以完整滚到导航栏上方。
+- **手机端：点卡片里任意位置不再让整页弹动。** 在任务、标签、链接里切换标签页只重绘那一张卡片，滚动位置保持不变，卡片高度也只增不减（以前切到较短的标签页会让页面变矮，在底部时视图就被顶上去）。整页刷新同样保持滚动位置，聚焦不再带动页面滚动，点列表行不再让它获得焦点，手指没有移动的一次轻点也不会再改变滚动位置。触屏上粘住的“悬停”阴影也关掉了。
 
 **1.2.2**
 

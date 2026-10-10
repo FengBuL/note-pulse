@@ -1,4 +1,4 @@
-import { ItemView, Notice, TFile, WorkspaceLeaf, setIcon } from "obsidian";
+import { ItemView, Notice, Platform, TFile, WorkspaceLeaf, setIcon } from "obsidian";
 import type NotePulsePlugin from "./main";
 import { GroupStat, Hint, TaskInfo, VaultStats, addDays, dayKey, pad2, startOfDay } from "./stats";
 import {
@@ -60,6 +60,9 @@ export class DashboardView extends ItemView {
   private bodyHost!: HTMLElement;
   private helpPop: HTMLElement | null = null;
   private helpAnchor: HTMLElement | null = null;
+  /** 分页卡片（任务 / 标签 / 链接）见过的最大高度：切换标签页时只增不减，避免整页高度塌缩导致滚动跳动 */
+  private cardMinH = new Map<string, number>();
+  private tapGuardCleanup: (() => void) | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: NotePulsePlugin) {
     super(leaf);
@@ -80,6 +83,7 @@ export class DashboardView extends ItemView {
     const root = this.contentEl;
     root.empty();
     root.addClass("vp-root");
+    if (Platform.isMobile) root.addClass("is-mobile");
     const shell = root.createDiv({ cls: "vp-shell" });
 
     const header = shell.createDiv({ cls: "vp-header" });
@@ -107,12 +111,92 @@ export class DashboardView extends ItemView {
       if (!(e.target as HTMLElement | null)?.closest?.(".vp-help")) this.hideHelp();
     });
 
+    if (Platform.isMobile) this.installTapGuard(root);
+
     if (this.plugin.lastStats) this.render(this.plugin.lastStats);
     else this.showLoading("正在统计…");
     this.plugin.requestRefresh(false);
   }
 
+  /**
+   * 真正在滚动的那个元素：通常是 contentEl 自己（.view-content），
+   * 但某些主题 / 平台下滚动的是外层容器，所以向上找第一个能滚动的祖先，找不到就用 contentEl。
+   */
+  private scroller(): HTMLElement {
+    const root = this.contentEl;
+    for (let el: HTMLElement | null = root; el && el !== el.ownerDocument.body; el = el.parentElement) {
+      const oy = el.ownerDocument.defaultView?.getComputedStyle(el).overflowY;
+      if ((oy === "auto" || oy === "scroll") && el.scrollHeight > el.clientHeight + 1) return el;
+    }
+    return root;
+  }
+
+  /** 执行 fn（会重绘 DOM），之后把滚动位置放回去；下一帧再校正一次，应对图表异步量宽后的高度变化 */
+  private keepScroll(fn: () => void) {
+    const sc = this.scroller();
+    const top = sc.scrollTop;
+    fn();
+    if (sc.scrollTop !== top) sc.scrollTop = top;
+    const win = sc.ownerDocument.defaultView;
+    win?.requestAnimationFrame(() => {
+      if (Math.abs(sc.scrollTop - top) > 1 && !this.userTouching) sc.scrollTop = top;
+    });
+  }
+
+  private userTouching = false;
+
+  /**
+   * 轻点保护：手指没有移动的一次点按之后，如果页面滚动位置在极短时间内被改动（浏览器聚焦滚动、重排夹紧等），
+   * 就恢复到点按前的位置。真正的拖动 / 惯性滚动不受影响（一旦手指移动或浏览器取消触摸就立刻停用）。
+   */
+  private installTapGuard(root: HTMLElement) {
+    this.tapGuardCleanup?.();
+    const doc = root.ownerDocument;
+    let start: { x: number; y: number; top: number; sc: HTMLElement } | null = null;
+    let until = 0;
+    let moved = false;
+    const down = (e: PointerEvent) => {
+      this.userTouching = true;
+      const sc = this.scroller();
+      start = { x: e.clientX, y: e.clientY, top: sc.scrollTop, sc };
+      moved = false;
+      until = Number.POSITIVE_INFINITY;
+    };
+    const move = (e: PointerEvent) => {
+      if (start && Math.hypot(e.clientX - start.x, e.clientY - start.y) > 6) moved = true;
+    };
+    const up = () => {
+      this.userTouching = false;
+      until = Date.now() + 500;
+    };
+    const cancel = () => {
+      this.userTouching = false;
+      moved = true;
+    };
+    const onScroll = (e: Event) => {
+      if (!start || moved || Date.now() > until || e.target !== start.sc) return;
+      if (start.sc.scrollTop !== start.top) start.sc.scrollTop = start.top;
+    };
+    root.addEventListener("pointerdown", down, true);
+    root.addEventListener("pointermove", move, true);
+    root.addEventListener("pointerup", up, true);
+    root.addEventListener("pointercancel", cancel, true);
+    root.addEventListener("wheel", cancel, { capture: true, passive: true });
+    // scroll 事件不冒泡，用捕获在 document 上接，这样不用提前知道到底是哪个元素在滚动
+    doc.addEventListener("scroll", onScroll, { capture: true, passive: true });
+    this.tapGuardCleanup = () => {
+      root.removeEventListener("pointerdown", down, true);
+      root.removeEventListener("pointermove", move, true);
+      root.removeEventListener("pointerup", up, true);
+      root.removeEventListener("pointercancel", cancel, true);
+      root.removeEventListener("wheel", cancel, true);
+      doc.removeEventListener("scroll", onScroll, true);
+    };
+  }
+
   async onClose() {
+    this.tapGuardCleanup?.();
+    this.tapGuardCleanup = null;
     this.disconnectObservers();
     this.helpPop?.remove();
     this.helpPop = null;
@@ -178,7 +262,20 @@ export class DashboardView extends ItemView {
   /* ================= 渲染 ================= */
 
   render(stats: VaultStats) {
-    const scrollTop = this.contentEl.scrollTop;
+    // 重绘期间把内容区高度撑住，避免清空 → 重建的瞬间页面塌缩、滚动位置被夹到顶部
+    const hold = this.bodyEl.offsetHeight;
+    if (hold > 0) this.bodyEl.style.minHeight = `${hold}px`;
+    this.keepScroll(() => this.renderNow(stats));
+    this.cardMinH.clear();
+    if (hold > 0) {
+      const win = this.contentEl.ownerDocument.defaultView;
+      win?.requestAnimationFrame(() => {
+        this.keepScroll(() => this.bodyEl.style.removeProperty("min-height"));
+      });
+    }
+  }
+
+  private renderNow(stats: VaultStats) {
     this.hideHelp();
     this.stats = stats;
     this.disconnectObservers();
@@ -213,8 +310,6 @@ export class DashboardView extends ItemView {
     this.define("tasks", grid, (h) => this.renderTasks(h, stats));
     this.define("tags", grid, (h) => this.renderTags(h, stats));
     this.define("links", grid, (h) => this.renderLinks(h, stats));
-
-    this.contentEl.scrollTop = scrollTop;
   }
 
   /** 登记并渲染一个区块；每个渲染函数必须恰好生成一个根元素 */
@@ -235,25 +330,38 @@ export class DashboardView extends ItemView {
     if (el) this.parts.set(key, el);
   }
 
-  /** 只重绘一个区块（点击标签页、切换范围时），不打断其它区块，并保持键盘焦点 */
+  /**
+   * 只重绘一个区块（点击标签页、切换范围时），不打断其它区块，并保持键盘焦点和滚动位置。
+   * 任务 / 标签 / 链接这类分页卡片：高度只增不减，切到较短的标签页时卡片不会收缩，
+   * 否则页面总高度变小，处在底部时浏览器会把滚动位置夹回去，看起来就是整页“弹”了一下。
+   */
   private rerender(key: string) {
     const old = this.parts.get(key);
     const fn = this.renderers.get(key);
     if (!old || !fn || !this.stats) return;
     const focusId = (this.contentEl.ownerDocument.activeElement as HTMLElement | null)?.getAttribute("data-fid") || null;
-    this.disconnectObservers(key);
-    // 先用一个 display: contents 的占位容器就地渲染，这样图表量到的是最终宽度，不会闪烁
-    const wrapper = this.contentEl.ownerDocument.createElement("div");
-    wrapper.addClass("vp-contents");
-    old.replaceWith(wrapper);
-    this.mount(key, wrapper, fn);
-    const fresh = this.parts.get(key);
-    if (!fresh) {
-      wrapper.replaceWith(old);
-      return;
-    }
-    wrapper.replaceWith(fresh);
-    if (focusId) (fresh.querySelector(`[data-fid="${focusId}"]`) as HTMLElement | null)?.focus();
+    const sticky = key === "tasks" || key === "tags" || key === "links";
+    const prevH = Math.max(this.cardMinH.get(key) ?? 0, sticky ? old.getBoundingClientRect().height : 0);
+    this.keepScroll(() => {
+      this.disconnectObservers(key);
+      // 先用一个 display: contents 的占位容器就地渲染，这样图表量到的是最终宽度，不会闪烁
+      const wrapper = this.contentEl.ownerDocument.createElement("div");
+      wrapper.addClass("vp-contents");
+      old.replaceWith(wrapper);
+      this.mount(key, wrapper, fn);
+      const fresh = this.parts.get(key);
+      if (!fresh) {
+        wrapper.replaceWith(old);
+        return;
+      }
+      wrapper.replaceWith(fresh);
+      if (sticky && prevH > 0) {
+        fresh.style.minHeight = `${Math.ceil(prevH)}px`;
+        this.cardMinH.set(key, Math.max(prevH, fresh.getBoundingClientRect().height));
+      }
+      // preventScroll：聚焦时不要让浏览器把元素滚进视野（手机上会拖着整页跳）
+      if (focusId) (fresh.querySelector(`[data-fid="${focusId}"]`) as HTMLElement | null)?.focus({ preventScroll: true });
+    });
   }
 
   /* ---------- 通用组件 ---------- */
@@ -367,6 +475,8 @@ export class DashboardView extends ItemView {
     el.setAttr("tabindex", "0");
     if (label) srLabel(el, label);
     el.addEventListener("click", (e) => handler(e));
+    // 触屏上轻点不要让这一行拿到焦点：浏览器会把获得焦点的元素滚进视野，页面就会跳
+    if (Platform.isMobile) el.addEventListener("mousedown", (e) => e.preventDefault());
     el.addEventListener("keydown", (e) => {
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();

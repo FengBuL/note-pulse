@@ -1853,3 +1853,45 @@
 .vp-week-day.is-today .vp-week-label {
   color: color-mix(in srgb, var(--vp-accent) 78%, var(--text-normal));
 }
+
+/* =========================================================
+   1.2.3：手机端（Obsidian iOS / iPadOS / Android）
+   ========================================================= */
+
+/*
+ * 手机底部有一条悬浮导航栏（后退 / 前进 / 搜索 / 新建 / 标签页 / 菜单），它浮在内容上面、不占版面。
+ * 上面的 .vp-root 把内边距清成了 0，所以最后一张卡片被它盖住、也滚不上来。
+ * 这里在滚动容器底部留出导航栏的高度 + 安全区 + 一点呼吸空间（导航栏高度取主题变量，没有就按 76px 估）。
+ */
+body.is-mobile .vp-root,
+.vp-root.is-mobile {
+  padding-bottom: calc(max(var(--mobile-navbar-height, 0px), 76px) + env(safe-area-inset-bottom, 0px) + 32px) !important;
+  box-sizing: border-box;
+  overscroll-behavior-y: contain;
+  -webkit-tap-highlight-color: transparent;
+}
+.vp-card {
+  box-sizing: border-box;
+}
+body.is-mobile .vp-root .vp-shell,
+.vp-root.is-mobile .vp-shell {
+  padding-left: max(var(--vp-s4), env(safe-area-inset-left, 0px));
+  padding-right: max(var(--vp-s4), env(safe-area-inset-right, 0px));
+}
+body.is-mobile .vp-root :is(button, [role="button"], [role="tab"], .is-clickable),
+.vp-root.is-mobile :is(button, [role="button"], [role="tab"], .is-clickable) {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 触屏没有真正的“悬停”，点一下后 :hover 会一直粘着：别让它触发阴影 / 边框的重绘动画 */
+@media (hover: none) {
+  .vp-card,
+  .vp-card:hover {
+    transition: none;
+  }
+  .vp-card:hover {
+    box-shadow: var(--vp-shadow);
+    border-color: var(--vp-card-border);
+  }
+}
