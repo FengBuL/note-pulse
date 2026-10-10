@@ -18,7 +18,7 @@
   --vp-surface: var(--background-primary);
   --vp-border: var(--background-modifier-border);
   /* 次要文字：比 --text-faint 对比度更高（浅色主题下 --text-faint 约 2.3:1，达不到 WCAG AA） */
-  --vp-subtle: color-mix(in srgb, var(--text-muted) 85%, var(--background-primary));
+  --vp-subtle: color-mix(in srgb, var(--text-muted) 94%, var(--background-primary));
   --vp-track: color-mix(in srgb, var(--text-normal) 7%, transparent);
   /* 热力图：空格用中性灰，1-4 级是强调色叠在卡片底色上的不透明深浅，两种主题下都分得开 */
   --vp-heat-base: var(--vp-surface);
@@ -667,7 +667,6 @@
   stroke-width: 2;
 }
 .vp-bar {
-  fill: var(--vp-accent);
   opacity: 0.85;
   transition: opacity 0.15s var(--vp-ease);
 }
@@ -1521,4 +1520,371 @@
   .vp-help {
     transition: none;
   }
+}
+
+/* =========================================================
+   1.2.0：更有层次的背景与卡片
+   —— 全部由 Obsidian 的主题变量 + color-mix(--interactive-accent) 派生，
+      纯 CSS / 内联 SVG 遮罩，没有位图；主题色再怪也只是色调变化，不会影响文字对比度
+   ========================================================= */
+
+.vp-root {
+  /* 页面底：基础色 + 极淡的强调色渐变，顶部两角有若有若无的光晕 */
+  --vp-page-base: color-mix(in srgb, var(--vp-accent) 2.5%, var(--background-secondary));
+  --vp-page-bg:
+    radial-gradient(700px 360px at 0% 0%, color-mix(in srgb, var(--vp-accent) 11%, transparent), transparent 70%),
+    radial-gradient(620px 320px at 100% 0%, color-mix(in srgb, var(--vp-accent) 7%, transparent), transparent 70%),
+    linear-gradient(180deg, color-mix(in srgb, var(--vp-accent) 4.5%, var(--background-secondary)) 0%, var(--vp-page-base) 480px, var(--background-secondary) 100%);
+  /* 卡片：不透明（对比度可预测），顶部带一点强调色晕染 */
+  --vp-card-bg:
+    linear-gradient(180deg, color-mix(in srgb, var(--vp-accent) 3.5%, var(--vp-surface)) 0%, var(--vp-surface) 150px),
+    var(--vp-surface);
+  --vp-card-border: color-mix(in srgb, var(--vp-accent) 9%, var(--vp-border));
+  --vp-card-edge: inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  --vp-shadow:
+    var(--vp-card-edge),
+    0 1px 1px rgba(15, 20, 30, 0.04),
+    0 3px 8px rgba(15, 20, 30, 0.04),
+    0 12px 28px color-mix(in srgb, var(--vp-accent) 7%, transparent);
+  --vp-shadow-hover:
+    var(--vp-card-edge),
+    0 1px 2px rgba(15, 20, 30, 0.05),
+    0 6px 14px rgba(15, 20, 30, 0.06),
+    0 18px 36px color-mix(in srgb, var(--vp-accent) 12%, transparent);
+  --vp-chip-bg: linear-gradient(135deg, color-mix(in srgb, var(--vp-accent) 26%, var(--vp-surface)), color-mix(in srgb, var(--vp-accent) 9%, var(--vp-surface)));
+  --vp-chip-ring: color-mix(in srgb, var(--vp-accent) 22%, transparent);
+  --vp-chip-fg: color-mix(in srgb, var(--vp-accent) 72%, var(--text-normal));
+  background: var(--vp-page-bg);
+  background-color: var(--background-secondary);
+  background-attachment: local;
+}
+.theme-dark .vp-root {
+  --vp-page-base: color-mix(in srgb, var(--vp-accent) 3%, var(--background-primary));
+  --vp-page-bg:
+    radial-gradient(720px 380px at 0% 0%, color-mix(in srgb, var(--vp-accent) 20%, transparent), transparent 70%),
+    radial-gradient(620px 340px at 100% 0%, color-mix(in srgb, var(--vp-accent) 12%, transparent), transparent 70%),
+    linear-gradient(180deg, color-mix(in srgb, var(--vp-accent) 6%, var(--background-primary)) 0%, var(--vp-page-base) 520px, var(--background-primary) 100%);
+  --vp-card-bg:
+    linear-gradient(180deg, color-mix(in srgb, var(--vp-accent) 6%, var(--vp-surface)) 0%, var(--vp-surface) 160px),
+    var(--vp-surface);
+  --vp-card-border: color-mix(in srgb, var(--vp-accent) 14%, var(--vp-border));
+  --vp-card-edge: inset 0 1px 0 rgba(255, 255, 255, 0.055);
+  --vp-shadow:
+    var(--vp-card-edge),
+    0 1px 2px rgba(0, 0, 0, 0.3),
+    0 8px 24px rgba(0, 0, 0, 0.22),
+    0 0 0 1px rgba(0, 0, 0, 0.12);
+  --vp-shadow-hover:
+    var(--vp-card-edge),
+    0 2px 4px rgba(0, 0, 0, 0.34),
+    0 14px 32px rgba(0, 0, 0, 0.32),
+    0 0 0 1px color-mix(in srgb, var(--vp-accent) 14%, transparent);
+  --vp-chip-bg: linear-gradient(135deg, color-mix(in srgb, var(--vp-accent) 38%, var(--vp-surface)), color-mix(in srgb, var(--vp-accent) 14%, var(--vp-surface)));
+  --vp-chip-fg: color-mix(in srgb, var(--vp-accent) 60%, var(--text-normal));
+}
+
+/* ---- 页头：Logo 徽章 + 淡淡的脉搏线 ---- */
+.vp-header {
+  position: relative;
+  isolation: isolate;
+  padding-bottom: var(--vp-s1);
+}
+.vp-header::before {
+  /* 脉搏线：SVG 当遮罩，颜色取自强调色；左端渐隐，右端伸向操作按钮 */
+  content: "";
+  position: absolute;
+  z-index: -1;
+  left: 34%;
+  right: 128px;
+  top: 50%;
+  height: 40px;
+  transform: translateY(-50%);
+  background: linear-gradient(90deg, transparent 0%, color-mix(in srgb, var(--vp-accent) 55%, transparent) 100%);
+  opacity: 0.55;
+  pointer-events: none;
+  -webkit-mask: var(--vp-pulse) no-repeat center / 100% 100%;
+  mask: var(--vp-pulse) no-repeat center / 100% 100%;
+  --vp-pulse: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 40' preserveAspectRatio='none'%3E%3Cpath d='M0 20H120L134 20L142 6L154 34L164 12L172 20H260L270 20L278 10L288 28L296 20H400' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round' vector-effect='non-scaling-stroke'/%3E%3C/svg%3E");
+}
+.vp-title {
+  display: flex !important;
+  align-items: center;
+  gap: var(--vp-s3);
+}
+.vp-title::before {
+  content: "";
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3 12h4l2.5-6 5 12 2.5-6h4'/%3E%3C/svg%3E") center / 20px 20px no-repeat,
+    linear-gradient(135deg, color-mix(in srgb, var(--vp-accent) 88%, white), color-mix(in srgb, var(--vp-accent) 80%, black));
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--vp-accent) 38%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+.vp-subtitle {
+  margin-left: calc(32px + var(--vp-s3));
+}
+
+/* ---- 卡片：渐变底 + 细边高光 + 分层阴影 ---- */
+.vp-card {
+  background: var(--vp-card-bg);
+  border-color: var(--vp-card-border);
+  box-shadow: var(--vp-shadow);
+}
+.vp-card:hover {
+  box-shadow: var(--vp-shadow-hover);
+  border-color: color-mix(in srgb, var(--vp-accent) 20%, var(--vp-border));
+}
+.vp-card-icon {
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  background: var(--vp-chip-bg);
+  color: var(--vp-chip-fg);
+  box-shadow: inset 0 0 0 1px var(--vp-chip-ring);
+}
+.vp-card-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* ---- 焦点卡：更浓的强调色渐变 + 装饰同心圆 ---- */
+.vp-hero {
+  isolation: isolate;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 100% 0%, transparent 0 74px, color-mix(in srgb, var(--vp-accent) 20%, transparent) 75px 76px, transparent 77px),
+    radial-gradient(circle at 100% 0%, transparent 0 118px, color-mix(in srgb, var(--vp-accent) 14%, transparent) 119px 120px, transparent 121px),
+    radial-gradient(circle at 100% 0%, transparent 0 168px, color-mix(in srgb, var(--vp-accent) 9%, transparent) 169px 170px, transparent 171px),
+    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--vp-accent) 22%, transparent) 0, transparent 190px),
+    radial-gradient(120% 100% at 0% 0%, color-mix(in srgb, var(--vp-accent) 20%, transparent) 0%, transparent 62%),
+    linear-gradient(160deg, color-mix(in srgb, var(--vp-accent) 12%, var(--vp-surface)) 0%, var(--vp-surface) 70%);
+  border-color: color-mix(in srgb, var(--vp-accent) 34%, var(--vp-border));
+}
+.theme-dark .vp-hero {
+  background:
+    radial-gradient(circle at 100% 0%, transparent 0 74px, color-mix(in srgb, var(--vp-accent) 34%, transparent) 75px 76px, transparent 77px),
+    radial-gradient(circle at 100% 0%, transparent 0 118px, color-mix(in srgb, var(--vp-accent) 22%, transparent) 119px 120px, transparent 121px),
+    radial-gradient(circle at 100% 0%, transparent 0 168px, color-mix(in srgb, var(--vp-accent) 14%, transparent) 169px 170px, transparent 171px),
+    radial-gradient(circle at 100% 0%, color-mix(in srgb, var(--vp-accent) 30%, transparent) 0, transparent 200px),
+    radial-gradient(120% 100% at 0% 0%, color-mix(in srgb, var(--vp-accent) 26%, transparent) 0%, transparent 62%),
+    linear-gradient(160deg, color-mix(in srgb, var(--vp-accent) 14%, var(--vp-surface)) 0%, var(--vp-surface) 75%);
+  border-color: color-mix(in srgb, var(--vp-accent) 44%, var(--vp-border));
+}
+.vp-hero .vp-ring-track {
+  stroke: color-mix(in srgb, var(--vp-accent) 14%, var(--vp-track));
+}
+.vp-hero .vp-pill.is-muted {
+  background: color-mix(in srgb, var(--vp-accent) 10%, var(--vp-surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--vp-accent) 20%, transparent);
+}
+.vp-hero .vp-pill.is-success {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--vp-success) 28%, transparent);
+}
+.vp-hero-foot {
+  border-top-color: color-mix(in srgb, var(--vp-accent) 18%, var(--vp-border));
+}
+.vp-hero .vp-num-hero {
+  background: linear-gradient(180deg, var(--text-normal) 55%, color-mix(in srgb, var(--vp-accent) 55%, var(--text-normal)) 130%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+}
+.vp-hero .vp-num-hero .vp-num-unit {
+  -webkit-text-fill-color: var(--text-muted);
+}
+
+/* ---- KPI 图标徽章：渐变 + 内描边 ---- */
+.vp-kpi-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: var(--vp-chip-bg);
+  color: var(--vp-chip-fg);
+  box-shadow: inset 0 0 0 1px var(--vp-chip-ring), 0 2px 6px color-mix(in srgb, var(--vp-accent) 14%, transparent);
+}
+.vp-kpi:nth-child(3) .vp-kpi-icon {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--vp-success) 28%, var(--vp-surface)), color-mix(in srgb, var(--vp-success) 10%, var(--vp-surface)));
+  color: color-mix(in srgb, var(--vp-success) 75%, var(--text-normal));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--vp-success) 28%, transparent), 0 2px 6px color-mix(in srgb, var(--vp-success) 14%, transparent);
+}
+.vp-kpi::after {
+  /* 右上角一团很淡的光 */
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 60%;
+  height: 70%;
+  border-radius: inherit;
+  background: radial-gradient(100% 100% at 100% 0%, color-mix(in srgb, var(--vp-accent) 9%, transparent), transparent 70%);
+  pointer-events: none;
+}
+.vp-kpi:nth-child(3)::after {
+  background: radial-gradient(100% 100% at 100% 0%, color-mix(in srgb, var(--vp-success) 9%, transparent), transparent 70%);
+}
+.theme-dark .vp-kpi::after {
+  background: radial-gradient(100% 100% at 100% 0%, color-mix(in srgb, var(--vp-accent) 15%, transparent), transparent 70%);
+}
+.theme-dark .vp-kpi:nth-child(3)::after {
+  background: radial-gradient(100% 100% at 100% 0%, color-mix(in srgb, var(--vp-success) 14%, transparent), transparent 70%);
+}
+.vp-spark-line {
+  stroke-width: 2.25;
+  filter: drop-shadow(0 2px 3px color-mix(in srgb, var(--vp-accent) 30%, transparent));
+}
+.vp-grad-top {
+  stop-opacity: 0.34;
+}
+
+/* ---- 热力图 / 趋势图卡片 ---- */
+.vp-heat-card,
+.vp-trend-card {
+  background:
+    radial-gradient(90% 60% at 100% 0%, color-mix(in srgb, var(--vp-accent) 7%, transparent), transparent 70%),
+    var(--vp-card-bg);
+}
+.theme-dark .vp-heat-card,
+.theme-dark .vp-trend-card {
+  background:
+    radial-gradient(90% 60% at 100% 0%, color-mix(in srgb, var(--vp-accent) 11%, transparent), transparent 70%),
+    var(--vp-card-bg);
+}
+.vp-bar {
+  opacity: 0.92;
+}
+.vp-line {
+  filter: drop-shadow(0 3px 4px color-mix(in srgb, var(--vp-accent) 28%, transparent));
+}
+.vp-chart .vp-gridline {
+  stroke: color-mix(in srgb, var(--text-normal) 9%, transparent);
+}
+
+/* ---- 进度条 / 条形：加一点光泽 ---- */
+.vp-meter-fill,
+.vp-barfill {
+  position: relative;
+}
+.vp-meter-fill::after,
+.vp-barfill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0) 60%);
+  pointer-events: none;
+}
+.vp-meter-fill {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--vp-accent) 70%, var(--background-primary)), var(--vp-accent));
+}
+.vp-meter.is-success .vp-meter-fill {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--vp-success) 70%, var(--background-primary)), var(--vp-success));
+}
+.vp-bartrack,
+.vp-meter {
+  box-shadow: inset 0 1px 1px color-mix(in srgb, var(--text-normal) 7%, transparent);
+}
+
+/* ---- 其他小件 ---- */
+.vp-mini {
+  background: linear-gradient(145deg, color-mix(in srgb, var(--vp-accent) 10%, var(--vp-surface)), color-mix(in srgb, var(--vp-accent) 3%, var(--vp-surface)));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--vp-accent) 12%, transparent);
+}
+.vp-hint {
+  background: linear-gradient(90deg, color-mix(in srgb, var(--vp-accent) 11%, var(--vp-surface)), color-mix(in srgb, var(--vp-accent) 4%, var(--vp-surface)));
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--vp-accent) 10%, transparent);
+}
+.vp-icon-btn,
+.vp-btn:not(.is-primary) {
+  background: var(--vp-card-bg) !important;
+  border-color: var(--vp-card-border) !important;
+}
+.vp-icon-btn.is-small {
+  background: transparent !important;
+}
+.vp-icon-btn:hover,
+.vp-btn:not(.is-primary):hover {
+  background: color-mix(in srgb, var(--vp-accent) 9%, var(--vp-surface)) !important;
+}
+.vp-seg {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-normal) 5%, transparent);
+}
+.vp-seg-btn.is-active {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12), inset 0 0 0 1px color-mix(in srgb, var(--vp-accent) 14%, transparent) !important;
+}
+.vp-week-day.is-active .vp-week-dot {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--vp-accent) 80%, white), var(--vp-accent));
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--vp-accent) 35%, transparent);
+}
+.vp-week-day.is-today .vp-week-dot {
+  box-shadow: 0 0 0 2px var(--vp-surface), 0 0 0 4px color-mix(in srgb, var(--vp-accent) 45%, transparent);
+}
+.vp-row.is-clickable:hover,
+.vp-barrow.is-clickable:hover {
+  background: color-mix(in srgb, var(--vp-accent) 7%, transparent);
+}
+
+/* 不支持 color-mix 的旧环境：退回纯色，保证可读 */
+@supports not (background: color-mix(in srgb, red 10%, blue)) {
+  .vp-root {
+    background: var(--background-secondary);
+  }
+  .vp-card,
+  .vp-hero {
+    background: var(--vp-surface);
+  }
+}
+
+@container vd (max-width: 760px) {
+  .vp-header::before {
+    left: 46%;
+    right: 100px;
+    opacity: 0.3;
+  }
+}
+@container vd (max-width: 480px) {
+  .vp-header::before {
+    display: none;
+  }
+}
+.vp-bargrad-top {
+  stop-color: var(--vp-accent);
+  stop-opacity: 1;
+}
+.vp-bargrad-bottom {
+  stop-color: var(--vp-accent);
+  stop-opacity: 0.55;
+}
+
+/* 状态色文字：向正文色靠拢一些，浅色主题下在淡底色上也能达到 WCAG AA */
+.vp-delta.is-up,
+.vp-pill.is-success {
+  color: color-mix(in srgb, var(--vp-success) 55%, var(--text-normal));
+}
+.vp-delta.is-down {
+  color: color-mix(in srgb, var(--vp-danger) 62%, var(--text-normal));
+}
+.vp-due {
+  color: color-mix(in srgb, var(--vp-warning) 55%, var(--text-normal));
+}
+.vp-due.is-overdue {
+  color: color-mix(in srgb, var(--vp-danger) 62%, var(--text-normal));
+}
+.vp-mini.is-warning .vp-mini-value {
+  color: color-mix(in srgb, var(--vp-warning) 70%, var(--text-normal));
+}
+
+/* 强调色上的白字：略压暗底色，保证按钮文字对比度；今天的标签在深色主题里提亮 */
+.vp-btn.is-primary {
+  background: color-mix(in srgb, var(--vp-accent) 86%, black) !important;
+}
+.vp-btn.is-primary:hover {
+  background: color-mix(in srgb, var(--vp-accent) 76%, black) !important;
+}
+.vp-week-day.is-today .vp-week-label {
+  color: color-mix(in srgb, var(--vp-accent) 78%, var(--text-normal));
 }

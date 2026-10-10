@@ -242,6 +242,11 @@ export function drawTrendChart(container: HTMLElement, points: SeriesPoint[], o:
 
   const bars: SVGRectElement[] = [];
   if (isBar) {
+    // 柱子上浓下淡的渐变（颜色取自 CSS 里的 stop-color）
+    const bgid = `${gid}-bar`;
+    const bgrad = svgEl("linearGradient", { id: bgid, x1: 0, y1: 0, x2: 0, y2: 1 }, defs);
+    svgEl("stop", { offset: "0%", class: "vp-bargrad-top" }, bgrad);
+    svgEl("stop", { offset: "100%", class: "vp-bargrad-bottom" }, bgrad);
     const bw = Math.max(2, Math.min(28, step * 0.62));
     points.forEach((p, i) => {
       const y = yOf(p.value);
@@ -249,7 +254,7 @@ export function drawTrendChart(container: HTMLElement, points: SeriesPoint[], o:
       bars.push(
         svgEl(
           "rect",
-          { x: xOf(i) - bw / 2, y: padT + ch - h, width: bw, height: h, rx: Math.min(4, bw / 2), class: "vp-bar" },
+          { x: xOf(i) - bw / 2, y: padT + ch - h, width: bw, height: h, rx: Math.min(4, bw / 2), class: "vp-bar", fill: `url(#${bgid})` },
           svg
         )
       );

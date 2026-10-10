@@ -106,6 +106,14 @@ To release, run `npm version <patch|minor|major>` (updates `manifest.json` and `
 
 ## Changelog
 
+### 1.2.0
+
+- **A richer look, same layout.** The dashboard no longer sits on flat white/grey. The page now has a soft vertical wash with faint accent glows in the top corners; cards have a gentle tinted gradient, a 1px highlight along the top edge and layered shadows; the header gets a gradient logo badge and a faint pulse line.
+- **Hero card.** The "today" card has a stronger accent gradient with decorative concentric rings, and the streak number is lightly shaded.
+- **Icon chips and charts.** Card and KPI icons sit in gradient chips (the task-completion card uses green), sparklines and the trend line get a soft glow, trend bars fade from top to bottom, and progress bars have a subtle sheen.
+- **Works with your theme.** Everything is derived from Obsidian's own colour variables and `color-mix()` on the theme's accent colour, so it follows light/dark themes and custom accent colours. It uses only CSS and inline SVG (no images), and falls back to flat colours where `color-mix()` isn't available.
+- **Readability.** Secondary text, status badges (up/down, overdue, due soon) and the primary button were darkened slightly so text keeps at least WCAG AA contrast (4.5:1) on the new backgrounds in the default light and dark themes. Animations still respect "reduce motion".
+
 ### 1.1.2
 
 - **Fix: hovering a "?" showed two tooltips.** Obsidian pops up its own tooltip for any element that has an `aria-label`, on top of Note Pulse's own bubble. Accessible names now live in visually hidden text (`aria-labelledby`), so only one tooltip appears. The same cleanup was applied to the heatmap, trend chart, KPI cards, ring, lists, and tab buttons; only the icon-only buttons (refresh, settings, close) keep Obsidian's own tooltip, as their single one.
@@ -206,6 +214,14 @@ Note Pulse（笔记脉搏）是一个 Obsidian 插件，在一个页面里集中
 - 插件只在本地读取笔记，不联网，不收集任何数据。
 
 ### 更新日志
+
+**1.2.0**
+
+- **背景和卡片更有层次，布局不变。** 看板不再是单调的纯白/纯灰：页面有一层柔和的纵向渐变，顶部两角带极淡的强调色光晕；卡片有微弱的染色渐变、顶边 1px 高光和分层阴影；页头多了渐变 Logo 徽章和一条淡淡的脉搏线。
+- **焦点卡。** “今日写作”卡的强调色渐变更浓，加了装饰性的同心圆，连续天数的大数字带一点渐变。
+- **图标和图表。** 卡片和 KPI 图标放进渐变底的小徽章（任务完成率用绿色），迷你曲线和趋势线带柔和的光晕，趋势柱子上深下浅，进度条有一点光泽。
+- **适配你的主题。** 全部颜色取自 Obsidian 的主题变量，并用 `color-mix()` 从主题强调色派生，所以会跟随浅色/深色主题和自定义强调色。只用 CSS 和内联 SVG，没有图片；不支持 `color-mix()` 的环境会退回纯色。
+- **可读性。** 次要文字、状态标签（上升/下降、逾期、临近到期）和主按钮的颜色略微加深，在默认浅色和深色主题下文字对比度都不低于 WCAG AA（4.5:1）。动画仍然遵循“减少动态效果”。
 
 **1.1.2**
 
