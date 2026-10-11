@@ -40,8 +40,11 @@
   container-type: inline-size;
   container-name: vd;
   background: var(--vp-page);
-  padding: 0 !important;
   font-variant-numeric: tabular-nums;
+}
+/* Obsidian 给 .view-content 设了内边距，这里要清掉；靠更高的选择器优先级盖过它 */
+.workspace-leaf-content .view-content.vp-root {
+  padding: 0;
 }
 
 .theme-dark .vp-root {
@@ -69,12 +72,14 @@
   margin-bottom: var(--vp-s5);
 }
 .vp-title {
-  margin: 0 !important;
   font-size: 24px;
   line-height: 32px;
   font-weight: 700;
   letter-spacing: -0.01em;
   color: var(--text-normal);
+}
+.vp-root .vp-title {
+  margin: 0;
 }
 .vp-subtitle {
   margin-top: var(--vp-s1);
@@ -98,18 +103,22 @@
   justify-content: center;
   width: 32px;
   height: 32px;
-  padding: 0 !important;
   border-radius: var(--vp-radius-sm);
-  border: 1px solid var(--vp-border) !important;
-  background: var(--vp-surface) !important;
   color: var(--text-muted);
-  box-shadow: none !important;
   cursor: pointer;
   transition: color 0.15s var(--vp-ease), background 0.15s var(--vp-ease), border-color 0.15s var(--vp-ease);
 }
+.vp-root .vp-shell .vp-icon-btn {
+  padding: 0;
+  border: 1px solid var(--vp-border);
+  background: var(--vp-surface);
+  box-shadow: none;
+}
 .vp-icon-btn:hover {
   color: var(--text-normal);
-  background: var(--vp-hover) !important;
+}
+.vp-root .vp-shell .vp-icon-btn:hover {
+  background: var(--vp-hover);
 }
 .vp-icon-btn svg {
   width: 16px;
@@ -118,8 +127,10 @@
 .vp-icon-btn.is-small {
   width: 24px;
   height: 24px;
-  border-color: transparent !important;
-  background: transparent !important;
+}
+.vp-root .vp-shell .vp-icon-btn.is-small {
+  border-color: transparent;
+  background: transparent;
 }
 .vp-icon-btn.is-spinning svg {
   animation: vp-spin 0.9s linear infinite;
@@ -354,6 +365,8 @@
 .vp-ring {
   position: relative;
   flex-shrink: 0;
+  width: var(--vp-ring-size);
+  height: var(--vp-ring-size);
 }
 .vp-ring svg {
   display: block;
@@ -575,11 +588,7 @@
 }
 .vp-seg-btn {
   height: 24px;
-  padding: 0 10px !important;
-  border: none !important;
   border-radius: 6px;
-  background: transparent !important;
-  box-shadow: none !important;
   color: var(--text-muted);
   font-size: 12px;
   font-weight: 500;
@@ -587,16 +596,24 @@
   white-space: nowrap;
   transition: color 0.15s var(--vp-ease), background 0.15s var(--vp-ease);
 }
+.vp-root .vp-shell .vp-seg-btn {
+  padding: 0 10px;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+}
 .vp-seg-btn:hover {
   color: var(--text-normal);
 }
 .vp-seg-btn.is-active {
-  background: var(--vp-surface) !important;
   color: var(--text-normal);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12) !important;
 }
-.theme-dark .vp-seg-btn.is-active {
-  background: color-mix(in srgb, var(--text-normal) 14%, transparent) !important;
+.vp-root .vp-shell .vp-seg-btn.is-active {
+  background: var(--vp-surface);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+}
+.theme-dark .vp-root .vp-shell .vp-seg-btn.is-active {
+  background: color-mix(in srgb, var(--text-normal) 14%, transparent);
 }
 .vp-subhead {
   display: flex;
@@ -901,7 +918,7 @@
 }
 .vp-row-name.is-unresolved {
   color: var(--text-muted);
-  text-decoration: underline dotted;
+  text-decoration: underline;
   text-underline-offset: 3px;
 }
 .vp-row-meta {
@@ -1145,7 +1162,7 @@
   .vp-hero {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    column-gap: var(--vp-s5);
+    gap: 0 var(--vp-s5);
   }
   .vp-hero-head {
     grid-column: 1 / -1;
@@ -1199,9 +1216,9 @@
   .vp-hero-main {
     gap: var(--vp-s4);
   }
-  .vp-hero-ring {
-    width: 112px !important;
-    height: 112px !important;
+  .vp-ring.vp-hero-ring {
+    width: 112px;
+    height: 112px;
   }
   .vp-hero-ring svg {
     width: 112px;
@@ -1223,11 +1240,12 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .vp-root *,
-  .vp-root *::before,
-  .vp-root *::after {
-    animation: none !important;
-    transition: none !important;
+  /* 选择器写得足够具体，才能盖过各处的 transition / animation 声明 */
+  .vp-root.vp-root.vp-root.vp-root.vp-root.vp-root *,
+  .vp-root.vp-root.vp-root.vp-root.vp-root.vp-root *::before,
+  .vp-root.vp-root.vp-root.vp-root.vp-root.vp-root *::after {
+    animation: none;
+    transition: none;
   }
 }
 
@@ -1239,11 +1257,7 @@
    1.1.0：提示条 / 排除开关 / 键盘焦点 / 无障碍
    ========================================================= */
 
-.vp-contents {
-  display: contents;
-}
 .vp-sr-only {
-  position: absolute !important;
   width: 1px;
   height: 1px;
   margin: -1px;
@@ -1252,6 +1266,9 @@
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border: 0;
+}
+.vp-root .vp-sr-only {
+  position: absolute;
 }
 
 /* 键盘焦点：只在键盘操作时显示 */
@@ -1274,28 +1291,32 @@
 /* 通用按钮 */
 .vp-btn {
   height: 28px;
-  padding: 0 12px !important;
-  border: 1px solid var(--vp-border) !important;
   border-radius: var(--vp-radius-sm);
-  background: var(--vp-surface) !important;
   color: var(--text-normal);
   font-size: 12px;
   font-weight: 500;
-  box-shadow: none !important;
   cursor: pointer;
   white-space: nowrap;
   transition: background 0.15s var(--vp-ease), border-color 0.15s var(--vp-ease);
 }
-.vp-btn:hover {
-  background: var(--vp-hover) !important;
+.vp-root .vp-shell .vp-btn {
+  padding: 0 12px;
+  border: 1px solid var(--vp-border);
+  background: var(--vp-surface);
+  box-shadow: none;
+}
+.vp-root .vp-shell .vp-btn:hover {
+  background: var(--vp-hover);
 }
 .vp-btn.is-primary {
-  border-color: transparent !important;
-  background: var(--vp-accent) !important;
   color: var(--text-on-accent, #fff);
 }
-.vp-btn.is-primary:hover {
-  background: color-mix(in srgb, var(--vp-accent) 88%, black) !important;
+.vp-root .vp-shell .vp-btn.is-primary {
+  border-color: transparent;
+  background: var(--vp-accent);
+}
+.vp-root .vp-shell .vp-btn.is-primary:hover {
+  background: color-mix(in srgb, var(--vp-accent) 88%, black);
 }
 
 /* 提示条：紧凑的一行，可关闭；关闭后不再出现 */
@@ -1344,8 +1365,10 @@
 }
 .vp-btn.is-compact {
   height: 24px;
-  padding: 0 10px !important;
   font-size: 12px;
+}
+.vp-root .vp-shell .vp-btn.is-compact {
+  padding: 0 10px;
 }
 
 /* 趋势卡下方：排除开关（说明都在旁边的问号里） */
@@ -1361,13 +1384,15 @@
   align-items: center;
   gap: var(--vp-s2);
   height: auto;
-  padding: 2px 4px !important;
-  border: none !important;
-  background: transparent !important;
-  box-shadow: none !important;
   color: var(--text-muted);
   font-size: 12px;
   cursor: pointer;
+}
+.vp-root .vp-shell .vp-switch {
+  padding: 2px 4px;
+  border: none;
+  background: transparent;
+  box-shadow: none;
 }
 .vp-switch:hover {
   color: var(--text-normal);
@@ -1427,7 +1452,7 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) 72px 64px;
   align-items: center;
-  column-gap: var(--vp-s3);
+  gap: var(--vp-s3);
 }
 .vp-group-row .vp-row-meta {
   text-align: right;
@@ -1448,17 +1473,19 @@
   min-width: 0;
   min-height: 0;
   margin: 0 0 0 2px;
-  padding: 0 !important;
-  border: none !important;
   border-radius: 50%;
-  background: transparent !important;
-  box-shadow: none !important;
   color: var(--vp-subtle);
   font-size: 12px;
   font-weight: 600;
   line-height: 1;
   cursor: help;
   transition: color 0.15s var(--vp-ease);
+}
+.vp-root .vp-shell .vp-help {
+  padding: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
 }
 .vp-help svg {
   width: 14px;
@@ -1590,9 +1617,11 @@
   padding-bottom: var(--vp-s1);
 }
 .vp-title {
-  display: flex !important;
   align-items: center;
   gap: var(--vp-s3);
+}
+.vp-root .vp-title {
+  display: flex;
 }
 .vp-title::before {
   content: "";
@@ -1775,23 +1804,23 @@
   background: linear-gradient(90deg, color-mix(in srgb, var(--vp-accent) 11%, var(--vp-surface)), color-mix(in srgb, var(--vp-accent) 4%, var(--vp-surface)));
   box-shadow: 0 1px 2px color-mix(in srgb, var(--vp-accent) 10%, transparent);
 }
-.vp-icon-btn,
-.vp-btn:not(.is-primary) {
-  background: var(--vp-card-bg) !important;
-  border-color: var(--vp-card-border) !important;
+.vp-root .vp-shell .vp-icon-btn,
+.vp-root .vp-shell .vp-btn:not(.is-primary) {
+  background: var(--vp-card-bg);
+  border-color: var(--vp-card-border);
 }
-.vp-icon-btn.is-small {
-  background: transparent !important;
+.vp-root .vp-shell .vp-icon-btn.is-small {
+  background: transparent;
 }
-.vp-icon-btn:hover,
-.vp-btn:not(.is-primary):hover {
-  background: color-mix(in srgb, var(--vp-accent) 9%, var(--vp-surface)) !important;
+.vp-root .vp-shell .vp-icon-btn:hover,
+.vp-root .vp-shell .vp-btn:not(.is-primary):hover {
+  background: color-mix(in srgb, var(--vp-accent) 9%, var(--vp-surface));
 }
 .vp-seg {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text-normal) 5%, transparent);
 }
-.vp-seg-btn.is-active {
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12), inset 0 0 0 1px color-mix(in srgb, var(--vp-accent) 14%, transparent) !important;
+.vp-root .vp-shell .vp-seg-btn.is-active {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12), inset 0 0 0 1px color-mix(in srgb, var(--vp-accent) 14%, transparent);
 }
 .vp-week-day.is-active .vp-week-dot {
   background: linear-gradient(135deg, color-mix(in srgb, var(--vp-accent) 80%, white), var(--vp-accent));
@@ -1844,11 +1873,11 @@
 }
 
 /* 强调色上的白字：略压暗底色，保证按钮文字对比度；今天的标签在深色主题里提亮 */
-.vp-btn.is-primary {
-  background: color-mix(in srgb, var(--vp-accent) 86%, black) !important;
+.vp-root .vp-shell .vp-btn.is-primary {
+  background: color-mix(in srgb, var(--vp-accent) 86%, black);
 }
-.vp-btn.is-primary:hover {
-  background: color-mix(in srgb, var(--vp-accent) 76%, black) !important;
+.vp-root .vp-shell .vp-btn.is-primary:hover {
+  background: color-mix(in srgb, var(--vp-accent) 76%, black);
 }
 .vp-week-day.is-today .vp-week-label {
   color: color-mix(in srgb, var(--vp-accent) 78%, var(--text-normal));
@@ -1863,9 +1892,9 @@
  * 上面的 .vp-root 把内边距清成了 0，所以最后一张卡片被它盖住、也滚不上来。
  * 这里在滚动容器底部留出导航栏的高度 + 安全区 + 一点呼吸空间（导航栏高度取主题变量，没有就按 76px 估）。
  */
-body.is-mobile .vp-root,
-.vp-root.is-mobile {
-  padding-bottom: calc(max(var(--mobile-navbar-height, 0px), 76px) + env(safe-area-inset-bottom, 0px) + 32px) !important;
+body.is-mobile .workspace-leaf-content .view-content.vp-root,
+.workspace-leaf-content .view-content.vp-root.is-mobile {
+  padding-bottom: calc(max(var(--mobile-navbar-height, 0px), 76px) + env(safe-area-inset-bottom, 0px) + 32px);
   box-sizing: border-box;
   overscroll-behavior-y: contain;
   -webkit-tap-highlight-color: transparent;

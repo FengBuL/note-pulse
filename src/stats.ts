@@ -44,7 +44,7 @@ export function parseDateStr(s: string): Date | null {
 /** 汉字 / 假名按字计数；谚文（韩文）有空格分词，按词计数，所以不放在这里 */
 const CJK_RE = /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\u{20000}-\u{2fa1f}]/gu;
 /** 其余文字（拉丁、西里尔、希腊、阿拉伯、谚文……）按“词”计数 */
-const WORD_RE = /[\p{L}\p{N}\p{M}]+(?:['’.\-][\p{L}\p{N}\p{M}]+)*/gu;
+const WORD_RE = /[\p{L}\p{N}\p{M}]+(?:['’.-][\p{L}\p{N}\p{M}]+)*/gu;
 
 /** 去掉不算“写作”的内容。所有范围匹配都限制在单行或有限长度内，避免超大文本上的回溯。 */
 export function stripMarkdown(text: string): string {
@@ -74,7 +74,7 @@ export function stripMarkdown(text: string): string {
   // 脚注标记、任务/列表标记、标题、引用、强调等符号
   t = t.replace(/\[\^[^\]\n]{0,100}\]/g, " ");
   t = t.replace(/^\s*[-*+]\s+\[.\]\s*/gm, " ");
-  t = t.replace(/[#*_>~=`|\[\]()^]/g, " ");
+  t = t.replace(/[#*_>~=`|[\]()^]/g, " ");
   return t;
 }
 
@@ -211,7 +211,7 @@ export interface PersistentData {
 
 /* ---------------- 工具 ---------------- */
 
-const yieldToUi = () => new Promise<void>((r) => setTimeout(r, 0));
+const yieldToUi = () => new Promise<void>((r) => window.setTimeout(r, 0));
 
 async function runPool<T>(items: T[], limit: number, fn: (t: T) => Promise<void>): Promise<void> {
   let i = 0;
@@ -453,7 +453,7 @@ export async function computeStats(
     const cache: CachedMetadata | null = app.metadataCache.getFileCache(f);
     const content = contentCache.get(f.path);
     const words = content ? content.words : 0;
-    const fm = cache?.frontmatter as Record<string, unknown> | undefined;
+    const fm: Record<string, unknown> | undefined = cache?.frontmatter;
     const collected = isExcluded(f.path, clipping);
     const big = words > threshold;
     const writeWords = collected || (excludeBig && big) ? 0 : words;
@@ -576,8 +576,8 @@ export async function computeStats(
   const topLinked = Array.from(inbound.entries())
     .sort((a, b) => b[1] - a[1])
     .slice(0, 15)
-    .map(([p, count]) => ({ file: byPath.get(p) as TFile, count }))
-    .filter((x) => !!x.file);
+    .map(([p, count]) => ({ file: byPath.get(p), count }))
+    .filter((x): x is { file: TFile; count: number } => !!x.file);
   const orphans = files.filter((f) => !inbound.has(f.path) && !hasOutbound.has(f.path));
   const unresolvedMap = new Map<string, number>();
   let unresolvedCount = 0;
@@ -625,7 +625,12 @@ export async function computeStats(
   if (files.length >= 40) {
     let spikeDay = "",
       spikeN = 0;
-    for (const [k, n] of Object.entries(dayCreated)) if (n > spikeN) (spikeDay = k), (spikeN = n);
+    for (const [k, n] of Object.entries(dayCreated)) {
+      if (n > spikeN) {
+        spikeDay = k;
+        spikeN = n;
+      }
+    }
     if (spikeN >= Math.max(20, files.length * 0.25) && !dismissed.has("spike:" + spikeDay)) {
       hints.push({ key: "spike:" + spikeDay, kind: "spike", target: spikeDay, count: spikeN, total: files.length });
     }

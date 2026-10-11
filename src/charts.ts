@@ -8,7 +8,7 @@ export function svgEl<K extends keyof SVGElementTagNameMap>(
   attrs: Record<string, string | number>,
   parent?: Element
 ): SVGElementTagNameMap[K] {
-  const el = document.createElementNS(SVG_NS, tag) as SVGElementTagNameMap[K];
+  const el = document.createElementNS(SVG_NS, tag);
   for (const k of Object.keys(attrs)) el.setAttribute(k, String(attrs[k]));
   if (parent) parent.appendChild(el);
   return el;
@@ -84,7 +84,7 @@ function monotonePath(xs: number[], ys: number[]): string {
   if (n === 1) return `M${xs[0]},${ys[0]}`;
   const m: number[] = [];
   for (let i = 0; i < n - 1; i++) m.push((ys[i + 1] - ys[i]) / (xs[i + 1] - xs[i] || 1));
-  const t: number[] = new Array(n);
+  const t = new Array<number>(n);
   t[0] = m[0];
   t[n - 1] = m[n - 2];
   for (let i = 1; i < n - 1; i++) t[i] = m[i - 1] * m[i] <= 0 ? 0 : (m[i - 1] + m[i]) / 2;
@@ -125,12 +125,8 @@ let srSeq = 0;
  * 做法：在 holder 里放一段视觉隐藏的文字，再用 aria-labelledby 指向它。
  */
 export function srLabel(el: Element, text: string, holder?: Element): void {
-  const doc = el.ownerDocument;
   const id = `vp-sr-${++srSeq}`;
-  const span = doc.createElement("span");
-  span.className = "vp-sr-only";
-  span.id = id;
-  span.textContent = text;
+  const span = createSpan({ cls: "vp-sr-only", attr: { id }, text });
   if (holder) holder.appendChild(span);
   else el.appendChild(span);
   el.setAttribute("aria-labelledby", id);
@@ -334,8 +330,8 @@ export function drawSparkline(container: HTMLElement, values: number[]) {
 /** 画一个进度圆环，返回中心的 HTML 容器，用于放置文字 */
 export function drawRing(container: HTMLElement, ratio: number, size: number, stroke: number, cls = ""): HTMLElement {
   const wrap = container.createDiv({ cls: `vp-ring ${cls}` });
-  wrap.style.width = `${size}px`;
-  wrap.style.height = `${size}px`;
+  // 尺寸通过 CSS 变量传入，样式表里的 .vp-ring 用它设置宽高（窄屏时可以直接覆盖，不必 !important）
+  wrap.setCssProps({ "--vp-ring-size": `${size}px` });
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
   const svg = svgEl("svg", { width: size, height: size, viewBox: `0 0 ${size} ${size}` }, wrap);

@@ -13,6 +13,31 @@ interface SavedData {
   fileWords?: Record<string, number>;
 }
 
+/** Obsidian 没有公开的 API，只能通过这几个内部入口完成“打开搜索 / 设置 / 在文件管理器中定位”；每一处都会先检查是否存在。 */
+interface InternalPluginHandle<T> {
+  instance?: T;
+}
+interface AppInternals {
+  internalPlugins?: {
+    getPluginById?: (id: string) => InternalPluginHandle<unknown> | undefined;
+  };
+  setting?: {
+    open?: () => void;
+    openTabById?: (id: string) => void;
+  };
+}
+interface GlobalSearchInstance {
+  openGlobalSearch?: (query: string) => void;
+}
+interface FileExplorerInstance {
+  revealInFolder?: (folder: TFolder) => void;
+}
+type CacheEntry = [number, number, number, number | null, Record<number, string>];
+interface CacheFile {
+  v?: number;
+  files?: Record<string, CacheEntry>;
+}
+
 const CACHE_FILE = "cache.json";
 const CACHE_VERSION = 1;
 
@@ -86,7 +111,7 @@ export default class NotePulsePlugin extends Plugin {
       // 切回看板标签页时，补上它不可见期间错过的刷新
       this.registerEvent(
         this.app.workspace.on("active-leaf-change", (leaf) => {
-          if (this.stale && leaf && leaf.view instanceof DashboardView) this.requestRefresh(false);
+          if (this.stale && leaf && leaf.view instanceof DashboardView) void this.requestRefresh(false);
         })
       );
       // 启动后在后台补记一次（只会读取上次之后改动过的文件），这样看板没打开时写的字数也不会丢
@@ -131,7 +156,7 @@ export default class NotePulsePlugin extends Plugin {
       leaf = workspace.getLeaf("tab");
       await leaf.setViewState({ type: VIEW_TYPE_PULSE, active: true });
     }
-    workspace.revealLeaf(leaf);
+    await workspace.revealLeaf(leaf);
   }
 
   private enqueue<T>(fn: () => Promise<T>): Promise<T> {
@@ -213,31 +238,31 @@ export default class NotePulsePlugin extends Plugin {
   }
 
   openSearch(query: string) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const search = (this.app as any).internalPlugins?.getPluginById?.("global-search");
-    if (search && search.instance && typeof search.instance.openGlobalSearch === "function") {
-      search.instance.openGlobalSearch(query);
+    const internals = this.app as unknown as AppInternals;
+    const search = internals.internalPlugins?.getPluginById?.("global-search")?.instance as GlobalSearchInstance | undefined;
+    if (search && typeof search.openGlobalSearch === "function") {
+      search.openGlobalSearch(query);
     } else {
       new Notice(`请启用核心插件“搜索”。查询：${query}`);
     }
   }
 
   openSettings() {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const setting = (this.app as any).setting;
+    const setting = (this.app as unknown as AppInternals).setting;
     if (setting) {
-      setting.open();
-      setting.openTabById(this.manifest.id);
+      setting.open?.();
+      setting.openTabById?.(this.manifest.id);
     }
   }
 
   revealFolder(path: string) {
     const folder = this.app.vault.getAbstractFileByPath(path);
     if (!(folder instanceof TFolder)) return;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const explorer = (this.app as any).internalPlugins?.getPluginById?.("file-explorer");
-    if (explorer?.instance?.revealInFolder) {
-      explorer.instance.revealInFolder(folder);
+    const explorer = (this.app as unknown as AppInternals).internalPlugins?.getPluginById?.("file-explorer")?.instance as
+      | FileExplorerInstance
+      | undefined;
+    if (explorer && typeof explorer.revealInFolder === "function") {
+      explorer.revealInFolder(folder);
     } else {
       this.openSearch(`path:"${path}"`);
     }
@@ -322,9 +347,9 @@ export default class NotePulsePlugin extends Plugin {
     try {
       const adapter = this.app.vault.adapter;
       if (await adapter.exists(this.cachePath)) {
-        const c = JSON.parse(await adapter.read(this.cachePath));
+        const c = JSON.parse(await adapter.read(this.cachePath)) as CacheFile | null;
         if (c && c.v === CACHE_VERSION && c.files) {
-          for (const [p, e] of Object.entries(c.files as Record<string, [number, number, number, number | null, Record<number, string>]>)) {
+          for (const [p, e] of Object.entries(c.files)) {
             this.contentCache.set(p, { mtime: e[0], size: e[1], words: e[2], logged: e[3] ?? undefined, taskLines: e[4] || {} });
           }
           cacheOk = true;

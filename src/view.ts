@@ -94,19 +94,19 @@ export class DashboardView extends ItemView {
 
     const actions = header.createDiv({ cls: "vp-header-actions" });
     this.statusEl = actions.createSpan({ cls: "vp-status" });
-    this.refreshBtn = this.iconButton(actions, "refresh-cw", "刷新数据", () => this.plugin.requestRefresh(true));
+    this.refreshBtn = this.iconButton(actions, "refresh-cw", "刷新数据", () => void this.plugin.requestRefresh(true));
     this.iconButton(actions, "settings", "看板设置", () => this.plugin.openSettings());
 
     this.bodyEl = shell.createDiv({ cls: "vp-body" });
     // 跨过午夜后，“今天”变了，需要重新统计
     this.registerInterval(
       window.setInterval(() => {
-        if (this.renderedDay && this.renderedDay !== dayKey(Date.now()) && this.isVisible()) this.plugin.requestRefresh(false);
+        if (this.renderedDay && this.renderedDay !== dayKey(Date.now()) && this.isVisible()) void this.plugin.requestRefresh(false);
       }, 60000)
     );
 
     // 说明气泡：滚动或点击别处时收起（触屏没有悬停，靠点击问号查看）
-    this.registerDomEvent(root, "scroll", () => this.hideHelp(), { capture: true } as AddEventListenerOptions);
+    this.registerDomEvent(root, "scroll", () => this.hideHelp(), { capture: true });
     this.registerDomEvent(root.ownerDocument, "pointerdown", (e: Event) => {
       if (!(e.target as HTMLElement | null)?.closest?.(".vp-help")) this.hideHelp();
     });
@@ -115,7 +115,7 @@ export class DashboardView extends ItemView {
 
     if (this.plugin.lastStats) this.render(this.plugin.lastStats);
     else this.showLoading("正在统计…");
-    this.plugin.requestRefresh(false);
+    void this.plugin.requestRefresh(false);
   }
 
   /**
@@ -256,7 +256,7 @@ export class DashboardView extends ItemView {
     const e = this.bodyEl.createDiv({ cls: "vp-card vp-fullempty", attr: { role: "alert" } });
     this.empty(e, "alert-triangle", "统计时出错了，详情见开发者控制台");
     const b = e.createEl("button", { cls: "vp-btn", text: "重试" });
-    b.addEventListener("click", () => this.plugin.requestRefresh(true));
+    b.addEventListener("click", () => void this.plugin.requestRefresh(true));
   }
 
   /* ================= 渲染 ================= */
@@ -345,8 +345,8 @@ export class DashboardView extends ItemView {
     this.keepScroll(() => {
       this.disconnectObservers(key);
       // 先用一个 display: contents 的占位容器就地渲染，这样图表量到的是最终宽度，不会闪烁
-      const wrapper = this.contentEl.ownerDocument.createElement("div");
-      wrapper.addClass("vp-contents");
+      const wrapper = createDiv();
+      wrapper.setCssProps({ display: "contents" });
       old.replaceWith(wrapper);
       this.mount(key, wrapper, fn);
       const fresh = this.parts.get(key);
@@ -360,7 +360,7 @@ export class DashboardView extends ItemView {
         this.cardMinH.set(key, Math.max(prevH, fresh.getBoundingClientRect().height));
       }
       // preventScroll：聚焦时不要让浏览器把元素滚进视野（手机上会拖着整页跳）
-      if (focusId) (fresh.querySelector(`[data-fid="${focusId}"]`) as HTMLElement | null)?.focus({ preventScroll: true });
+      if (focusId) fresh.querySelector<HTMLElement>(`[data-fid="${focusId}"]`)?.focus({ preventScroll: true });
     });
   }
 
@@ -404,13 +404,12 @@ export class DashboardView extends ItemView {
     const pop = this.helpPop;
     pop.setText(text);
     pop.removeClass("is-visible");
-    pop.style.left = "0px";
-    pop.style.top = "0px";
+    pop.setCssProps({ left: "0px", top: "0px" });
     this.helpAnchor = anchor;
     anchor.setAttr("aria-describedby", "vp-help-pop");
     const a = anchor.getBoundingClientRect();
     const vw = doc.documentElement.clientWidth;
-    const card = (anchor.closest(".vp-card") as HTMLElement | null)?.getBoundingClientRect();
+    const card = anchor.closest<HTMLElement>(".vp-card")?.getBoundingClientRect();
     const pw = pop.offsetWidth,
       ph = pop.offsetHeight;
     // 尽量留在所在卡片范围内；卡片太窄时退而求其次，保证不超出窗口
@@ -489,7 +488,7 @@ export class DashboardView extends ItemView {
     const row = parent.createDiv({ cls: "vp-row" });
     row.createSpan({ cls: "vp-row-name", text: file.basename, attr: { title: file.path } });
     if (meta) row.createSpan({ cls: "vp-row-meta", text: meta });
-    this.clickable(row, `${file.basename}${meta ? "，" + meta : ""}`, (e) => this.plugin.openFile(file, line, e));
+    this.clickable(row, `${file.basename}${meta ? "，" + meta : ""}`, (e) => void this.plugin.openFile(file, line, e));
     return row;
   }
 
@@ -577,7 +576,7 @@ export class DashboardView extends ItemView {
         x.addEventListener("click", () => {
           this.hideHelp();
           el.remove();
-          this.plugin.dismissHint(h.key);
+          void this.plugin.dismissHint(h.key);
         });
       };
       return { btn, close };
@@ -600,8 +599,8 @@ export class DashboardView extends ItemView {
           `“${f}/” 里${h.count === h.total ? `${h.total} 篇笔记都` : ` ${h.total} 篇有 ${h.count} 篇`}超过 ${thr} 字，像是自动采集的内容。`,
           "这类笔记会让字数趋势和热力图失真。“不计入写作统计”后，笔记仍计入总数；“完全排除”则整个文件夹不参与任何统计。"
         );
-        m.btn("不计入写作统计", "笔记仍计入总数，但不计入字数趋势、热力图和打卡", () => this.plugin.setClippingFolder(f), true);
-        m.btn("完全排除", "整个文件夹不参与任何统计", () => this.plugin.excludeFolder(f));
+        m.btn("不计入写作统计", "笔记仍计入总数，但不计入字数趋势、热力图和打卡", () => void this.plugin.setClippingFolder(f), true);
+        m.btn("完全排除", "整个文件夹不参与任何统计", () => void this.plugin.excludeFolder(f));
         m.close("忽略，不再提示这个文件夹");
       } else if (h.kind === "spike" && h.target) {
         const [, mm, dd] = h.target.split("-").map(Number);
@@ -678,7 +677,7 @@ export class DashboardView extends ItemView {
     stat("近一年打卡", String(ck.activeDays), "天");
     const diary = stat("本月日记", String(ck.diaryMonth), "篇");
     const todayDiary = s.dailyNotes[ck.todayKey];
-    if (todayDiary) this.clickable(diary, "打开今天的日记", (e) => this.plugin.openFile(todayDiary, undefined, e));
+    if (todayDiary) this.clickable(diary, "打开今天的日记", (e) => void this.plugin.openFile(todayDiary, undefined, e));
   }
 
   /* ---------- 2. KPI ---------- */
@@ -1114,7 +1113,7 @@ export class DashboardView extends ItemView {
     });
     sw.createSpan({ cls: "vp-switch-track" }).createSpan({ cls: "vp-switch-thumb" });
     sw.createSpan({ cls: "vp-switch-label", text: `排除超大笔记（> ${fmtNum(s.outliers.threshold)} 字）` });
-    sw.addEventListener("click", () => this.plugin.setOutlierExclusion(!on));
+    sw.addEventListener("click", () => void this.plugin.setOutlierExclusion(!on));
 
     const w = big.reduce((a, f) => a + f.words, 0);
     const top = [...big, ...collected].sort((a, b) => b.words - a.words).slice(0, 3);
@@ -1257,7 +1256,7 @@ export class DashboardView extends ItemView {
         const text = cleanTaskText(it.text);
         row.createSpan({ cls: "vp-row-name", text: text || "（空任务）", attr: { title: `${text}\n${it.file.path}` } });
         row.createSpan({ cls: "vp-row-meta", text: it.file.basename });
-        this.clickable(row, `${text || "空任务"}，${it.file.basename}${overdue ? "，已逾期" : ""}`, (e) => this.plugin.openFile(it.file, it.line, e));
+        this.clickable(row, `${text || "空任务"}，${it.file.basename}${overdue ? "，已逾期" : ""}`, (e) => void this.plugin.openFile(it.file, it.line, e));
       }
       if (items.length > LIST_LIMIT) list.createDiv({ cls: "vp-more", text: `还有 ${items.length - LIST_LIMIT} 项` });
     } else {
@@ -1274,7 +1273,7 @@ export class DashboardView extends ItemView {
         row.createSpan({ cls: "vp-row-meta vp-tabular", text: `待办 ${g.pending}` });
         if (g.file) {
           const f = g.file;
-          this.clickable(row, `${g.key}，待办 ${g.pending}`, (e) => this.plugin.openFile(f, undefined, e));
+          this.clickable(row, `${g.key}，待办 ${g.pending}`, (e) => void this.plugin.openFile(f, undefined, e));
         } else if (g.key !== "(根目录)") this.clickable(row, `${g.key}，待办 ${g.pending}`, () => this.plugin.revealFolder(g.key));
       }
     }

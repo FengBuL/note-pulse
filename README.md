@@ -106,6 +106,17 @@ To release, run `npm version <patch|minor|major>` (updates `manifest.json` and `
 
 ## Changelog
 
+### 1.2.4
+
+Clean-up release for the Obsidian community plugin review. No visual change, apart from one tiny detail noted below.
+
+- **Minimum Obsidian version is now 1.7.2** (was 1.4.0). The dashboard uses `Workspace.revealLeaf()`, which was added in 1.7.2.
+- **No more `!important` in `styles.css`.** The few places that had to override Obsidian's default button, heading and padding styles now do it with more specific selectors instead. The hero ring size is passed to CSS as a variable. I compared computed styles and screenshots (light, dark, desktop, narrow, phone, tablet, reduced motion) against 1.2.3 and they match, including the phone bottom padding and no-jump behaviour from 1.2.3.
+- **Browser-compatibility lint.** `column-gap` on grid layouts is written as `gap`; the "unresolved link" underline is a plain underline instead of a dotted one (the only visible change); the temporary `display: contents` wrapper used while redrawing a card is now set from code.
+- **Type-safety and lint fixes.** The few private Obsidian internals (global search, file explorer, settings dialog) are accessed through small typed interfaces with no `any` and no lint-disable comments; promises are handled explicitly (`void`) in click handlers; `window.setTimeout` is used for popout windows; an `instanceof`/type-guard replaces a `TFile` cast; unnecessary regex escapes and type assertions removed; the cache file is parsed into a typed shape.
+- **Settings are declared once** and rendered both by `getSettingDefinitions()` (Obsidian 1.13+, so settings show up in settings search) and by the classic `display()` for older versions. The reset button uses the same style class as before.
+- **Build:** the `builtin-modules` dev dependency was replaced by Node's own `module.builtinModules`.
+
 ### 1.2.3
 
 - **Mobile: the last card is no longer hidden behind the floating bottom bar.** The dashboard had its padding reset to zero, which also removed the room Obsidian leaves for the mobile navigation bar (back / forward / search / new / tabs / menu). On phones and tablets the scroll area now has bottom padding equal to the navbar height plus the safe area, so the "Links" card can be scrolled fully clear of it.
@@ -228,6 +239,17 @@ Note Pulse（笔记脉搏）是一个 Obsidian 插件，在一个页面里集中
 - 插件只在本地读取笔记，不联网，不收集任何数据。
 
 ### 更新日志
+
+**1.2.4**
+
+为通过 Obsidian 官方插件审核做的整理，界面不变（只有下面注明的一处极小细节）。
+
+- **最低 Obsidian 版本改为 1.7.2**（原来是 1.4.0）。看板用到的 `Workspace.revealLeaf()` 是 1.7.2 才加入的。
+- **`styles.css` 里不再使用 `!important`。** 原来用它去盖过 Obsidian 默认的按钮、标题、内边距样式，现在改用更具体的选择器；今日卡的圆环尺寸改为通过 CSS 变量传入。我把计算样式和截图（浅色、深色、桌面、窄屏、手机、平板、减少动态效果）和 1.2.3 逐项对比，结果一致，1.2.3 的手机底部留白和不弹动也都保留。
+- **浏览器兼容性提示。** 网格布局里的 `column-gap` 改写成 `gap`；“未解析链接”的下划线由点状改成普通实线（唯一能看出的变化）；重绘卡片时临时用的 `display: contents` 容器改为在代码里设置。
+- **类型安全和规范检查。** 少数 Obsidian 内部入口（全局搜索、文件管理器、设置窗口）改用小型的类型声明访问，不再有 `any`，也没有关闭检查的注释；点击处理里的异步调用都显式处理；弹出窗口使用 `window.setTimeout`；用类型判断代替 `TFile` 强制转换；去掉不必要的正则转义和类型断言；缓存文件按明确的结构解析。
+- **设置项只定义一次，** 同时用于 `getSettingDefinitions()`（Obsidian 1.13 及以上，设置项会出现在设置搜索里）和旧版本使用的 `display()`。“重置”按钮的样式和原来一样。
+- **构建：** 开发依赖 `builtin-modules` 换成了 Node 自带的 `module.builtinModules`。
 
 **1.2.3**
 
