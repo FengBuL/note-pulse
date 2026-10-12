@@ -3,6 +3,7 @@ import { DashboardSettings, DEFAULT_SETTINGS, DashboardSettingTab, SETTINGS_VERS
 import { ContentInfo, PersistentData, VaultStats, computeStats, includedFiles, syncContent, dayKey } from "./stats";
 import { DashboardView, VIEW_TYPE_PULSE, noticeError } from "./view";
 import { WordPropsService } from "./wordprops";
+import { DedupeService, normalizeDedupeSettings } from "./dedupe/service";
 
 interface SavedData {
   settings: DashboardSettings;
@@ -47,6 +48,7 @@ export default class NotePulsePlugin extends Plugin {
   data: PersistentData = { wordLog: {}, wordLogBig: {}, logInitialized: false, logStartDay: "" };
   lastStats: VaultStats | null = null;
   wordProps: WordPropsService = new WordPropsService(this);
+  dedupe: DedupeService = new DedupeService(this);
   private contentCache = new Map<string, ContentInfo>();
   private running = false;
   private rerun = false;
@@ -91,6 +93,8 @@ export default class NotePulsePlugin extends Plugin {
       name: "移除所有字数属性",
       callback: () => void this.wordProps.removeAll(),
     });
+
+    await this.dedupe.load();
 
     this.addSettingTab(new DashboardSettingTab(this.app, this));
 
@@ -142,6 +146,7 @@ export default class NotePulsePlugin extends Plugin {
 
   onunload() {
     this.wordProps.dispose();
+    this.dedupe.dispose();
     // 视图会被 Obsidian 自动卸载；把还没落盘的记录写出去
     void this.persist();
   }
@@ -349,6 +354,14 @@ export default class NotePulsePlugin extends Plugin {
       if (this.settings.heatmapMode === "mtime") this.settings.heatmapMode = "auto";
       if (raw.settings) this.settings.onboarded = true; // 老用户不需要欢迎提示
     }
+    // 1.4.0：重复内容清理并入。旧设置原样保留；第一次加载时，如果装过独立的 Clip Dedupe，就沿用它的设置
+    let migrated = false;
+    if (!raw.settings?.dedupe) {
+      this.settings.dedupe = normalizeDedupeSettings(await this.readLegacyDedupe());
+      migrated = !!raw.settings;
+    } else {
+      this.settings.dedupe = normalizeDedupeSettings(raw.settings.dedupe);
+    }
     this.settings.settingsVersion = SETTINGS_VERSION;
 
     const wordLog = raw.wordLog || {};
@@ -359,7 +372,7 @@ export default class NotePulsePlugin extends Plugin {
       logInitialized: !!raw.logInitialized,
       logStartDay: raw.logStartDay || (raw.logInitialized ? logDays[0] || dayKey(Date.now()) : ""),
       legacyFileWords: raw.fileWords && Object.keys(raw.fileWords).length ? raw.fileWords : undefined,
-      dirty: !!raw.fileWords || (raw.settings?.settingsVersion ?? 1) < 2,
+      dirty: !!raw.fileWords || (raw.settings?.settingsVersion ?? 1) < 2 || migrated,
     };
 
     // 内容缓存：[mtime, size, words, logged, taskLines]
@@ -379,6 +392,28 @@ export default class NotePulsePlugin extends Plugin {
       console.warn("[note-pulse] 读取缓存失败，将重新统计", e);
     }
     if (!cacheOk && this.data.logInitialized && !this.data.legacyFileWords) this.data.seedOnly = true;
+  }
+
+  /** 读取独立版 Clip Dedupe 的设置（若存在），只读，不改动它的文件 */
+  private async readLegacyDedupe(): Promise<unknown> {
+    try {
+      const path = normalizePath(`${this.app.vault.configDir}/plugins/clip-dedupe/data.json`);
+      if (await this.app.vault.adapter.exists(path)) return JSON.parse(await this.app.vault.adapter.read(path)) as unknown;
+    } catch (e) {
+      console.warn("[note-pulse] 读取 Clip Dedupe 旧设置失败，使用默认值", e);
+    }
+    return {};
+  }
+
+  /** 只保存设置，不触发看板重新统计（重复内容清理的设置与看板统计无关） */
+  async saveDedupeSettings() {
+    this.data.dirty = true;
+    await this.persist();
+  }
+
+  /** 用已有统计结果重绘看板（比如显示 / 隐藏入口卡片） */
+  refreshViewsOnly() {
+    if (this.lastStats) for (const v of this.getViews()) v.render(this.lastStats);
   }
 
   schedulePersist() {

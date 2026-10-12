@@ -1,6 +1,7 @@
 import { App, PluginSettingTab, Setting, SettingDefinitionItem } from "obsidian";
 import type NotePulsePlugin from "./main";
 import { sanitizeProperty } from "./wordprops-logic";
+import { ClipDedupeSettings, DEFAULT_SETTINGS as DEDUPE_DEFAULTS, dedupeSections } from "./dedupe/settings";
 
 export type HeatmapMode = "auto" | "mtime" | "delta";
 export type OutlierMode = "exclude" | "off";
@@ -39,6 +40,11 @@ export interface DashboardSettings {
   wordPropSkipOutliers: boolean;
   wordPropIncludeFolders: string;
   wordPropExcludeFolders: string;
+  /* 重复内容清理（1.4.0 起由 Clip Dedupe 并入） */
+  dedupeEnabled: boolean;
+  /** 看板底部的入口卡片 */
+  dedupeCard: boolean;
+  dedupe: ClipDedupeSettings;
 }
 
 export const DEFAULT_SETTINGS: DashboardSettings = {
@@ -67,6 +73,9 @@ export const DEFAULT_SETTINGS: DashboardSettings = {
   wordPropSkipOutliers: true,
   wordPropIncludeFolders: "",
   wordPropExcludeFolders: "",
+  dedupeEnabled: true,
+  dedupeCard: true,
+  dedupe: { ...DEDUPE_DEFAULTS, ignored: [] },
 };
 
 export function splitList(s: string): string[] {
@@ -424,6 +433,37 @@ export class DashboardSettingTab extends PluginSettingTab {
           },
         ],
       },
+      {
+        heading: "重复内容清理",
+        rows: [
+          {
+            name: "启用重复内容清理",
+            desc: "找出在多篇笔记里重复出现的段落（比如反复剪藏的文章、每天自动生成的报告），先预览再处理，随时可撤销。关闭后隐藏侧边栏图标、命令和看板入口。",
+            render: (setting) =>
+              setting.addToggle((tg) =>
+                tg.setValue(st.dedupeEnabled).onChange(async (v) => {
+                  st.dedupeEnabled = v;
+                  await this.plugin.saveDedupeSettings();
+                  this.plugin.dedupe.applyEnabled();
+                  this.plugin.refreshViewsOnly();
+                })
+              ),
+          },
+          {
+            name: "在看板上显示入口",
+            desc: "看板底部的“重复内容清理”小卡片。",
+            render: (setting) =>
+              setting.addToggle((tg) =>
+                tg.setValue(st.dedupeCard).onChange(async (v) => {
+                  st.dedupeCard = v;
+                  await this.plugin.saveDedupeSettings();
+                  this.plugin.refreshViewsOnly();
+                })
+              ),
+          },
+        ],
+      },
+      ...dedupeSections(this.plugin.dedupe),
       {
         heading: "数据",
         rows: [

@@ -30,6 +30,7 @@ The UI is in Chinese. It follows your light or dark theme, has no external depen
 | Tasks | Done, open, overdue and due within 7 days; due list jumps straight to the task line; open tasks by folder or by note. Understands `📅 YYYY-MM-DD`, `⏳` and `[due:: ]`; `- [-]` counts as cancelled |
 | Tags and folders | Most used tags (click to search), note and word counts per top-level folder (click to reveal) |
 | Links | Linked notes, orphan notes, unresolved links; lists of most linked notes, orphans and common unresolved links |
+| Duplicate cleanup (new in 1.4.0) | A separate tab that finds passages repeated across notes (re-saved clippings, daily captures, AI reports) and helps you keep one copy. A small card at the bottom of the dashboard opens it |
 
 Every note in the dashboard is clickable (mouse or keyboard). The dashboard refreshes automatically (debounced) when your vault changes, and only computes while it is visible. Word counts are cached on disk, so a restart only re-reads notes that changed. Tags, links and tasks come from Obsidian's metadata cache; word counts are cached by modification time, so later refreshes only re-read changed files.
 
@@ -114,6 +115,26 @@ views:
 
 Then open the base, open the **Sort** menu, choose **Add sort → words** and set it to descending (Obsidian saves the sort into the `.base` file for you). Run **批量更新所有笔记字数属性** once first so existing notes have the property. If you enable `reading_time`, use it directly as a column instead of the `read_min` formula. Filters and formulas reference the property as `words` (shorthand for `note.words`). See the [Bases syntax](https://help.obsidian.md/bases/syntax) page for more.
 
+## Duplicate cleanup
+
+New in 1.4.0. This used to be a separate plugin, Clip Dedupe. It is now built into Note Pulse because both are tools for keeping a vault tidy. If you installed Clip Dedupe, you can disable and remove it: Note Pulse picks up its settings the first time it loads (it only reads Clip Dedupe's files and never changes them). Undo history from the old plugin stays with the old plugin.
+
+Open it from the **layers** icon in the ribbon, the command **打开重复内容清理**, or the card at the bottom of the dashboard.
+
+1. **Scan.** Choose the whole vault or one folder. Scanning only reads notes and never changes them.
+2. **See what repeats.** Every result says in plain words how many notes a passage appears in, which copy is the earliest, and how many characters a cleanup would save.
+3. **Choose how to handle it.** Before anything changes you get a preview of every note. The default only marks later copies with a `duplicate_of` property and leaves the text alone. You can also replace later copies with a link to the original, or delete them. A backup is written first and **撤销上一次重复内容清理** undoes the last cleanup.
+
+Advanced options (what counts as a passage, which copy to keep, link style, property name, backups to keep) are collapsed by default under 设置 → 重复内容清理 · 高级. The whole feature can be switched off in settings, which hides the ribbon icon, the commands and the dashboard card.
+
+![Dashboard with the duplicate cleanup card](docs/zh-dashboard-dedupe-entry-light.png)
+
+![Duplicate cleanup, first screen](docs/zh-dedupe-welcome-light.png)
+
+![Duplicate cleanup results](docs/zh-dedupe-results-light.png)
+
+![Preview before cleaning](docs/zh-dedupe-preview-light.png)
+
 ## Keeping the numbers honest
 
 - **Oversized notes and clipping folders.** A single auto-collected file with 200,000 characters can outweigh a year of writing. Note Pulse excludes notes over the threshold from writing stats by default, lets you mark whole folders as "collection" folders, and suggests it in a banner when it finds a folder where most notes are oversized.
@@ -159,6 +180,13 @@ Settings and the daily word log live in `data.json`; the per-note word-count cac
 To release, run `npm version <patch|minor|major>` (updates `manifest.json` and `versions.json`), run `npm run build`, then create a GitHub release whose tag matches the version (no `v` prefix) and attach `main.js`, `manifest.json` and `styles.css`.
 
 ## Changelog
+
+### 1.4.0
+
+- Clip Dedupe is merged into Note Pulse as **Duplicate cleanup** (重复内容清理): its own tab, a ribbon icon, four commands, and a subtle entry card at the bottom of the dashboard.
+- Keeps the beginner flow from Clip Dedupe 1.1.0: a welcome screen with three steps, plain wording, preview before every change, one-click undo, help, and advanced options collapsed.
+- New settings group 重复内容清理 with an on/off switch and a switch for the dashboard card. Existing Note Pulse settings are untouched; settings from a standalone Clip Dedupe install are imported once.
+- Its cache and backups live in the Note Pulse plugin folder (`dedupe-cache.json`, `dedupe-backups/`).
 
 ### 1.3.0
 
@@ -256,6 +284,7 @@ Note Pulse（笔记脉搏）是一个 Obsidian 插件，在一个页面里集中
 | 任务 | 已完成、未完成、已逾期、7 天内到期；到期列表点击直接跳到任务所在行；可按文件夹或笔记查看未完成任务。识别 `📅 YYYY-MM-DD`、`⏳`、`[due:: ]`，`- [-]` 视为已取消 |
 | 标签 / 文件夹 | 标签使用排行（点击搜索）、各顶层文件夹的笔记数和字数（点击在文件列表中定位） |
 | 链接 | 已连接笔记、孤立笔记、未解析链接；最常被链接、孤立笔记、常见未解析链接三个列表 |
+| 重复内容清理（1.4.0 新增） | 独立标签页：找出在多篇笔记里重复出现的段落（反复剪藏的文章、每日采集、AI 报告），帮你只留一份。看板底部有一张小卡片可以直接打开 |
 
 看板中的笔记都可以点击（也支持键盘）打开。仓库内容变化后会自动刷新（带防抖，只在看板可见时计算）。字数缓存会保存在磁盘上，重启后只重新读取改动过的笔记。
 
@@ -335,6 +364,18 @@ views:
 
 然后打开这个 base，点「排序」菜单，选「添加排序 → words」并设为降序（Obsidian 会自动把排序存进 `.base` 文件）。先运行一次「批量更新所有笔记字数属性」，已有笔记才有这个属性。如果开启了 `reading_time`，可以直接把它当作一列，不需要 `read_min` 公式。过滤和公式里直接写 `words`（是 `note.words` 的简写）。更多语法见 [Bases 语法](https://help.obsidian.md/bases/syntax)。
 
+### 重复内容清理
+
+1.4.0 新增。它原本是一个单独的插件 Clip Dedupe，因为和看板一样都是管理笔记库的工具，现在直接并入 Note Pulse。如果你装过 Clip Dedupe，可以关闭并卸载它：Note Pulse 第一次加载时会沿用它的设置（只读取，不改动它的文件）。旧插件里的撤销记录仍留在旧插件中。
+
+打开方式：侧边栏的“层叠”图标、命令“打开重复内容清理”，或看板底部的小卡片。
+
+1. **扫描**：选整个笔记库或某个文件夹。扫描只读，不会改动任何笔记。
+2. **查看哪些内容重复了**：每条结果都用大白话写清楚这段话出现在几篇笔记里、哪一份最早、清理后能减少多少字。
+3. **选择怎么处理**：改动之前会先给你看每篇笔记的前后对比。默认只在较新的笔记属性里标记 `duplicate_of`，正文一个字都不改；也可以换成指向原文的链接，或直接删除。处理前会先备份，命令“撤销上一次重复内容清理”可以一键撤销。
+
+高级选项（什么算一段、保留哪一份、链接样式、属性名、保留几份备份）默认收起在 设置 → 重复内容清理 · 高级。整个功能可以在设置里关闭，关闭后侧边栏图标、命令和看板卡片都会隐藏。
+
 ### 让数字更可信
 
 - **超大笔记与采集文件夹。** 一个 20 万字的自动采集文件，可能比你一年写的字还多。Note Pulse 默认把超过阈值的笔记排除出写作统计，支持把整个文件夹标记为“采集文件夹”；发现某个文件夹里大部分笔记都超大时，会在看板顶部提示，并给出一键按钮。
@@ -354,6 +395,13 @@ views:
 - 插件只在本地读取笔记，不联网，不收集任何数据。
 
 ### 更新日志
+
+**1.4.0**
+
+- Clip Dedupe 并入 Note Pulse，改名为“重复内容清理”：独立标签页、侧边栏图标、4 个命令，看板底部有一张低调的入口卡片。
+- 保留 Clip Dedupe 1.1.0 的新手引导：欢迎页和三步说明、大白话、每次改动前预览、一键撤销、使用说明，高级选项默认收起。
+- 设置里新增“重复内容清理”分组，可以整体关闭，也可以只隐藏看板卡片。原有设置不变；装过独立版 Clip Dedupe 的话，会一次性沿用它的设置。
+- 缓存和备份放在 Note Pulse 的插件文件夹里（`dedupe-cache.json`、`dedupe-backups/`）。
 
 **1.3.0**
 

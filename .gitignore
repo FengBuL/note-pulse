@@ -14,3 +14,6 @@ data.json
 
 # tests
 .test-out/
+
+.test-build/
+.preview-build/

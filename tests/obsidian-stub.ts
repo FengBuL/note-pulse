@@ -102,3 +102,4 @@ export function parseYaml(s: string): unknown {
 export function stringifyYaml(o: Record<string, unknown>): string {
   return Object.entries(o).map(([k, v]) => `${k}: ${v}`).join("\n");
 }
+export const moment = { locale: () => "zh-cn" };

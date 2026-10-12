@@ -1,5 +1,6 @@
 import { ItemView, Notice, Platform, TFile, WorkspaceLeaf, setIcon } from "obsidian";
 import type NotePulsePlugin from "./main";
+import { groupKey as groupKeyOf } from "./dedupe/core/summary";
 import { GroupStat, Hint, TaskInfo, VaultStats, addDays, dayKey, pad2, startOfDay } from "./stats";
 import {
   BarItem,
@@ -310,6 +311,7 @@ export class DashboardView extends ItemView {
     this.define("tasks", grid, (h) => this.renderTasks(h, stats));
     this.define("tags", grid, (h) => this.renderTags(h, stats));
     this.define("links", grid, (h) => this.renderLinks(h, stats));
+    if (this.plugin.settings.dedupeEnabled && this.plugin.settings.dedupeCard) this.define("dedupe", grid, (h) => this.renderDedupe(h));
   }
 
   /** 登记并渲染一个区块；每个渲染函数必须恰好生成一个根元素 */
@@ -1373,6 +1375,31 @@ export class DashboardView extends ItemView {
         this.clickable(row, `未解析的链接 ${name}，${n} 处，点击搜索`, () => this.plugin.openSearch(`"[[${name}]]"`));
       }
     }
+  }
+
+  /* ---------- 8. 重复内容清理入口（轻量，详细功能在独立标签页） ---------- */
+
+  private renderDedupe(grid: HTMLElement) {
+    const dd = this.plugin.dedupe;
+    const el = grid.createDiv({ cls: "vp-card vp-dedupe-card" });
+    setIcon(el.createSpan({ cls: "vp-dedupe-icon", attr: { "aria-hidden": "true" } }), "layers");
+    const main = el.createDiv({ cls: "vp-dedupe-main" });
+    const title = main.createDiv({ cls: "vp-dedupe-title" });
+    title.createSpan({ text: "重复内容清理" });
+    this.help(
+      title,
+      "同一段文字出现在好几篇笔记里（反复剪藏的文章、每天自动生成的报告、复制粘贴的模板），会让笔记库越来越乱。\n扫描只读，不会改动任何笔记；处理前会先给你看改动前后的对比，处理后随时可以撤销。"
+    );
+    let line = "找出在多篇笔记里重复出现的段落，先预览、再处理，可撤销。";
+    if (dd.scanning) line = "正在扫描…";
+    else if (dd.analysis) {
+      const ignored = dd.ignoredSet();
+      const n = dd.analysis.groups.filter((g) => !ignored.has(groupKeyOf(g))).length;
+      line = n > 0 ? `上次扫描发现 ${fmtFull(n)} 段内容在多篇笔记里重复出现。` : "上次扫描没有发现重复内容。";
+    }
+    main.createDiv({ cls: "vp-dedupe-text", text: line });
+    const b = el.createEl("button", { cls: "vp-btn is-compact is-primary vp-dedupe-btn", text: dd.analysis ? "查看" : "开始" });
+    b.addEventListener("click", () => void dd.openReport(false));
   }
 }
 

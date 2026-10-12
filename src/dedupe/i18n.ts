@@ -1,0 +1,262 @@
+import { moment } from "obsidian";
+
+/** Interface strings as [中文, English]. Obsidian's own language decides which one is shown. */
+const S = {
+  // names
+  pluginName: ["重复内容清理", "Duplicate cleanup"],
+  tagline: ["找出在多篇笔记里重复出现的同一段内容，帮你清理，随时可撤销", "Finds the same passage repeated across several notes and helps you tidy it up. Undo any time."],
+  ribbonScan: ["查找重复内容", "Find duplicate content"],
+  cmdOpen: ["查找重复内容", "Find duplicate content"],
+  cmdScan: ["立即扫描重复内容", "Scan for duplicate content now"],
+  cmdUndo: ["撤销上一次处理", "Undo the last cleanup"],
+  cmdHelp: ["这是做什么的？", "What does this do?"],
+
+  // header
+  whatIsThis: ["这是做什么的？", "What does this do?"],
+  rescan: ["重新扫描", "Scan again"],
+  cancel: ["取消", "Cancel"],
+  close: ["关闭", "Close"],
+  settings: ["设置", "Settings"],
+  undoLast: ["撤销上一次处理", "Undo last cleanup"],
+  help: ["说明", "Help"],
+  stale: ["笔记有改动，建议重新扫描", "Notes changed, scan again to refresh"],
+  scannedAt: ["扫描于 {0}", "Scanned {0}"],
+  scanning: ["正在扫描…", "Scanning…"],
+  scanningProgress: ["正在读取笔记 {0}/{1}", "Reading notes {0}/{1}"],
+  grouping: ["正在比对内容…", "Comparing content…"],
+  scanCancelled: ["已取消扫描", "Scan cancelled"],
+  scanFailed: ["扫描失败，详情见开发者控制台", "Scan failed, see the developer console"],
+  scanningHint: ["只是读取，不会改动任何笔记。", "Only reading. No note is changed."],
+
+  // welcome
+  welcomeTitle: ["你的笔记里，有没有同一段话被存了好几遍？", "Is the same passage saved in several of your notes?"],
+  welcomeText: [
+    "剪藏、每日采集、AI 报告很容易把同一段内容存进好几篇笔记。这个功能帮你把它们找出来，由你决定怎么处理。",
+    "Clippings, daily captures and AI reports often save the same passage into several notes. This feature finds them and lets you decide what to do.",
+  ],
+  step1: ["扫描", "Scan"],
+  step1Text: ["读一遍你的笔记，找出重复的段落", "Read your notes and find repeated passages"],
+  step2: ["查看哪些内容重复了", "See what is repeated"],
+  step2Text: ["每段都写清出现在哪几篇笔记里", "Each passage shows which notes it is in"],
+  step3: ["选择怎么处理", "Choose what to do"],
+  step3Text: ["先预览，再确认，随时可撤销", "Preview first, then confirm. Undo any time"],
+  scopeLabel: ["扫描范围", "What to scan"],
+  scopeAll: ["整个笔记库", "The whole vault"],
+  scopeFolder: ["选择文件夹", "Choose a folder"],
+  scopePick: ["选择一个文件夹…", "Pick a folder…"],
+  scopeCustom: ["设置里的文件夹：{0}", "Folders from settings: {0}"],
+  startScan: ["开始扫描", "Start scan"],
+  readOnly: ["扫描只读，不会改动任何笔记", "Scanning is read-only and never changes a note"],
+
+  // none
+  noneTitle: ["没有发现重复内容", "No duplicate content found"],
+  noneText: ["在 {0} 篇笔记里没有找到重复出现的段落，你的笔记很干净。", "No passage appears in more than one of your {0} notes. Nice and tidy."],
+  noneIgnored: ["另有 {0} 段被你忽略了。", "{0} passages are ignored."],
+  noneTip: ["如果你觉得应该有重复，可以在设置里调低“忽略太短的段落”的字数。", "If you expected duplicates, lower the minimum length in settings."],
+  openSettings: ["打开设置", "Open settings"],
+
+  // results
+  resultLead: ["在 {0} 篇笔记中发现 {1} 段重复内容", "Found {1} repeated passages across {0} notes"],
+  resultSave: ["清理后可减少约 {0} 字", "Cleaning up would save about {0} words"],
+  resultHow: [
+    "推荐方式：每段只保留最早的那份，其余标记为重复，不删除任何文字。确认前会先给你看预览。",
+    "Recommended: keep only the earliest copy of each passage and mark the others as duplicates. No text is deleted. You see a preview before anything happens.",
+  ],
+  fixAll: ["一键处理全部（推荐方式）", "Handle all (recommended)"],
+  listTitle: ["重复的内容", "Repeated passages"],
+  listSort: ["按可减少的字数排序", "Sorted by words saved"],
+  itemTitle: ["这段内容在 {0} 篇笔记里出现", "This passage appears in {0} notes"],
+  itemSave: ["可减少约 {0} 字", "Saves about {0} words"],
+  itemPostWarn: ["这几处指向同一条 X 帖子，但文字不完全一样，处理前请看一眼。", "These all point to the same X post, but the text is not identical. Have a look first."],
+  keepEarliest: ["只保留最早那份", "Keep only the earliest"],
+  keepChosen: ["只保留选中的那份", "Keep only the chosen copy"],
+  ignore: ["忽略", "Ignore"],
+  ignored: ["已忽略，不再显示", "Ignored, it will not be shown again"],
+  tagKeep: ["保留", "Keep"],
+  tagDup: ["重复", "Duplicate"],
+  tagEarliest: ["最早", "Earliest"],
+  inNotes: ["出现在：", "Found in:"],
+  sameNoteMore: ["…以及另外 {0} 篇", "…and {0} more"],
+  showAllNotes: ["显示全部 {0} 篇", "Show all {0} notes"],
+  expand: ["展开全文", "Show all"],
+  collapse: ["收起", "Show less"],
+  loadingText: ["读取中…", "Loading…"],
+  textUnavailable: ["（无法读取内容）", "(content unavailable)"],
+  openNote: ["打开 {0}", "Open {0}"],
+  showMore: ["再显示 {0} 段", "Show {0} more"],
+  advanced: ["高级选项", "Advanced options"],
+  advKeepTitle: ["改为保留其他那份", "Keep a different copy"],
+  advKeepText: ["默认保留最早的一份。点下面的笔记名，可以改成保留那一份。", "The earliest copy is kept by default. Pick another note to keep that one instead."],
+  advOtherWays: ["其他处理方式（换成链接、删除）", "Other ways (link, delete)"],
+  advOtherWaysText: ["打开预览后，可以在“处理方式”里改选。", "Open the preview and pick a different way there."],
+  advChoose: ["选择处理方式…", "Choose how…"],
+  globalAdv: ["高级选项", "Advanced options"],
+  advSort: ["排序方式", "Sort by"],
+  sortReclaim: ["可减少的字数", "Words saved"],
+  sortCount: ["出现的笔记数", "Number of notes"],
+  sortNewest: ["最近出现", "Most recent"],
+  advPairs: ["整篇笔记大部分重复的情况", "Notes that are mostly repeats of another"],
+  advPairsText: ["有些笔记把另一篇的内容几乎整段搬了过来，例如“续查”笔记带上了上一次的全部内容。", "Some notes carry over almost all of another note, for example a follow-up that repeats the previous run."],
+  pairTitle: ["“{0}” 有 {1}% 的内容和更早的笔记一样", "{1}% of \u201c{0}\u201d is the same as an older note"],
+  pairWith: ["更早的笔记：", "Older note:"],
+  pairOpenBoth: ["并排打开对比", "Open side by side"],
+  pairClean: ["清理较新的这篇", "Clean the newer note"],
+  pairsNone: ["没有这样的笔记。", "No such notes."],
+  advIgnored: ["已忽略 {0} 段内容", "{0} passages ignored"],
+  advRestore: ["全部恢复显示", "Show them again"],
+
+  // help modal
+  helpTitle: ["这是做什么的？", "What does this do?"],
+  helpIntro: [
+    "同一段话经常会被存进好几篇笔记，比如每天的剪藏、自动生成的日报。时间久了，笔记库里堆满了一模一样的内容。这个功能把它们找出来，帮你只留一份。",
+    "The same passage often ends up in several notes, for example daily clippings or generated reports. Over time your vault fills up with identical text. This feature finds those passages and helps you keep just one copy.",
+  ],
+  helpBefore: ["处理前", "Before"],
+  helpAfter: ["处理后（推荐方式）", "After (recommended)"],
+  helpNoteA: ["10月5日 剪藏", "Oct 5 clipping"],
+  helpNoteB: ["10月6日 剪藏", "Oct 6 clipping"],
+  helpNoteC: ["10月8日 剪藏", "Oct 8 clipping"],
+  helpSample: ["提示词缓存让长上下文的费用降低了一半以上……", "Prompt caching cut our long-context bill by more than half…"],
+  helpKept: ["原样保留", "Kept as is"],
+  helpMarked: ["属性里多了一行：重复于 [[10月5日 剪藏]]", "Gets one property: duplicate of [[Oct 5 clipping]]"],
+  helpWaysTitle: ["三种处理方式", "Three ways to handle it"],
+  helpSafeTitle: ["为什么放心", "Why it is safe"],
+  helpSafe1: ["扫描只读，不会改动任何笔记。", "Scanning only reads, it never changes a note."],
+  helpSafe2: ["动手之前一定先给你看预览，你点了确认才会改。", "You always see a preview first. Nothing changes until you confirm."],
+  helpSafe3: ["每次处理前都会自动备份，点“撤销上一次处理”就能恢复。", "A backup is made every time. \u201cUndo last cleanup\u201d restores it."],
+  gotIt: ["知道了", "Got it"],
+
+  // modes
+  modeMark: ["标记为重复（不删除，最安全）", "Mark as duplicate (deletes nothing, safest)"],
+  modeMarkDesc: ["正文一个字都不改，只在较新的笔记属性里记下“重复于：最早那篇”，方便你以后自己查看。", "The text is not touched. The newer notes just get a property saying which note they duplicate."],
+  modeLink: ["换成指向原文的链接", "Replace with a link to the original"],
+  modeLinkDesc: ["较新笔记里的这段话换成一个链接，点开就能看到原文；原文后面会加一个小标记让链接找得到它。", "In the newer notes the passage becomes a link to the original. The original gets a small marker so the link can find it."],
+  modeRemove: ["从较新的笔记里删除这段", "Delete it from the newer notes"],
+  modeRemoveDesc: ["直接删掉较新笔记里的重复段落，最早那份原样保留。", "The repeated passage is removed from the newer notes. The earliest copy stays as it is."],
+  recommended: ["推荐", "Recommended"],
+  changesText: ["会改动正文", "Changes text"],
+
+  // preview modal
+  previewTitle: ["处理前预览", "Preview before cleaning"],
+  previewLead: ["将处理 {1} 段重复内容，改动 {0} 篇笔记", "{1} repeated passages will be handled, {0} notes change"],
+  previewKeep: ["每段都保留一份原文，你确认之前什么都不会改。", "One original of each passage is always kept. Nothing changes until you confirm."],
+  modeLabel: ["处理方式", "How to handle it"],
+  changesTitle: ["每篇笔记会怎样变化", "What changes in each note"],
+  keptNotesNote: ["另有 {0} 篇原文笔记会在段落末尾加一个小标记（链接要用）。", "{0} original notes get a small marker at the end of the passage (needed for the link)."],
+  skippedNote: ["有 {0} 处无法用这种方式处理，会跳过。", "{0} places cannot be handled this way and will be skipped."],
+  nothingToDo: ["这种方式下没有可以处理的内容。", "Nothing to do in this way."],
+  changeCount: ["{0} 处改动", "{0} changes"],
+  beforeLabel: ["之前", "Before"],
+  afterLabel: ["之后", "After"],
+  afterRemoved: ["（这段被删除）", "(this passage is removed)"],
+  afterProp: ["笔记属性里多一行：", "One new property:"],
+  afterMarker: ["段落末尾加上标记", "Marker added at the end"],
+  keptOriginal: ["原文，保留", "Original, kept"],
+  propLabel: ["重复于", "duplicate of"],
+  diffMoreEdits: ["…还有 {0} 处改动", "…{0} more changes"],
+  diffMoreFiles: ["…还有 {0} 篇笔记", "…{0} more notes"],
+  confirmCheck: ["我知道这会改动 {0} 篇笔记的正文（会先自动备份，可以撤销）", "I understand this changes the text of {0} notes (backed up first, can be undone)"],
+  confirm: ["确认处理", "Confirm"],
+  applying: ["正在处理 {0}/{1}", "Working {0}/{1}"],
+  loadingPlan: ["正在读取笔记…", "Reading notes…"],
+  doneToast: ["已处理 {0} 篇笔记", "Updated {0} notes"],
+  doneSkipped: ["，跳过 {0} 处", ", skipped {0}"],
+  doneNone: ["没有笔记被改动", "No note was changed"],
+  undo: ["撤销", "Undo"],
+  resultTitle: ["部分内容没有处理", "Some places were skipped"],
+  resultSkipped: ["跳过了 {0} 处：", "Skipped {0} places:"],
+
+  // skip reasons
+  skip_recent: ["刚被修改过，为避免和同步冲突先跳过", "modified a moment ago, skipped to avoid clashing with sync"],
+  skip_stale: ["扫描之后内容变了", "changed since the scan"],
+  skip_missing: ["笔记已经不存在", "note no longer exists"],
+  skip_unsupported: ["表格行和代码块不能换成链接", "table rows and code blocks cannot become links"],
+  skip_dependency: ["原文那段没能加上标记", "the original could not get its marker"],
+  skip_edited: ["处理之后你又编辑过它，没有恢复", "edited since the cleanup, not restored"],
+  skip_cancelled: ["已取消", "cancelled"],
+  skip_header: ["表格里还有其他行，表头保留", "table still has other rows, header kept"],
+
+  // undo
+  undoTitle: ["撤销上一次处理", "Undo the last cleanup"],
+  undoBody: ["会把 {0} 篇笔记恢复到 {1} 处理之前的样子。处理之后你又编辑过的笔记会跳过。", "This restores {0} notes to how they were before the cleanup at {1}. Notes you edited since are skipped."],
+  undoConfirm: ["撤销", "Undo"],
+  undoNone: ["没有可以撤销的处理", "There is no cleanup to undo"],
+  undoDone: ["已恢复 {0} 篇笔记", "Restored {0} notes"],
+  undoDoneSkipped: ["已恢复 {0} 篇笔记，跳过 {1} 篇（之后被编辑过或已不存在）", "Restored {0} notes, skipped {1} (edited since, or gone)"],
+  undoProgress: ["正在撤销…", "Undoing…"],
+
+  // settings
+  setBasic: ["重复内容清理", "Duplicate cleanup"],
+  setAdvanced: ["重复内容清理 · 高级", "Duplicate cleanup · advanced"],
+  setIncludeName: ["只扫描这些文件夹", "Only scan these folders"],
+  setIncludeDesc: ["留空就是扫描整个笔记库。想只查某几个文件夹，就把文件夹名写在这里，每行一个。", "Leave empty to scan the whole vault. To check only some folders, write their names here, one per line."],
+  setExcludeName: ["不要扫描这些文件夹", "Never scan these folders"],
+  setExcludeDesc: ["这些文件夹里的笔记不会被检查，比如模板文件夹。每行一个。", "Notes in these folders are never checked, for example your templates folder. One per line."],
+  setMinName: ["忽略太短的段落（少于 {0} 个字符，约 {1} 个汉字）", "Ignore short passages (under {0} characters)"],
+  setMinDesc: ["太短的句子（比如“待跟进”）重复很正常，不值得处理。数字越大，找到的重复越少。", "Short lines repeat naturally and are not worth cleaning. A higher number finds fewer duplicates."],
+  setFrontmatterName: ["不比较笔记属性", "Skip note properties"],
+  setFrontmatterDesc: ["笔记顶部的属性（frontmatter）不参与比较。", "Properties at the top of a note are not compared."],
+  setCodeName: ["不比较代码块", "Skip code blocks"],
+  setCodeDesc: ["用 ``` 包起来的代码不参与比较。", "Code fenced with ``` is not compared."],
+  setHeadingsName: ["不比较标题", "Skip headings"],
+  setHeadingsDesc: ["只有一行标题的段落不参与比较。", "A passage that is only a heading line is not compared."],
+  setLinksName: ["不比较只有链接的段落", "Skip link-only passages"],
+  setLinksDesc: ["只有链接或网址、没有其他文字的段落不参与比较。", "Passages with only links or URLs and no other text are not compared."],
+  setStatusName: ["同一条 X 帖子算作重复", "Treat the same X post as a duplicate"],
+  setStatusDesc: ["链接指向同一条 X（推特）帖子的段落，即使文字略有不同，也当作重复。", "Passages linking the same X (Twitter) post count as duplicates even if the wording differs a little."],
+  setKeepName: ["默认保留哪一份", "Copy to keep by default"],
+  setKeepDesc: ["“最早”看文件名里的日期，没有日期就看创建时间。", "\u201cEarliest\u201d uses the date in the file name, otherwise the creation time."],
+  keepAuto: ["最早的（推荐）", "The earliest (recommended)"],
+  keepCreated: ["最早创建的", "Created first"],
+  keepModified: ["最早修改的", "Modified first"],
+  keepName: ["文件名排在最前的", "First by file name"],
+  setOverlapName: ["“大部分重复”的标准（%）", "\u201cMostly repeated\u201d threshold (%)"],
+  setOverlapDesc: ["一篇笔记至少有这么多内容和另一篇相同，才列进高级选项里的“整篇笔记大部分重复”。", "A note must share at least this much with another to be listed under \u201cnotes that are mostly repeats\u201d."],
+  setModeName: ["默认处理方式", "Default way to handle"],
+  setModeDesc: ["预览里默认选中的方式。换成链接和删除都要在预览里再确认一次。", "The way preselected in the preview. Linking and deleting always ask once more."],
+  setLinkStyleName: ["换成链接时", "When replacing with a link"],
+  setLinkStyleDesc: ["“嵌入”会在原位置直接显示原文内容；“链接”只显示一个可以点击的链接。", "An embed shows the original text in place; a link is just clickable."],
+  styleEmbed: ["嵌入（显示原文）", "Embed (shows the text)"],
+  styleLink: ["普通链接", "Plain link"],
+  setPropName: ["标记用的属性名", "Property name for marking"],
+  setPropDesc: ["“标记为重复”时写进笔记属性的名字。", "The property written when marking a duplicate."],
+  setBackupsName: ["保留几次备份", "Backups to keep"],
+  setBackupsDesc: ["每次处理前都会备份改动的笔记，超过这个次数会删掉最旧的。", "Every cleanup backs up the notes it changes; the oldest are removed beyond this number."],
+  setNewTabName: ["在新标签页打开笔记", "Open notes in a new tab"],
+  setNewTabDesc: ["点击结果里的笔记名时，在新标签页打开，结果页保持不动。", "Clicking a note in the results opens it in a new tab so the results stay open."],
+  setClearCacheName: ["清除扫描缓存", "Clear scan cache"],
+  setClearCacheDesc: ["为了让下次扫描更快，会记住已经读过的笔记。清除后下次会重新读一遍。", "To make the next scan fast Note Pulse remembers notes it has read. After clearing it reads everything again."],
+  setIgnoredName: ["恢复被忽略的内容", "Restore ignored passages"],
+  setIgnoredDesc: ["你点过“忽略”的内容共 {0} 段。恢复后下次扫描会重新显示。", "{0} passages are ignored. After restoring they show up again."],
+  restore: ["恢复", "Restore"],
+  clear: ["清除", "Clear"],
+  cacheCleared: ["已清除缓存", "Cache cleared"],
+} as const satisfies Record<string, readonly [string, string]>;
+
+export type StrKey = keyof typeof S;
+
+let lang: 0 | 1 = 1;
+
+/** Chinese when Obsidian runs in a Chinese language, English otherwise. */
+export function initLanguage(): void {
+  // moment follows Obsidian's own language setting and exists in every supported version
+  let l = "en";
+  try {
+    l = moment.locale() || document.documentElement.lang || "en";
+  } catch {
+    l = "en";
+  }
+  lang = l.toLowerCase().startsWith("zh") ? 0 : 1;
+}
+
+export function isChinese(): boolean {
+  return lang === 0;
+}
+
+export function t(key: StrKey, ...args: (string | number)[]): string {
+  let s: string = S[key][lang];
+  args.forEach((a, i) => {
+    s = s.split(`{${i}}`).join(String(a));
+  });
+  return s;
+}
