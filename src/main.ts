@@ -2,6 +2,7 @@ import { Notice, Plugin, TAbstractFile, TFile, TFolder, WorkspaceLeaf, debounce,
 import { DashboardSettings, DEFAULT_SETTINGS, DashboardSettingTab, SETTINGS_VERSION, normalizeFolder, splitList } from "./settings";
 import { ContentInfo, PersistentData, VaultStats, computeStats, includedFiles, syncContent, dayKey } from "./stats";
 import { DashboardView, VIEW_TYPE_PULSE, noticeError } from "./view";
+import { WordPropsService } from "./wordprops";
 
 interface SavedData {
   settings: DashboardSettings;
@@ -45,6 +46,7 @@ export default class NotePulsePlugin extends Plugin {
   settings: DashboardSettings = { ...DEFAULT_SETTINGS };
   data: PersistentData = { wordLog: {}, wordLogBig: {}, logInitialized: false, logStartDay: "" };
   lastStats: VaultStats | null = null;
+  wordProps: WordPropsService = new WordPropsService(this);
   private contentCache = new Map<string, ContentInfo>();
   private running = false;
   private rerun = false;
@@ -74,6 +76,22 @@ export default class NotePulsePlugin extends Plugin {
       callback: () => this.requestRefresh(true),
     });
 
+    this.addCommand({
+      id: "update-word-property",
+      name: "更新当前笔记字数属性",
+      callback: () => void this.wordProps.updateCurrent(),
+    });
+    this.addCommand({
+      id: "update-all-word-properties",
+      name: "批量更新所有笔记字数属性",
+      callback: () => void this.wordProps.batchUpdate(),
+    });
+    this.addCommand({
+      id: "remove-word-properties",
+      name: "移除所有字数属性",
+      callback: () => void this.wordProps.removeAll(),
+    });
+
     this.addSettingTab(new DashboardSettingTab(this.app, this));
 
     this.buildDebouncer();
@@ -81,6 +99,7 @@ export default class NotePulsePlugin extends Plugin {
     // 布局就绪后再监听，避免启动时大量 create 事件
     this.app.workspace.onLayoutReady(() => {
       const trigger = () => this.onVaultChanged();
+      this.wordProps.register();
       this.registerEvent(this.app.metadataCache.on("changed", trigger));
       this.registerEvent(this.app.vault.on("create", (f: TAbstractFile) => f instanceof TFile && trigger()));
       this.registerEvent(
@@ -122,6 +141,7 @@ export default class NotePulsePlugin extends Plugin {
   }
 
   onunload() {
+    this.wordProps.dispose();
     // 视图会被 Obsidian 自动卸载；把还没落盘的记录写出去
     void this.persist();
   }

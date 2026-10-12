@@ -35,7 +35,7 @@ Every note in the dashboard is clickable (mouse or keyboard). The dashboard refr
 
 ## Installation
 
-### From Community plugins (after approval)
+### From Community plugins
 
 1. Open **Settings → Community plugins → Browse**.
 2. Search for **Note Pulse**, then install and enable it.
@@ -63,6 +63,56 @@ Click the dashboard icon in the left ribbon, or run the command **打开看板**
 | Created date fields | Frontmatter fields such as `created: 2025-01-01` used as the creation date, useful when sync resets file times |
 | Auto refresh and delay | Refresh after vault changes, and the debounce delay |
 | Open notes in new tab | Keep the dashboard open when you click a note |
+| Word count properties | Section **字数属性**: enable (off by default), property names, optional reading time and speeds, minimum change, idle time, skip oversized notes, include / exclude folders, batch update and remove buttons. See [Word count properties](#word-count-properties-for-bases) |
+
+## Word count properties (for Bases)
+
+Note Pulse can write each note's word count into its properties (frontmatter) as a **number**, so [Bases](https://help.obsidian.md/bases) can sort, filter and run formulas on it. This **edits your notes, so it is off by default**. Turn it on under **Settings → Note Pulse → 字数属性** (Word count properties).
+
+```yaml
+---
+words: 1832
+reading_time: 5
+---
+```
+
+- **What is written:** `words` (the same CJK-aware count the dashboard uses: frontmatter, code, comments, URLs, embeds and Markdown syntax are not counted, each CJK character is one word, other languages count by words). Optionally `reading_time` in minutes, rounded up, from two speeds you can set (default 400 CJK characters/min and 220 words/min). Property names are configurable.
+- **When:** only the note you are editing, only after you stop typing for a few seconds (default 5, minimum 3). Notes that were modified in the last 2 seconds (for example just changed by iCloud) are never touched; the plugin's own writes never trigger another write.
+- **Never writes if nothing changed.** A note is rewritten only when the stored number is missing, not a number, or differs from the new count by at least the threshold (default 1; raise it to cut down on file changes and sync traffic). Empty notes without the property are left alone.
+- **Scope:** `.md` files only. Skips the dashboard's excluded folders, an extra "do not write" folder list, and (optional, on by default) notes above the oversized-note threshold. You can also restrict it to a list of folders.
+- **Commands:** **更新当前笔记字数属性** (update the current note), **批量更新所有笔记字数属性** (update all notes: shows a dry-run count and asks to confirm, then writes in batches with a progress notice) and **移除所有字数属性** (remove the properties from every note, with a confirmation). The commands also work while the automatic mode is off.
+
+> **Heads-up.** Obsidian rewrites the whole properties block when a property is saved (that is how `processFrontMatter` works): comments inside the YAML can be lost and a note without properties gets a new block. Back up first, and try a small folder with "only write to these folders". "Remove" deletes any property with the configured name, including one you created yourself.
+
+### Example: a Bases view of your longest notes
+
+Save this as `Longest notes.base` (or paste it into a `base` code block). It uses only documented Bases syntax: a filter on `words`, a formula, display names, column order and a column summary.
+
+```yaml
+filters:
+  and:
+    - file.ext == "md"
+    - words > 1000
+formulas:
+  read_min: "(words / 400).ceil()"
+properties:
+  words:
+    displayName: Words
+  formula.read_min:
+    displayName: Minutes to read
+views:
+  - type: table
+    name: Longest notes
+    order:
+      - file.name
+      - words
+      - formula.read_min
+      - file.mtime
+    summaries:
+      words: Sum
+```
+
+Then open the base, open the **Sort** menu, choose **Add sort → words** and set it to descending (Obsidian saves the sort into the `.base` file for you). Run **批量更新所有笔记字数属性** once first so existing notes have the property. If you enable `reading_time`, use it directly as a column instead of the `read_min` formula. Filters and formulas reference the property as `words` (shorthand for `note.words`). See the [Bases syntax](https://help.obsidian.md/bases/syntax) page for more.
 
 ## Keeping the numbers honest
 
@@ -89,13 +139,17 @@ Click the dashboard icon in the left ribbon, or run the command **打开看板**
 npm install
 npm run dev     # watch build
 npm run build   # type check + production build -> main.js
+npm test        # unit tests for counting and the write decision, plus an in-memory simulation of the update flow
 ```
 
 ```
 src/
 ├── main.ts      # entry: view, commands, ribbon icon, auto refresh, background word tracking, persistence
 ├── view.ts      # dashboard view and panels
-├── stats.ts     # statistics (words, tasks, links, tags, folders, daily notes)
+├── stats.ts     # statistics (tasks, links, tags, folders, daily notes)
+├── count.ts     # word counting (pure, CJK-aware)
+├── wordprops.ts # word count properties: triggers, batch update, remove, confirm dialogs
+├── wordprops-logic.ts # pure decisions: scope, reading time, write-or-not
 ├── charts.ts    # SVG charts: trend, sparkline, ring, bar list, tooltip
 └── settings.ts  # settings tab
 ```
@@ -105,6 +159,17 @@ Settings and the daily word log live in `data.json`; the per-note word-count cac
 To release, run `npm version <patch|minor|major>` (updates `manifest.json` and `versions.json`), run `npm run build`, then create a GitHub release whose tag matches the version (no `v` prefix) and attach `main.js`, `manifest.json` and `styles.css`.
 
 ## Changelog
+
+### 1.3.0
+
+New: **write word counts into note properties**, so Bases can use them. Everything is opt-in; the dashboard is unchanged.
+
+- New settings section **字数属性**: enable toggle (off by default), property name (`words`), optional reading time (`reading_time`, minutes, with configurable CJK and word speeds), minimum change before rewriting, idle time, skip oversized notes, include / exclude folder lists.
+- Values are written as numbers with `processFrontMatter`, so Bases can sort, filter and use them in formulas.
+- Automatic updates follow only the note you are editing, after you stop typing. A note is never rewritten when the value is unchanged, notes modified in the last 2 seconds are skipped, and the plugin ignores its own writes.
+- New commands: **更新当前笔记字数属性**, **批量更新所有笔记字数属性** (dry-run count, confirmation, batches with progress) and **移除所有字数属性** (confirmation).
+- README: how to use the property in a Bases view, with a `.base` example checked against the official Bases syntax docs.
+- Word counting moved to its own module (`count.ts`), same behaviour; added unit tests (`npm test`).
 
 ### 1.2.4
 
@@ -196,7 +261,7 @@ Note Pulse（笔记脉搏）是一个 Obsidian 插件，在一个页面里集中
 
 ### 安装
 
-**插件市场（审核通过后）：** 打开「设置 → 第三方插件 → 浏览」，搜索 **Note Pulse**，安装并启用。
+**插件市场：** 打开「设置 → 第三方插件 → 浏览」，搜索 **Note Pulse**，安装并启用。
 
 **手动安装：**
 
@@ -219,6 +284,56 @@ Note Pulse（笔记脉搏）是一个 Obsidian 插件，在一个页面里集中
 | 创建日期字段名 | frontmatter 中的 `created: 2025-01-01` 等字段优先作为创建日期，适合同步后文件时间不准的情况 |
 | 自动刷新 / 延迟 | 内容变化后自动刷新及防抖时间 |
 | 在新标签页打开笔记 | 点击看板中的笔记时是否新开标签页 |
+| 字数属性 | 「字数属性」分组：启用开关（默认关闭）、属性名、可选阅读时长和速度、最小变化字数、停手等待时间、不写入超大笔记、包含 / 排除文件夹，以及批量更新和移除按钮。详见下面的「字数写入笔记属性」 |
+
+### 字数写入笔记属性（配合 Bases）
+
+Note Pulse 可以把每篇笔记的字数以**数字**写进它的属性（frontmatter），这样 [Bases（基础）](https://help.obsidian.md/bases) 就能按字数排序、筛选和写公式。这会**修改你的笔记，所以默认关闭**。在「设置 → Note Pulse → 字数属性」里打开。
+
+```yaml
+---
+words: 1832
+reading_time: 5
+---
+```
+
+- **写什么：** `words`（和看板同一套按中日文字计数的算法：不算 frontmatter、代码、注释、网址、嵌入和 Markdown 符号，每个汉字算一个字，其他语言按词）。可选再写 `reading_time`（分钟，向上取整），按你设置的两个阅读速度估算（默认中日文 400 字/分钟、其他文字 220 词/分钟）。属性名都可以改。
+- **什么时候写：** 只跟随你正在编辑的那篇笔记，停止输入几秒后才写（默认 5 秒，最小 3 秒）。最近 2 秒内被修改过的笔记（比如刚被 iCloud 同步改动）不会碰；插件自己的写入不会再触发写入。
+- **没变化绝不写：** 只有属性不存在、不是数字，或与新字数相差达到阈值（默认 1，调大可以减少文件改动和同步）时才写。没有属性的空笔记不会被加上属性。
+- **范围：** 只处理 `.md` 文件；跳过看板里“排除的文件夹”、另外设置的“不写入这些文件夹”，以及（可选，默认开启）超过超大笔记阈值的笔记；也可以只写入指定的文件夹。
+- **命令：** 「更新当前笔记字数属性」「批量更新所有笔记字数属性」（先显示试算数量并让你确认，再分批写入并显示进度）和「移除所有字数属性」（需确认）。自动模式关闭时这些命令也能用。
+
+> **注意：** 保存属性时 Obsidian 会重写整个属性区（`processFrontMatter` 的行为）：YAML 里的注释可能丢失，没有属性的笔记会新增一个属性区。请先备份，也可以先用“只写入这些文件夹”在一个小文件夹里试。“移除”会删掉所有同名属性，包括你自己加的。
+
+#### 示例：用 Bases 看最长的笔记
+
+保存为 `Longest notes.base`（或粘贴进 `base` 代码块）。只用了官方文档里有的语法：按 `words` 过滤、一个公式、显示名、列顺序和列汇总。
+
+```yaml
+filters:
+  and:
+    - file.ext == "md"
+    - words > 1000
+formulas:
+  read_min: "(words / 400).ceil()"
+properties:
+  words:
+    displayName: 字数
+  formula.read_min:
+    displayName: 阅读分钟
+views:
+  - type: table
+    name: 最长的笔记
+    order:
+      - file.name
+      - words
+      - formula.read_min
+      - file.mtime
+    summaries:
+      words: Sum
+```
+
+然后打开这个 base，点「排序」菜单，选「添加排序 → words」并设为降序（Obsidian 会自动把排序存进 `.base` 文件）。先运行一次「批量更新所有笔记字数属性」，已有笔记才有这个属性。如果开启了 `reading_time`，可以直接把它当作一列，不需要 `read_min` 公式。过滤和公式里直接写 `words`（是 `note.words` 的简写）。更多语法见 [Bases 语法](https://help.obsidian.md/bases/syntax)。
 
 ### 让数字更可信
 
@@ -239,6 +354,17 @@ Note Pulse（笔记脉搏）是一个 Obsidian 插件，在一个页面里集中
 - 插件只在本地读取笔记，不联网，不收集任何数据。
 
 ### 更新日志
+
+**1.3.0**
+
+新增：**把字数写入笔记属性**，方便 Bases 使用。全部是可选功能，看板本身不变。
+
+- 设置里新增「字数属性」：启用开关（默认关闭）、属性名（`words`）、可选阅读时长（`reading_time`，分钟，中日文和其他文字速度可调）、最小变化字数、停手等待时间、不写入超大笔记、包含 / 排除文件夹。
+- 通过 `processFrontMatter` 写入数字，Bases 可以排序、筛选并用于公式。
+- 自动更新只跟随你正在编辑的笔记，停手后才写；值没变绝不重写，最近 2 秒内被改过的笔记会跳过，插件自己的写入不会触发新的写入。
+- 新增命令：「更新当前笔记字数属性」「批量更新所有笔记字数属性」（试算数量、确认、分批并显示进度）和「移除所有字数属性」（需确认）。
+- README 新增 Bases 用法，`.base` 示例对照官方 Bases 语法文档核对过。
+- 字数统计拆成独立模块（`count.ts`），行为不变；新增单元测试（`npm test`）。
 
 **1.2.4**
 

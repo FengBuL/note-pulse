@@ -11,3 +11,6 @@ main.js
 .idea/
 .vscode/
 data.json
+
+# tests
+.test-out/

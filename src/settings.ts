@@ -1,5 +1,6 @@
 import { App, PluginSettingTab, Setting, SettingDefinitionItem } from "obsidian";
 import type NotePulsePlugin from "./main";
+import { sanitizeProperty } from "./wordprops-logic";
 
 export type HeatmapMode = "auto" | "mtime" | "delta";
 export type OutlierMode = "exclude" | "off";
@@ -26,6 +27,18 @@ export interface DashboardSettings {
   autoRefresh: boolean;
   refreshDelaySec: number;
   openInNewTab: boolean;
+  /* 字数属性：把字数写进笔记属性（默认关闭） */
+  wordPropEnabled: boolean;
+  wordPropName: string;
+  wordPropReading: boolean;
+  wordPropReadingName: string;
+  wordPropCjkPerMin: number;
+  wordPropLatinPerMin: number;
+  wordPropMinChange: number;
+  wordPropIdleSec: number;
+  wordPropSkipOutliers: boolean;
+  wordPropIncludeFolders: string;
+  wordPropExcludeFolders: string;
 }
 
 export const DEFAULT_SETTINGS: DashboardSettings = {
@@ -43,6 +56,17 @@ export const DEFAULT_SETTINGS: DashboardSettings = {
   autoRefresh: true,
   refreshDelaySec: 3,
   openInNewTab: true,
+  wordPropEnabled: false,
+  wordPropName: "words",
+  wordPropReading: false,
+  wordPropReadingName: "reading_time",
+  wordPropCjkPerMin: 400,
+  wordPropLatinPerMin: 220,
+  wordPropMinChange: 1,
+  wordPropIdleSec: 5,
+  wordPropSkipOutliers: true,
+  wordPropIncludeFolders: "",
+  wordPropExcludeFolders: "",
 };
 
 export function splitList(s: string): string[] {
@@ -240,6 +264,163 @@ export class DashboardSettingTab extends PluginSettingTab {
                   await save();
                 })
               ),
+          },
+        ],
+      },
+      {
+        heading: "字数属性",
+        rows: [
+          {
+            name: "把字数写入笔记属性",
+            desc:
+              "开启后，编辑完一篇笔记并停手几秒，会把它的字数写进 frontmatter（属性是数字类型），这样 Bases 可以直接按字数排序、筛选和做公式。" +
+              "这会修改你的笔记文件，所以默认关闭。写入时 Obsidian 会重新整理该笔记的 YAML 属性区（注释可能丢失）。下面的两个命令在关闭时也能手动使用。",
+            render: (setting) =>
+              setting.addToggle((t) =>
+                t.setValue(st.wordPropEnabled).onChange(async (v) => {
+                  st.wordPropEnabled = v;
+                  await save();
+                })
+              ),
+          },
+          {
+            name: "字数属性名",
+            desc: "默认 words。在 Bases 里就用这个名字，例如 words > 1000。",
+            render: (setting) =>
+              setting.addText((t) =>
+                t.setPlaceholder(DEFAULT_SETTINGS.wordPropName).setValue(st.wordPropName).onChange(async (v) => {
+                  st.wordPropName = sanitizeProperty(v, DEFAULT_SETTINGS.wordPropName);
+                  await save();
+                })
+              ),
+          },
+          {
+            name: "同时写入阅读时长",
+            desc: "按下面的阅读速度估算，单位是分钟（向上取整，最少 1 分钟）。",
+            render: (setting) =>
+              setting.addToggle((t) =>
+                t.setValue(st.wordPropReading).onChange(async (v) => {
+                  st.wordPropReading = v;
+                  await save();
+                })
+              ),
+          },
+          {
+            name: "阅读时长属性名",
+            desc: "默认 reading_time。",
+            render: (setting) =>
+              setting.addText((t) =>
+                t.setPlaceholder(DEFAULT_SETTINGS.wordPropReadingName).setValue(st.wordPropReadingName).onChange(async (v) => {
+                  st.wordPropReadingName = sanitizeProperty(v, DEFAULT_SETTINGS.wordPropReadingName);
+                  await save();
+                })
+              ),
+          },
+          {
+            name: "中日文阅读速度（字/分钟）",
+            desc: "默认 400。",
+            render: (setting) =>
+              setting.addText((t) =>
+                t.setPlaceholder("400").setValue(String(st.wordPropCjkPerMin)).onChange(async (v) => {
+                  const n = parseInt(v, 10);
+                  st.wordPropCjkPerMin = isNaN(n) || n < 50 ? 50 : n;
+                  await save();
+                })
+              ),
+          },
+          {
+            name: "其他文字阅读速度（词/分钟）",
+            desc: "英文等按词计的文字，默认 220。",
+            render: (setting) =>
+              setting.addText((t) =>
+                t.setPlaceholder("220").setValue(String(st.wordPropLatinPerMin)).onChange(async (v) => {
+                  const n = parseInt(v, 10);
+                  st.wordPropLatinPerMin = isNaN(n) || n < 50 ? 50 : n;
+                  await save();
+                })
+              ),
+          },
+          {
+            name: "最小变化字数",
+            desc: "新旧字数相差达到这个数才写入，默认 1（只要有变化就写）。调大可以减少文件改动和同步次数，但属性值会略微滞后。",
+            render: (setting) =>
+              setting.addText((t) =>
+                t.setPlaceholder("1").setValue(String(st.wordPropMinChange)).onChange(async (v) => {
+                  const n = parseInt(v, 10);
+                  st.wordPropMinChange = isNaN(n) || n < 1 ? 1 : n;
+                  await save();
+                })
+              ),
+          },
+          {
+            name: "停手多久后写入（秒）",
+            desc: "只处理你正在编辑的那篇笔记，停止输入这么久之后才写，默认 5，最小 3。",
+            render: (setting) =>
+              setting.addText((t) =>
+                t.setPlaceholder("5").setValue(String(st.wordPropIdleSec)).onChange(async (v) => {
+                  const n = parseFloat(v);
+                  st.wordPropIdleSec = isNaN(n) || n < 3 ? 3 : n;
+                  await save();
+                })
+              ),
+          },
+          {
+            name: "不写入超大笔记",
+            desc: "字数超过上面“超大笔记阈值”的笔记不写入（多为自动采集的文件，改写它们既慢又没意义）。",
+            render: (setting) =>
+              setting.addToggle((t) =>
+                t.setValue(st.wordPropSkipOutliers).onChange(async (v) => {
+                  st.wordPropSkipOutliers = v;
+                  await save();
+                })
+              ),
+          },
+          {
+            name: "只写入这些文件夹",
+            desc: "留空表示整个仓库。每行一个，或用逗号分隔，含子文件夹。",
+            render: (setting) =>
+              setting.addTextArea((t) => {
+                t.setValue(st.wordPropIncludeFolders)
+                  .onChange(async (v) => {
+                    st.wordPropIncludeFolders = v;
+                    await save();
+                  });
+                t.inputEl.rows = 2;
+              }),
+          },
+          {
+            name: "不写入这些文件夹",
+            desc: "含子文件夹。上面“范围”里设置的排除文件夹也不会写入。只处理 .md 文件。",
+            render: (setting) =>
+              setting.addTextArea((t) => {
+                t.setValue(st.wordPropExcludeFolders)
+                  .onChange(async (v) => {
+                    st.wordPropExcludeFolders = v;
+                    await save();
+                  });
+                t.inputEl.rows = 2;
+              }),
+          },
+          {
+            name: "批量更新所有笔记",
+            desc: "先统计会改动多少篇并让你确认，再分批写入。没有变化的笔记不会被碰。",
+            render: (setting) =>
+              setting.addButton((b) =>
+                b.setButtonText("批量更新").onClick(() => {
+                  void this.plugin.wordProps.batchUpdate();
+                })
+              ),
+          },
+          {
+            name: "移除所有字数属性",
+            desc: "从所有笔记里删掉上面设置的属性名（字数，以及开启时的阅读时长）。如果你自己也用了同名属性，也会被删掉，确认前会显示数量。",
+            render: (setting) =>
+              setting.addButton((b) => {
+                b.buttonEl.addClass("mod-warning");
+                b.setButtonText("移除").onClick(() => {
+                  void this.plugin.wordProps.removeAll();
+                });
+              }),
           },
         ],
       },
