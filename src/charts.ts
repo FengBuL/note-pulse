@@ -158,8 +158,8 @@ export class Tooltip {
     const hostTop = this.host.getBoundingClientRect().top;
     let top = y - h - 12;
     if (hostTop + top < bound.top + 4) top = y + 16;
-    el.style.left = `${left}px`;
-    el.style.top = `${top}px`;
+    el.setCssProps({ "--vp-tip-left": `${left}px` });
+    el.setCssProps({ "--vp-tip-top": `${top}px` });
   }
   /** 以视口坐标定位 */
   showAtClient(clientX: number, clientY: number, title: string, rows: TipRow[]) {
@@ -383,10 +383,10 @@ export function drawBarList(container: HTMLElement, items: BarItem[], emptyText:
     top.createSpan({ cls: "vp-barvalue", text: it.valueText ?? fmtNum(it.value) });
     const track = row.createDiv({ cls: "vp-bartrack" });
     const fill = track.createDiv({ cls: "vp-barfill" });
-    fill.style.width = `${Math.max(2, (it.value / max) * 100)}%`;
+    fill.setCssProps({ "--vp-bar-width": `${Math.max(2, (it.value / max) * 100)}%` });
     // 排名越靠前颜色越饱和：同一强调色的不同浓度
     const strength = Math.round(100 - (idx / Math.max(1, items.length - 1)) * 55);
-    fill.style.background = `color-mix(in srgb, var(--vp-accent) ${strength}%, transparent)`;
+    fill.setCssProps({ "--vp-bar-background": `color-mix(in srgb, var(--vp-accent) ${strength}%, transparent)` });
     if (it.onClick) {
       const cb = it.onClick;
       row.addClass("is-clickable");

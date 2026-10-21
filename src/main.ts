@@ -1,7 +1,9 @@
 import { Notice, Plugin, TAbstractFile, TFile, TFolder, WorkspaceLeaf, debounce, Debouncer, normalizePath } from "obsidian";
-import { DashboardSettings, DEFAULT_SETTINGS, DashboardSettingTab, SETTINGS_VERSION, normalizeFolder, splitList } from "./settings";
+import { DashboardSettings, DEFAULT_SETTINGS, DashboardSettingTab, SETTINGS_VERSION, migrateWritingSettings, normalizeFolder, splitList } from "./settings";
 import { ContentInfo, PersistentData, VaultStats, computeStats, includedFiles, syncContent, dayKey } from "./stats";
 import { DashboardView, VIEW_TYPE_PULSE, noticeError } from "./view";
+import { ReportPreviewModal } from "./reports";
+import { ReportKind } from "./report-logic";
 import { WordPropsService } from "./wordprops";
 import { DedupeService, normalizeDedupeSettings } from "./dedupe/service";
 
@@ -92,6 +94,17 @@ export default class NotePulsePlugin extends Plugin {
       id: "remove-word-properties",
       name: "移除所有字数属性",
       callback: () => void this.wordProps.removeAll(),
+    });
+
+    this.addCommand({
+      id: "generate-writing-weekly-report",
+      name: "生成写作周报",
+      callback: () => void this.openWritingReport("week"),
+    });
+    this.addCommand({
+      id: "generate-writing-monthly-report",
+      name: "生成写作月报",
+      callback: () => void this.openWritingReport("month"),
     });
 
     await this.dedupe.load();
@@ -255,6 +268,18 @@ export default class NotePulsePlugin extends Plugin {
     }
   }
 
+  async openWritingReport(kind: ReportKind): Promise<void> {
+    try {
+      // 与后台采集串行，命令在看板关闭时也能拿到最新统计。
+      const stats = await this.enqueue(() => computeStats(this.app, this.settings, this.contentCache, this.data));
+      this.lastStats = stats;
+      this.schedulePersist();
+      new ReportPreviewModal(this.app, stats, { ...this.settings }, kind).open();
+    } catch (e) {
+      noticeError(e);
+    }
+  }
+
   async openFile(file: TFile, line?: number, evt?: MouseEvent | KeyboardEvent) {
     const newTab = this.settings.openInNewTab || (evt && (evt.ctrlKey || evt.metaKey));
     const leaf = this.app.workspace.getLeaf(newTab ? "tab" : false);
@@ -362,6 +387,7 @@ export default class NotePulsePlugin extends Plugin {
     } else {
       this.settings.dedupe = normalizeDedupeSettings(raw.settings.dedupe);
     }
+    migrateWritingSettings(this.settings);
     this.settings.settingsVersion = SETTINGS_VERSION;
 
     const wordLog = raw.wordLog || {};
@@ -372,7 +398,7 @@ export default class NotePulsePlugin extends Plugin {
       logInitialized: !!raw.logInitialized,
       logStartDay: raw.logStartDay || (raw.logInitialized ? logDays[0] || dayKey(Date.now()) : ""),
       legacyFileWords: raw.fileWords && Object.keys(raw.fileWords).length ? raw.fileWords : undefined,
-      dirty: !!raw.fileWords || (raw.settings?.settingsVersion ?? 1) < 2 || migrated,
+      dirty: !!raw.fileWords || (raw.settings?.settingsVersion ?? 1) < SETTINGS_VERSION || migrated,
     };
 
     // 内容缓存：[mtime, size, words, logged, taskLines]

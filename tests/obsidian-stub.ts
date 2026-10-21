@@ -2,6 +2,7 @@
 export class TFile {
   path = "";
   extension = "md";
+  get basename() { return this.path.split("/").pop()?.replace(/\.md$/, "") ?? ""; }
   stat = { mtime: 0, ctime: 0, size: 0 };
 }
 export class TAbstractFile {}
@@ -103,3 +104,13 @@ export function stringifyYaml(o: Record<string, unknown>): string {
   return Object.entries(o).map(([k, v]) => `${k}: ${v}`).join("\n");
 }
 export const moment = { locale: () => "zh-cn" };
+
+export class TFolder {
+  constructor(public path = "") {}
+}
+export function normalizePath(path: string): string {
+  return path.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^\/|\/$/g, "");
+}
+export function getAllTags(cache: { tags?: { tag: string }[] }): string[] {
+  return cache.tags?.map((item) => item.tag) ?? [];
+}

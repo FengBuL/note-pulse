@@ -23,7 +23,8 @@ The UI is in Chinese. It follows your light or dark theme, has no external depen
 
 | Panel | What it shows |
 | --- | --- |
-| Today's writing | Progress ring for today's words vs. your daily goal, current streak, last 7 days, longest streak, check-in days in the past year, daily notes this month |
+| Today's writing | Progress ring for today's words vs. your daily goal, current streak, last 7 days, longest streak, check-in days in the past year, daily notes this month; weekly word goal and check-ins (Monday–Sunday) |
+| Writing reports (new in 1.5.0) | Weekly and monthly Markdown reports, preview before saving, previous-period comparisons, optional links to changed notes, and overwrite or save-as-new choices |
 | Stat cards | Total notes and total words (with 30-day change and a 12-week sparkline), task completion rate (with overdue count), total links (with orphan notes and connectivity) |
 | Writing heatmap | Recent weeks sized to the view width; hover for words written and notes changed or created; click a day to list notes modified that day. Keyboard: focus it, then use the arrow keys and Enter |
 | Growth trend | New notes per day (default) or cumulative words, over 30 days, 90 days or 1 year, with hover values. A switch excludes oversized notes so auto-collected files cannot distort the curve |
@@ -50,6 +51,14 @@ Every note in the dashboard is clickable (mouse or keyboard). The dashboard refr
 ### Usage
 
 Click the dashboard icon in the left ribbon, or run the command **打开看板** (Open dashboard) from the command palette. Use **刷新看板数据** (Refresh dashboard) to recompute.
+
+### Writing goals and reports (1.5.0)
+
+Set **每周字数目标** (Weekly word goal) to your target; the default is 1500, and 0 turns off the goal. Today's writing shows progress for Monday through Sunday and check-ins out of seven days. Existing settings are preserved during the upgrade.
+
+Run **生成写作周报** (Generate writing weekly report) or **生成写作月报** (Generate writing monthly report), or use the **写作回顾** card. Choose the current or previous calendar period, optionally include links to modified notes, then review the Markdown preview and save. Reports go to **Note Pulse** by default; change **写作报告保存位置** (Report folder) in settings, or leave it empty for the vault root. Existing files are only overwritten after you choose **覆盖现有笔记**; **另存为新文件** adds a numeric suffix.
+
+Reports include words written, check-in days, new notes, the longest note, common tags, and changes from the previous period. Words and check-ins use the dashboard's writing mode and exclusions. New-note counts follow the dashboard too: collected notes are excluded; oversized notes still count as notes. Rankings, tags and optional note lists exclude collected notes and oversized notes when that exclusion is enabled. Rankings use current note content; note lists use each file's latest modification time, so they cannot reconstruct every historical edit. Current periods are compared with the complete previous period, and reports state when writing counts are estimated or unavailable before recording began.
 
 ## Settings
 

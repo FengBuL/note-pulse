@@ -7,7 +7,7 @@ export type HeatmapMode = "auto" | "mtime" | "delta";
 export type OutlierMode = "exclude" | "off";
 
 /** 设置结构版本：用于一次性迁移旧设置 */
-export const SETTINGS_VERSION = 2;
+export const SETTINGS_VERSION = 3;
 
 export interface DashboardSettings {
   settingsVersion: number;
@@ -24,6 +24,8 @@ export interface DashboardSettings {
   dailyNoteFolder: string;
   createdFields: string;
   dailyWordGoal: number;
+  weeklyWordGoal: number;
+  reportFolder: string;
   heatmapMode: HeatmapMode;
   autoRefresh: boolean;
   refreshDelaySec: number;
@@ -58,6 +60,8 @@ export const DEFAULT_SETTINGS: DashboardSettings = {
   dailyNoteFolder: "",
   createdFields: "created, 创建时间, date",
   dailyWordGoal: 300,
+  weeklyWordGoal: 1500,
+  reportFolder: "Note Pulse",
   heatmapMode: "auto",
   autoRefresh: true,
   refreshDelaySec: 3,
@@ -204,6 +208,27 @@ export class DashboardSettingTab extends PluginSettingTab {
                     await save();
                   })
               ),
+          },
+          {
+            name: "每周字数目标",
+            desc: "周一到周日累计，默认 1500 字。设为 0 关闭每周目标。",
+            render: (setting) => setting.addText((t) =>
+              t.setPlaceholder("1500").setValue(String(st.weeklyWordGoal)).onChange(async (v) => {
+                const n = Number(v);
+                st.weeklyWordGoal = Number.isFinite(n) && n >= 0 ? Math.floor(n) : 1500;
+                await save();
+              })
+            ),
+          },
+          {
+            name: "写作报告保存位置",
+            desc: "周报和月报保存在这个文件夹，默认 Note Pulse。留空保存在笔记库最外层。",
+            render: (setting) => setting.addText((t) =>
+              t.setPlaceholder(DEFAULT_SETTINGS.reportFolder).setValue(st.reportFolder).onChange(async (v) => {
+                st.reportFolder = v.trim();
+                await save();
+              })
+            ),
           },
           {
             name: "写作量统计方式",
@@ -526,4 +551,13 @@ export class DashboardSettingTab extends PluginSettingTab {
       }
     }
   }
+}
+
+/** 保留用户明确设置的 0；旧设置缺少新字段时补齐默认值。 */
+export function migrateWritingSettings(settings: DashboardSettings): void {
+  if (!Number.isFinite(settings.weeklyWordGoal) || settings.weeklyWordGoal < 0) {
+    settings.weeklyWordGoal = DEFAULT_SETTINGS.weeklyWordGoal;
+  }
+  settings.weeklyWordGoal = Math.floor(settings.weeklyWordGoal);
+  if (typeof settings.reportFolder !== "string") settings.reportFolder = DEFAULT_SETTINGS.reportFolder;
 }

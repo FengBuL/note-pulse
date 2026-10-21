@@ -436,7 +436,7 @@ export async function computeStats(
     (dayModified[mk] = dayModified[mk] || []).push(f);
 
     // 日记（内容过少的空模板不算）
-    if (/^\d{4}-\d{2}-\d{2}$/.test(f.basename) && words >= DAILY_MIN_WORDS) {
+    if (!collected && !(excludeBig && big) && /^\d{4}-\d{2}-\d{2}$/.test(f.basename) && words >= DAILY_MIN_WORDS) {
       const inFolder = !dailyFolder || f.path.startsWith(dailyFolder + "/");
       const d = parseDateStr(f.basename);
       if (inFolder && d) dailyNotes[dayKey(d)] = f;
@@ -641,4 +641,10 @@ export async function computeStats(
     },
     folders,
   };
+}
+
+/** 看板、每周目标和报告共用同一个打卡规则。 */
+export function isCheckinDay(stats: VaultStats, goal: number, key: string): boolean {
+  const words = stats.dayWords[key] || 0;
+  return (goal > 0 ? words >= goal : words > 0) || !!stats.dailyNotes[key];
 }

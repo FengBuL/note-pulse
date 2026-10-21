@@ -4065,3 +4065,56 @@ body.is-mobile .cd-modal .cd-diff-list {
     transform: rotate(90deg);
   }
 }
+
+/* 每周写作和报告入口 */
+.vp-root .vp-weekly-goal {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 16px;
+  font-size: var(--font-ui-small);
+}
+.vp-root .vp-weekly-fill {
+  width: var(--vp-weekly-progress, 0%);
+}
+.vp-grid .vp-report-card {
+  grid-column: 1 / -1;
+}
+.vp-report-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+.vp-report-modal .vp-report-preview {
+  max-height: 50vh;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+}
+body.is-mobile .vp-report-modal {
+  padding-bottom: calc(var(--mobile-navbar-height, 0px) + env(safe-area-inset-bottom, 0px) + 16px);
+}
+
+/* 变化的尺寸和位置统一由 CSS 变量传入 */
+.vp-root .vp-held-height {
+  min-height: var(--vp-held-height, 0px);
+}
+.vp-tooltip {
+  left: var(--vp-tip-left, 0px);
+  top: var(--vp-tip-top, 0px);
+}
+.vp-help-pop {
+  left: var(--vp-help-left, 0px);
+  top: var(--vp-help-top, 0px);
+}
+.vp-root .vp-barfill {
+  width: var(--vp-bar-width, 0%);
+  background: var(--vp-bar-background, var(--vp-accent));
+}
+.vp-root .vp-meter-fill {
+  width: var(--vp-meter-width, var(--vp-weekly-progress, 0%));
+}

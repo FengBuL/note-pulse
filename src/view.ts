@@ -1,7 +1,8 @@
 import { ItemView, Notice, Platform, TFile, WorkspaceLeaf, setIcon } from "obsidian";
 import type NotePulsePlugin from "./main";
+import { reportPeriod, summarizeWritingDays } from "./report-logic";
 import { groupKey as groupKeyOf } from "./dedupe/core/summary";
-import { GroupStat, Hint, TaskInfo, VaultStats, addDays, dayKey, pad2, startOfDay } from "./stats";
+import { GroupStat, Hint, TaskInfo, VaultStats, addDays, dayKey, isCheckinDay, pad2, startOfDay } from "./stats";
 import {
   BarItem,
   SeriesPoint,
@@ -98,7 +99,7 @@ export class DashboardView extends ItemView {
     this.refreshBtn = this.iconButton(actions, "refresh-cw", "刷新数据", () => void this.plugin.requestRefresh(true));
     this.iconButton(actions, "settings", "看板设置", () => this.plugin.openSettings());
 
-    this.bodyEl = shell.createDiv({ cls: "vp-body" });
+    this.bodyEl = shell.createDiv({ cls: "vp-body vp-held-height" });
     // 跨过午夜后，“今天”变了，需要重新统计
     this.registerInterval(
       window.setInterval(() => {
@@ -265,13 +266,13 @@ export class DashboardView extends ItemView {
   render(stats: VaultStats) {
     // 重绘期间把内容区高度撑住，避免清空 → 重建的瞬间页面塌缩、滚动位置被夹到顶部
     const hold = this.bodyEl.offsetHeight;
-    if (hold > 0) this.bodyEl.style.minHeight = `${hold}px`;
+    if (hold > 0) this.bodyEl.setCssProps({ "--vp-held-height": `${hold}px` });
     this.keepScroll(() => this.renderNow(stats));
     this.cardMinH.clear();
     if (hold > 0) {
       const win = this.contentEl.ownerDocument.defaultView;
       win?.requestAnimationFrame(() => {
-        this.keepScroll(() => this.bodyEl.style.removeProperty("min-height"));
+        this.keepScroll(() => this.bodyEl.setCssProps({ "--vp-held-height": "" }));
       });
     }
   }
@@ -297,6 +298,7 @@ export class DashboardView extends ItemView {
       this.empty(e, "files", "没有可统计的笔记。先写一篇笔记，或检查设置里的“排除的文件夹”。");
       const b = e.createEl("button", { cls: "vp-btn", text: "打开设置" });
       b.addEventListener("click", () => this.plugin.openSettings());
+      this.renderReports(body);
       return;
     }
 
@@ -311,6 +313,7 @@ export class DashboardView extends ItemView {
     this.define("tasks", grid, (h) => this.renderTasks(h, stats));
     this.define("tags", grid, (h) => this.renderTags(h, stats));
     this.define("links", grid, (h) => this.renderLinks(h, stats));
+    this.define("reports", grid, (h) => this.renderReports(h));
     if (this.plugin.settings.dedupeEnabled && this.plugin.settings.dedupeCard) this.define("dedupe", grid, (h) => this.renderDedupe(h));
   }
 
@@ -358,7 +361,8 @@ export class DashboardView extends ItemView {
       }
       wrapper.replaceWith(fresh);
       if (sticky && prevH > 0) {
-        fresh.style.minHeight = `${Math.ceil(prevH)}px`;
+        fresh.addClass("vp-held-height");
+        fresh.setCssProps({ "--vp-held-height": `${Math.ceil(prevH)}px` });
         this.cardMinH.set(key, Math.max(prevH, fresh.getBoundingClientRect().height));
       }
       // preventScroll：聚焦时不要让浏览器把元素滚进视野（手机上会拖着整页跳）
@@ -406,7 +410,7 @@ export class DashboardView extends ItemView {
     const pop = this.helpPop;
     pop.setText(text);
     pop.removeClass("is-visible");
-    pop.setCssProps({ left: "0px", top: "0px" });
+    pop.setCssProps({ "--vp-help-left": "0px", "--vp-help-top": "0px" });
     this.helpAnchor = anchor;
     anchor.setAttr("aria-describedby", "vp-help-pop");
     const a = anchor.getBoundingClientRect();
@@ -424,8 +428,8 @@ export class DashboardView extends ItemView {
     const left = Math.max(minX, Math.min(maxX, a.left + a.width / 2 - pw / 2));
     let top = a.top - ph - 8;
     if (top < 6) top = a.bottom + 8;
-    pop.style.left = `${Math.round(left)}px`;
-    pop.style.top = `${Math.round(top)}px`;
+    pop.setCssProps({ "--vp-help-left": `${Math.round(left)}px` });
+    pop.setCssProps({ "--vp-help-top": `${Math.round(top)}px` });
     pop.addClass("is-visible");
   }
 
@@ -520,10 +524,7 @@ export class DashboardView extends ItemView {
     const goal = this.plugin.settings.dailyWordGoal;
     const today = startOfDay(Date.now());
     const todayKey = dayKey(today);
-    const isActive = (k: string) => {
-      const w = s.dayWords[k] || 0;
-      return (goal > 0 ? w >= goal : w > 0) || !!s.dailyNotes[k];
-    };
+    const isActive = (k: string) => isCheckinDay(s, goal, k);
     let longest = 0,
       run = 0,
       activeDays = 0,
@@ -665,6 +666,20 @@ export class DashboardView extends ItemView {
       c.createDiv({ cls: "vp-week-label", text: day.isToday ? "今" : day.label });
     }
 
+    const weeklyGoal = this.plugin.settings.weeklyWordGoal;
+    const weekly = summarizeWritingDays(s, this.plugin.settings, reportPeriod("week", new Date(s.generatedAt)));
+    const weeklyBox = hero.createDiv({ cls: "vp-weekly-goal" });
+    weeklyBox.createDiv({ cls: "vp-label", text: `本周打卡 ${weekly.checkins}/7 天 · 周一到周日` });
+    if (weeklyGoal > 0) {
+      weeklyBox.createDiv({ text: `本周 ${fmtFull(weekly.words)} / ${fmtFull(weeklyGoal)} 字` });
+      const meter = weeklyBox.createDiv({ cls: "vp-meter", attr: {
+        role: "progressbar", "aria-label": "每周字数目标", "aria-valuemin": "0",
+        "aria-valuemax": String(weeklyGoal), "aria-valuenow": String(Math.min(weekly.words, weeklyGoal)),
+        "aria-valuetext": `已写 ${weekly.words} 字，目标 ${weeklyGoal} 字`,
+      } });
+      meter.createDiv({ cls: "vp-meter-fill vp-weekly-fill" }).setCssProps({ "--vp-weekly-progress": `${Math.min(100, weekly.words / weeklyGoal * 100)}%` });
+    }
+
     // 底部统计
     const foot = hero.createDiv({ cls: "vp-hero-foot" });
     const stat = (label: string, value: string, unit: string) => {
@@ -801,7 +816,7 @@ export class DashboardView extends ItemView {
     const m = parent.createDiv({ cls: "vp-meter-wrap" });
     if (label) m.createDiv({ cls: "vp-meter-label", text: label });
     const track = m.createDiv({ cls: `vp-meter ${cls}` });
-    track.createDiv({ cls: "vp-meter-fill" }).style.width = `${Math.max(0, Math.min(1, ratio)) * 100}%`;
+    track.createDiv({ cls: "vp-meter-fill" }).setCssProps({ "--vp-meter-width": `${Math.max(0, Math.min(1, ratio)) * 100}%` });
   }
 
   /* ---------- 3. 热力图 ---------- */
@@ -1271,7 +1286,7 @@ export class DashboardView extends ItemView {
         const row = list.createDiv({ cls: "vp-row vp-group-row" });
         row.createSpan({ cls: "vp-row-name", text: g.key, attr: { title: g.file ? g.file.path : g.key } });
         const m = row.createDiv({ cls: "vp-meter is-success is-inline" });
-        m.createDiv({ cls: "vp-meter-fill" }).style.width = `${(g.done / Math.max(1, g.total)) * 100}%`;
+        m.createDiv({ cls: "vp-meter-fill" }).setCssProps({ "--vp-meter-width": `${(g.done / Math.max(1, g.total)) * 100}%` });
         row.createSpan({ cls: "vp-row-meta vp-tabular", text: `待办 ${g.pending}` });
         if (g.file) {
           const f = g.file;
@@ -1378,6 +1393,16 @@ export class DashboardView extends ItemView {
   }
 
   /* ---------- 8. 重复内容清理入口（轻量，详细功能在独立标签页） ---------- */
+
+  private renderReports(grid: HTMLElement) {
+    const { body } = this.card(grid, "vp-report-card", "写作回顾", "notebook-pen");
+    body.createDiv({ cls: "vp-label", text: "把这段时间的写作整理成笔记，先预览再保存。" });
+    const actions = body.createDiv({ cls: "vp-report-actions" });
+    for (const kind of ["week", "month"] as const) {
+      const button = actions.createEl("button", { text: kind === "week" ? "生成写作周报" : "生成写作月报" });
+      button.addEventListener("click", () => void this.plugin.openWritingReport(kind));
+    }
+  }
 
   private renderDedupe(grid: HTMLElement) {
     const dd = this.plugin.dedupe;
