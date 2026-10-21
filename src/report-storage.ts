@@ -10,6 +10,25 @@ export function reportPath(folder: string, title: string): string {
   return normalizePath(`${cleaned ? cleaned + "/" : ""}${title}.md`);
 }
 
+/** 只在配置的报告目录中查找；兼容缺少属性的旧报告和另存的副本。 */
+export function latestWritingReport(app: App, folder: string): TFile | null {
+  let directory: string;
+  try {
+    directory = reportPath(folder, "report").slice(0, -"report.md".length);
+  } catch {
+    return null;
+  }
+  let latest: TFile | null = null;
+  for (const file of app.vault.getMarkdownFiles()) {
+    if (!file.path.startsWith(directory)) continue;
+    const type: unknown = app.metadataCache.getFileCache(file)?.frontmatter?.type;
+    if (type !== "写作周报" && type !== "写作月报" && !/^写作[周月]报(?:\s|$)/u.test(file.basename)) continue;
+    if (!latest || file.stat.mtime > latest.stat.mtime ||
+      (file.stat.mtime === latest.stat.mtime && file.path.localeCompare(latest.path) < 0)) latest = file;
+  }
+  return latest;
+}
+
 export async function ensureReportFolder(app: App, path: string): Promise<void> {
   const parts = path.split("/").slice(0, -1);
   let current = "";

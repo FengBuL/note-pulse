@@ -26,6 +26,10 @@ export interface DashboardSettings {
   dailyWordGoal: number;
   weeklyWordGoal: number;
   reportFolder: string;
+  /** 写作回顾卡片共享的展开状态，沿用旧周报字段。 */
+  reportWeekExpanded: boolean;
+  /** 仅用于迁移旧版独立展开状态。 */
+  reportMonthExpanded?: boolean;
   heatmapMode: HeatmapMode;
   autoRefresh: boolean;
   refreshDelaySec: number;
@@ -62,6 +66,7 @@ export const DEFAULT_SETTINGS: DashboardSettings = {
   dailyWordGoal: 300,
   weeklyWordGoal: 1500,
   reportFolder: "Note Pulse",
+  reportWeekExpanded: false,
   heatmapMode: "auto",
   autoRefresh: true,
   refreshDelaySec: 3,
@@ -560,4 +565,6 @@ export function migrateWritingSettings(settings: DashboardSettings): void {
   }
   settings.weeklyWordGoal = Math.floor(settings.weeklyWordGoal);
   if (typeof settings.reportFolder !== "string") settings.reportFolder = DEFAULT_SETTINGS.reportFolder;
+  settings.reportWeekExpanded = settings.reportWeekExpanded === true || settings.reportMonthExpanded === true;
+  delete settings.reportMonthExpanded;
 }

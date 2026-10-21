@@ -1,6 +1,7 @@
 import { ItemView, Notice, Platform, TFile, WorkspaceLeaf, setIcon } from "obsidian";
 import type NotePulsePlugin from "./main";
-import { reportPeriod, summarizeWritingDays } from "./report-logic";
+import { reportPeriod, summarizeWritingDays, writingReportOverview } from "./report-logic";
+import { latestWritingReport } from "./report-storage";
 import { groupKey as groupKeyOf } from "./dedupe/core/summary";
 import { GroupStat, Hint, TaskInfo, VaultStats, addDays, dayKey, isCheckinDay, pad2, startOfDay } from "./stats";
 import {
@@ -17,6 +18,8 @@ import {
   srLabel,
   svgEl,
 } from "./charts";
+
+let reportDetailsId = 0;
 
 export const VIEW_TYPE_PULSE = "note-pulse-view";
 
@@ -1395,12 +1398,107 @@ export class DashboardView extends ItemView {
   /* ---------- 8. 重复内容清理入口（轻量，详细功能在独立标签页） ---------- */
 
   private renderReports(grid: HTMLElement) {
-    const { body } = this.card(grid, "vp-report-card", "写作回顾", "notebook-pen");
-    body.createDiv({ cls: "vp-label", text: "把这段时间的写作整理成笔记，先预览再保存。" });
-    const actions = body.createDiv({ cls: "vp-report-actions" });
+    if (!this.stats) return;
+    const { head, body } = this.card(grid, "vp-report-card", "写作回顾", "notebook-pen");
+    const aside = head.createDiv({ cls: "vp-card-aside vp-report-head-actions" });
+    aside.createSpan({ cls: "vp-report-hint", text: "先预览，再保存为笔记" });
+    const toggle = aside.createEl("button", { cls: "vp-report-toggle", attr: { type: "button" } });
+    const chevron = toggle.createSpan({ cls: "vp-report-chevron", attr: { "aria-hidden": "true" } });
+    const label = toggle.createSpan();
+    const detailPanels: HTMLElement[] = [];
+    const rows = body.createDiv({ cls: "vp-report-rows" });
+    const settings = this.plugin.settings;
+    const shortDate = (date: Date) => `${date.getMonth() + 1}月${date.getDate()}日`;
     for (const kind of ["week", "month"] as const) {
-      const button = actions.createEl("button", { text: kind === "week" ? "生成写作周报" : "生成写作月报" });
-      button.addEventListener("click", () => void this.plugin.openWritingReport(kind));
+      const weekly = kind === "week";
+      const title = weekly ? "周报" : "月报";
+      const { period, current: summary, metrics } = writingReportOverview(this.stats, settings, kind);
+      const [total, checkins] = metrics;
+      const row = rows.createDiv({ cls: `vp-report-row is-${kind}` });
+      const bar = row.createDiv({ cls: "vp-report-bar" });
+      const heading = bar.createDiv({ cls: "vp-report-heading" });
+      setIcon(heading.createSpan({ cls: "vp-report-icon", attr: { "aria-hidden": "true" } }), weekly ? "calendar-days" : "calendar-range");
+      heading.createSpan({ cls: "vp-report-title", text: title });
+      heading.createSpan({ cls: "vp-report-range", text: `${shortDate(period.start)}–${shortDate(addDays(period.end, -1))}` });
+      const actions = bar.createDiv({ cls: "vp-report-row-actions" });
+      const id = `vp-report-details-${++reportDetailsId}`;
+      const generate = actions.createEl("button", { cls: "vp-btn is-compact is-primary vp-report-generate", text: "生成", attr: {
+        type: "button", "aria-label": `生成${title}`,
+      } });
+      generate.addEventListener("click", () => void this.plugin.openWritingReport(kind));
+      const data = row.createDiv({ cls: "vp-report-summary" });
+      const totalBlock = data.createDiv({ cls: "vp-report-total" });
+      totalBlock.createDiv({ cls: "vp-report-metric-label", text: total.label });
+      const totalValue = totalBlock.createDiv({ cls: "vp-report-metric-value" });
+      const words = totalValue.createSpan({ cls: "vp-report-words" });
+      words.createSpan({ cls: "vp-report-number", text: total.value });
+      words.createSpan({ cls: "vp-report-unit", text: "字" });
+      totalValue.createSpan({ cls: `vp-report-change is-${total.trend}`, text: total.detail });
+      const checkinBlock = data.createDiv({ cls: "vp-report-checkins" });
+      checkinBlock.createDiv({ cls: "vp-report-metric-label", text: checkins.label });
+      const checkinValue = checkinBlock.createDiv({ cls: "vp-report-metric-value" });
+      checkinValue.createSpan({ cls: "vp-report-number", text: checkins.value });
+      checkinValue.createSpan({ cls: "vp-report-unit", text: checkins.unit });
+      if (weekly && settings.weeklyWordGoal > 0) {
+        const goal = settings.weeklyWordGoal;
+        const progress = Math.min(100, summary.words / goal * 100);
+        const goalBlock = data.createDiv({ cls: "vp-report-goal" });
+        goalBlock.createDiv({ cls: "vp-report-metric-label", text: `目标 ${Math.round(progress)}%` });
+        const goalValue = goalBlock.createDiv({ cls: "vp-report-metric-value" });
+        const meter = goalValue.createDiv({ cls: "vp-report-meter", attr: {
+          role: "progressbar", "aria-label": "每周字数目标", "aria-valuemin": "0", "aria-valuemax": String(goal),
+          "aria-valuenow": String(Math.min(summary.words, goal)), "aria-valuetext": `已写 ${fmtFull(summary.words)} 字，目标 ${fmtFull(goal)} 字`,
+        } });
+        meter.createDiv({ cls: "vp-report-fill" }).setCssProps({ "--vp-report-progress": `${progress}%` });
+      }
+      if (!weekly) {
+        const days = addDays(period.end, -1).getDate();
+        const elapsed = summary.elapsedDays;
+        const progress = elapsed / days * 100;
+        const monthBlock = data.createDiv({ cls: "vp-report-goal vp-report-month-progress" });
+        monthBlock.createDiv({ cls: "vp-report-metric-label", text: `本月进度 ${Math.round(progress)}%` });
+        const monthValue = monthBlock.createDiv({ cls: "vp-report-metric-value" });
+        const meter = monthValue.createDiv({ cls: "vp-report-meter", attr: {
+          role: "progressbar", "aria-label": "本月进度", "aria-valuemin": "0", "aria-valuemax": String(days),
+          "aria-valuenow": String(elapsed), "aria-valuetext": `第 ${elapsed} / ${days} 天`,
+        } });
+        meter.createDiv({ cls: "vp-report-fill" }).setCssProps({ "--vp-report-progress": `${progress}%` });
+        monthBlock.createDiv({ cls: "vp-report-progress-detail", text: `第 ${elapsed} / ${days} 天` });
+      }
+      const details = row.createDiv({ cls: "vp-report-details", attr: { id } });
+      detailPanels.push(details);
+      for (const metric of metrics.slice(2)) {
+        const stat = details.createDiv({ cls: `vp-report-stat is-${metric.id}` });
+        stat.createDiv({ cls: "vp-report-stat-label", text: metric.label });
+        const value = stat.createDiv({ cls: "vp-report-stat-value" });
+        value.createSpan({ text: metric.value });
+        if (metric.unit) value.createSpan({ cls: "vp-report-unit", text: metric.unit });
+        stat.createDiv({ cls: `vp-report-stat-detail is-${metric.trend}`, text: metric.detail });
+      }
+    }
+    toggle.setAttr("aria-controls", detailPanels.map((details) => details.id).join(" "));
+    const updateExpanded = () => {
+      for (const details of detailPanels) details.hidden = !settings.reportWeekExpanded;
+      toggle.setAttr("aria-expanded", String(settings.reportWeekExpanded));
+      label.setText(settings.reportWeekExpanded ? "收起" : "展开");
+      setIcon(chevron, settings.reportWeekExpanded ? "chevron-up" : "chevron-down");
+    };
+    updateExpanded();
+    toggle.addEventListener("click", () => {
+      settings.reportWeekExpanded = !settings.reportWeekExpanded;
+      updateExpanded();
+      void this.plugin.saveSettings();
+    });
+    const latest = latestWritingReport(this.app, settings.reportFolder);
+    if (latest) {
+      const recent = body.createDiv({ cls: "vp-report-recent" });
+      setIcon(recent.createSpan({ cls: "vp-report-recent-icon", attr: { "aria-hidden": "true" } }), "history");
+      recent.createSpan({ cls: "vp-report-recent-label", text: "上次生成：" });
+      const link = recent.createEl("a", { cls: "vp-report-recent-link", text: latest.basename, attr: { href: latest.path } });
+      link.addEventListener("click", (event) => {
+        event.preventDefault();
+        void this.plugin.openFile(latest, undefined, event);
+      });
     }
   }
 

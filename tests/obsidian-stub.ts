@@ -114,3 +114,7 @@ export function normalizePath(path: string): string {
 export function getAllTags(cache: { tags?: { tag: string }[] }): string[] {
   return cache.tags?.map((item) => item.tag) ?? [];
 }
+
+export class ItemView {}
+export const Platform = { isMobile: false };
+export function setIcon(_element: unknown, _icon: string) {}
