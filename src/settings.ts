@@ -22,6 +22,8 @@ export interface DashboardSettings {
   outlierMode: OutlierMode;
   /** 超过这个字数的笔记视为超大笔记（通常是自动采集或整段粘贴） */
   outlierWords: number;
+  /** 库体检里不检查孤立笔记的文件夹（含子文件夹）；采集文件夹也自动不检查 */
+  orphanIgnoreFolders: string;
   /** 已经点过“忽略”的提示 */
   dismissedHints: string[];
   onboarded: boolean;
@@ -68,6 +70,7 @@ export const DEFAULT_SETTINGS: DashboardSettings = {
   clippingFolders: "",
   outlierMode: "exclude",
   outlierWords: 20000,
+  orphanIgnoreFolders: "",
   dismissedHints: [],
   onboarded: false,
   dailyNoteFolder: "",
@@ -165,6 +168,21 @@ export class DashboardSettingTab extends PluginSettingTab {
                     st.clippingFolders = v;
                     await save();
                   });
+                t.inputEl.rows = 2;
+              }),
+          },
+          {
+            name: L("孤立笔记不检查的文件夹", "Folders skipped for orphans"),
+            desc: L(
+              "库体检不把这些文件夹里没有链接的笔记算作孤立笔记，比如日记、对话记录。采集文件夹自动不检查。每行一个，或用逗号分隔。",
+              "Vault checkup doesn't count unlinked notes in these folders as orphans, for example daily notes or chat logs. Clipping folders are skipped automatically. One per line or comma-separated."
+            ),
+            render: (setting) =>
+              setting.addTextArea((t) => {
+                t.setValue(st.orphanIgnoreFolders).onChange(async (v) => {
+                  st.orphanIgnoreFolders = v;
+                  await save();
+                });
                 t.inputEl.rows = 2;
               }),
           },

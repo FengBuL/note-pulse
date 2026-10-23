@@ -152,7 +152,26 @@ test("库体检：空笔记不含只有链接或嵌入的笔记，超大笔记�
   assert.deepEqual(c.empty.map((f) => f.file.path), ["空.md"]);
   assert.deepEqual(c.big.map((f) => f.file.path), ["大.md"]);
   assert.deepEqual(c.unresolved, [
-    { name: "年度复盘", count: 2, source: "工作/周会.md" },
-    { name: "竞品分析", count: 1, source: null },
+    { name: "年度复盘", count: 2, source: "工作/周会.md", fix: null, from: [] },
+    { name: "竞品分析", count: 1, source: null, fix: null, from: [] },
   ]);
+});
+
+test("库体检：能修的断链排在前面，同名笔记和未引用附件透传", () => {
+  const fix = { name: "竞品分析", target: "工作/竞品分析.md", kind: "exact" as const };
+  const s = stats({
+    links: {
+      topLinked: [], orphans: [], unresolvedCount: 3,
+      topUnresolved: [["年度复盘", 2], ["竞品分析", 1]],
+      unresolvedFrom: { 竞品分析: ["a.md"] },
+      suggestions: { 竞品分析: fix },
+      sameName: [["a/README.md", "b/README.md"]],
+      unusedAttachments: [],
+    },
+  });
+  const c = checkupModel(s);
+  assert.deepEqual(c.unresolved.map((x) => x.name), ["竞品分析", "年度复盘"]);
+  assert.deepEqual(c.unresolved[0].fix, fix);
+  assert.deepEqual(c.unresolved[0].from, ["a.md"]);
+  assert.deepEqual(c.sameName, [["a/README.md", "b/README.md"]]);
 });

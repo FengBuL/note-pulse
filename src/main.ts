@@ -7,6 +7,7 @@ import { ReportKind } from "./report-logic";
 import { WordPropsService } from "./wordprops";
 import { DedupeService, normalizeDedupeSettings } from "./dedupe/service";
 import { L } from "./i18n";
+import { linkText, rewriteLinks } from "./checkup-logic";
 import { DeviceLog, emptyDeviceLog, isDeviceId, mergeDeviceLog, newDeviceId, normalizeDeviceLog } from "./devices";
 
 interface SavedData {
@@ -398,6 +399,57 @@ export default class NotePulsePlugin extends Plugin {
   async setClippingFolder(folder: string) {
     this.addToList("clippingFolders", folder);
     await this.saveSettings();
+  }
+
+  /**
+   * 把指向 from 的断链改成指向 target，只改出现它的那些笔记。返回改了几篇、几处。
+   * 改之前记下每篇的原文和改后的文本，撤销时只恢复之后没再被改过的笔记。
+   */
+  async fixLink(from: string, target: string, sources: string[]): Promise<{ notes: number; links: number; to: string }> {
+    const paths = this.app.vault.getMarkdownFiles().map((f) => f.path);
+    const to = linkText(target, paths);
+    const changed: { path: string; before: string; after: string }[] = [];
+    let links = 0;
+    for (const p of new Set(sources)) {
+      const f = this.app.vault.getAbstractFileByPath(p);
+      if (!(f instanceof TFile)) continue;
+      await this.app.vault.process(f, (text) => {
+        const r = rewriteLinks(text, from, to);
+        if (r.count > 0) {
+          links += r.count;
+          changed.push({ path: p, before: text, after: r.text });
+        }
+        return r.text;
+      });
+    }
+    this.lastLinkFix = changed.length ? changed : null;
+    return { notes: changed.length, links, to };
+  }
+
+  /** 最近一次断链修复改过的笔记（只在这次运行期间可撤销） */
+  lastLinkFix: { path: string; before: string; after: string }[] | null = null;
+
+  /** 撤销最近一次断链修复：返回恢复了几篇、跳过了几篇（之后又被改过的不动） */
+  async undoLinkFix(): Promise<{ restored: number; skipped: number }> {
+    const fix = this.lastLinkFix;
+    this.lastLinkFix = null;
+    let restored = 0;
+    let skipped = 0;
+    for (const c of fix ?? []) {
+      const f = this.app.vault.getAbstractFileByPath(c.path);
+      if (!(f instanceof TFile)) {
+        skipped++;
+        continue;
+      }
+      let ok = false;
+      await this.app.vault.process(f, (text) => {
+        ok = text === c.after;
+        return ok ? c.before : text;
+      });
+      if (ok) restored++;
+      else skipped++;
+    }
+    return { restored, skipped };
   }
 
   async excludeFolder(folder: string) {

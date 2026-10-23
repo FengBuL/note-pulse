@@ -36,6 +36,7 @@ import {
   srLabel,
   svgEl,
 } from "./charts";
+import { baseName } from "./checkup-logic";
 import { L, UnitKind, count, fullDate, monthDay, monthShort, plural, unit, weekdayName, weekdayShort } from "./i18n";
 
 let reportDetailsId = 0;
@@ -45,6 +46,7 @@ const ROOT_FOLDER = "(根目录)"; // i18n-skip
 const folderName = (key: string) => (key === ROOT_FOLDER ? L("(根目录)", "(vault root)") : key);
 /** “收起”按钮的文字；moreLink 靠它决定箭头朝上 */
 const COLLAPSE = () => L("收起", "Show less");
+const fmtSize = (bytes: number) => (bytes >= 1e6 ? `${(bytes / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1e3))} KB`);
 /** "2026-10-24" → 星期几（0 是周日） */
 const dayIndex = (key: string) => {
   const [y, m, d] = key.split("-").map(Number);
@@ -1707,8 +1709,9 @@ export class DashboardView extends ItemView {
     live.createSpan({ cls: "vp-live-dot", attr: { "aria-hidden": "true" } });
     const at = new Date(s.generatedAt);
     live.createSpan({ text: L(`实时 · ${pad2(at.getHours())}:${pad2(at.getMinutes())} 更新`, `Live · updated ${pad2(at.getHours())}:${pad2(at.getMinutes())}`) });
-    const total = c.unresolved.length + c.orphans.length + c.empty.length + c.big.length + (dup ? dup.groups.length : 0);
-    const todo = fmtFull(c.unresolvedCount + c.orphans.length + c.empty.length + c.big.length + (dup ? dup.groups.length : 0));
+    const extra = c.sameName.length + c.unusedAttachments.length;
+    const total = c.unresolved.length + c.orphans.length + c.empty.length + c.big.length + extra + (dup ? dup.groups.length : 0);
+    const todo = fmtFull(c.unresolvedCount + c.orphans.length + c.empty.length + c.big.length + extra + (dup ? dup.groups.length : 0));
     head.createDiv({ cls: "vp-card-aside", text: total ? L(`共 ${todo} 项可整理`, `${todo} to tidy up`) : L("一切正常", "All good") });
 
     const cols = body.createDiv({ cls: "vp-checkup" });
@@ -1750,12 +1753,20 @@ export class DashboardView extends ItemView {
       });
     };
 
-    // 断链：按出现次数排；新建笔记用 Obsidian 自己的规则（和点断链时一样）
+    // 断链：能唯一确定指向哪篇的排在前面，一键改过去；其余照旧可以新建笔记（用 Obsidian 自己的规则）
     const u = col("unresolved", L("断链", "Broken links"), c.unresolvedCount, "warn", L("没有断开的链接", "No broken links"));
     for (const x of c.unresolved.slice(0, u.limit)) {
-      item(u.list, L(`[[${x.name}]] · ${x.count} 处`, `[[${x.name}]] · ${x.count}×`), x.name, () => this.plugin.openSearch(`"[[${x.name}]]"`), L("创建笔记", "Create note"), () => {
-        void this.app.workspace.openLinkText(x.name, x.source ?? "", "tab");
-      });
+      const shown = x.name.replace(/\\$/, "");
+      const search = () => this.plugin.openSearch(`"[[${shown}"`);
+      if (x.fix) {
+        const fix = x.fix;
+        const to = baseName(fix.target);
+        item(u.list, `[[${shown}]] → ${to}`, shown, search, L("修复", "Fix"), () => this.confirmLinkFix(shown, x.name, fix.target, x.from, x.count));
+      } else {
+        item(u.list, L(`[[${shown}]] · ${x.count} 处`, `[[${shown}]] · ${x.count}×`), shown, search, L("创建笔记", "Create note"), () => {
+          void this.app.workspace.openLinkText(shown, x.source ?? "", "tab");
+        });
+      }
     }
     foot(u, "unresolved", c.unresolved.length, "links");
 
@@ -1814,6 +1825,75 @@ export class DashboardView extends ItemView {
       );
     }
     foot(e, "emptybig", eb, "notes");
+
+    // 同名笔记：[[链接]] 只写名字时 Obsidian 会挑其中一篇，容易指错
+    const sn = col("samename", L("同名笔记", "Same name"), c.sameName.length, "", L("没有同名笔记", "No notes share a name"));
+    for (const g of c.sameName.slice(0, sn.limit)) {
+      const name = baseName(g[0]);
+      const first = this.app.vault.getAbstractFileByPath(g[0]);
+      item(
+        sn.list,
+        L(`${name} · ${g.length} 篇`, `${name} · ${g.length}`),
+        name,
+        first instanceof TFile ? () => void this.plugin.openFile(first) : null,
+        L("查看", "Show"),
+        () => this.plugin.openSearch(`file:"${name}"`)
+      );
+    }
+    foot(sn, "samename", c.sameName.length, "notes");
+
+    // 未引用的附件：没有任何笔记链接或嵌入它
+    const ua = col("unused", L("未引用的附件", "Unused attachments"), c.unusedAttachments.length, "", L("附件都有笔记在用", "Every attachment is used"));
+    for (const f of c.unusedAttachments.slice(0, ua.limit)) {
+      item(ua.list, `${f.name} · ${fmtSize(f.stat.size)}`, f.name, () => void this.plugin.openFile(f), L("删除", "Delete"), () => this.trashAttachment(f));
+    }
+    foot(ua, "unused", c.unusedAttachments.length, "notes");
+  }
+
+  /** 断链修复：先说清楚会改哪几篇，确认后改；改完可以撤销 */
+  private confirmLinkFix(shown: string, name: string, target: string, from: string[], times: number) {
+    const to = baseName(target);
+    const notes = new Set(from).size;
+    new ConfirmModal(
+      this.app,
+      L("修复断链", "Fix broken link"),
+      L(
+        `把 ${notes} 篇笔记里 ${times} 处 [[${shown}]] 改成指向“${target}”。别名、标题和嵌入保持不变。改完可以撤销。`,
+        `Point ${times} ${plural(times, "link")} to [[${shown}]] in ${count(notes, "notes")} at "${target}" instead. Aliases, headings and embeds stay as they are. You can undo this.`
+      ),
+      L("修复", "Fix"),
+      async () => {
+        const r = await this.plugin.fixLink(name, target, from);
+        const msg = L(`已修复 ${r.notes} 篇笔记里的 ${r.links} 处链接，现在指向 ${to}。`, `Fixed ${r.links} ${plural(r.links, "link")} in ${count(r.notes, "notes")}; they now point to ${to}.`);
+        const n = new Notice(msg, 10000);
+        // messageEl 要 Obsidian 1.8.7；更早的版本用 noticeEl
+        const host = (n as unknown as { messageEl?: HTMLElement; noticeEl: HTMLElement }).messageEl ?? (n as unknown as { noticeEl: HTMLElement }).noticeEl;
+        const undo = host.createEl("button", { cls: "vp-notice-undo", text: L("撤销", "Undo"), attr: { type: "button" } });
+        undo.addEventListener("click", () => {
+          n.hide();
+          void this.plugin.undoLinkFix().then((u) => {
+            new Notice(
+              u.skipped
+                ? L(`已撤销 ${u.restored} 篇；${u.skipped} 篇之后又改过，没有动。`, `Undid ${u.restored}; ${u.skipped} changed since and were left alone.`)
+                : L(`已撤销，${u.restored} 篇笔记恢复原样。`, `Undone. ${count(u.restored, "notes")} restored.`)
+            );
+          });
+        });
+      }
+    ).open();
+  }
+
+  /** 附件进回收站前确认 */
+  private trashAttachment(file: TFile) {
+    new ConfirmModal(
+      this.app,
+      L("删除未引用的附件", "Delete unused attachment"),
+      L(`没有笔记链接或嵌入“${file.path}”。删除后会进回收站，可以从回收站找回。`, `No note links to or embeds "${file.path}". It goes to the trash, where you can restore it.`),
+      L("删除", "Delete"),
+      async () => {
+        await this.app.fileManager.trashFile(file);
+      }
+    ).open();
   }
 
   /** 删除前确认；进系统 / Obsidian 回收站（按用户的“删除文件”设置），可以找回 */

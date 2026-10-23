@@ -149,6 +149,7 @@ Advanced options (what counts as a passage, which copy to keep, link style, prop
 
 - **Oversized notes and clipping folders.** A single auto-collected file with 200,000 characters can outweigh a year of writing. Note Pulse excludes notes over the threshold from writing stats by default, lets you mark whole folders as "collection" folders, and suggests it in a banner when it finds a folder where most notes are oversized.
 - **The word trend is based on current word counts.** It adds each note's current word count on its creation date. It is not a historical snapshot, so editing an old note changes the past. The chart says so, and "new notes per day" is the default view for that reason.
+- **Vault checkup.** Broken links that can only mean one note (it was moved, or the name differs only in spaces or case) can be fixed in one click; you see which notes change first, and you can undo. Other broken links can create the missing note. Orphans can be skipped per folder (Settings → Scope), and clipping folders are skipped automatically. The checkup also lists notes that share a name (a bare [[link]] may point to the wrong one) and attachments no note uses.
 - **Creation dates can be wrong after sync.** If many notes share one creation day, a banner points you to the created-date field setting.
 - **Streaks** count a day when it reaches the daily goal, or you wrote a daily note with at least 10 words. An empty template does not count. The current streak is not broken by today until the day is over.
 - **Several devices and outside writers.** Each device only records words typed in its own Obsidian editor, into its own log file, and the dashboard adds them up, so writing on both phone and computer is not double counted. Changes that arrive by sync, and text that AI assistants, scripts or import tools write straight into notes, update the note's word count but not "words added". Text typed in other editors does not count either.
@@ -405,6 +406,7 @@ views:
 
 - **超大笔记与采集文件夹。** 一个 20 万字的自动采集文件，可能比你一年写的字还多。Note Pulse 默认把超过阈值的笔记排除出写作统计，支持把整个文件夹标记为“采集文件夹”；发现某个文件夹里大部分笔记都超大时，会在看板顶部提示，并给出一键按钮。
 - **字数趋势用的是“当前字数”。** 它把每篇笔记现在的字数记在创建日上，不是历史快照，修改旧笔记会改变过去的曲线。图上有说明，默认视图也改成了“每天新建笔记数”。
+- **库体检。** 断链里能唯一确定该指向哪篇的（笔记被移动过，或名字只差空格、大小写），可以一键修复，修复前会说明改哪几篇，之后可以撤销；其余的可以直接新建笔记。孤立笔记可以按文件夹不检查（设置 → 范围），采集文件夹自动不检查。还会列出同名笔记（只写名字的 [[链接]] 可能指错）和没有被任何笔记引用的附件。
 - **同步后创建时间可能不准。** 如果很多笔记的创建日期是同一天，看板会提示你设置创建日期字段。
 - **打卡**：当天达到每日目标，或写了不少于 10 字的日记就算；空模板不算。今天还没结束时不会打断当前连续天数。
 - **多设备与外部写入。** 每台设备只记在自己的 Obsidian 编辑器里打的字，各写各的记录文件，看板相加，所以手机和电脑都写不会重复计数。同步进来的改动，以及 AI 助手、脚本、导入工具直接写进笔记的内容，只更新笔记字数，不算“新增字数”。在其它编辑器里写的字也不算。

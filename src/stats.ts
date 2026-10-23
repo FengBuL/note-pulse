@@ -1,6 +1,7 @@
 import { App, CachedMetadata, TFile, getAllTags } from "obsidian";
 import { countWords } from "./count";
 import { DashboardSettings, normalizeFolder, splitList } from "./settings";
+import { LinkSuggestion, inFolders, sameNameGroups, suggestTarget, unusedAttachments } from "./checkup-logic";
 
 /** 内容少于这个字数的日记（多半是空模板）不算打卡 */
 export const DAILY_MIN_WORDS = 10;
@@ -146,6 +147,14 @@ export interface VaultStats {
     topUnresolved: [string, number][];
     /** 断链名 -> 第一篇出现它的笔记路径（新建笔记时按 Obsidian 的规则决定放在哪） */
     unresolvedSource?: Record<string, string>;
+    /** 断链名 -> 出现它的所有笔记路径（修复时只改这些笔记） */
+    unresolvedFrom?: Record<string, string[]>;
+    /** 能唯一确定指向哪篇的断链：断链名 -> 建议的笔记路径 */
+    suggestions?: Record<string, LinkSuggestion>;
+    /** 文件名相同、在不同文件夹的笔记 */
+    sameName?: string[][];
+    /** 没有被任何笔记链接或嵌入的附件 */
+    unusedAttachments?: TFile[];
   };
   folders: { folder: string; notes: number; words: number }[];
 }
@@ -572,9 +581,12 @@ export async function computeStats(
     .slice(0, 15)
     .map(([p, count]) => ({ file: byPath.get(p), count }))
     .filter((x): x is { file: TFile; count: number } => !!x.file);
-  const orphans = files.filter((f) => !inbound.has(f.path) && !hasOutbound.has(f.path));
+  // 孤立笔记：设置里忽略的文件夹、采集文件夹不检查
+  const orphanSkip = [...splitList(settings.orphanIgnoreFolders || "").map(normalizeFolder), ...clipping];
+  const orphans = files.filter((f) => !inbound.has(f.path) && !hasOutbound.has(f.path) && !inFolders(f.path, orphanSkip));
   const unresolvedMap = new Map<string, number>();
   const unresolvedSource: Record<string, string> = {};
+  const unresolvedFrom: Record<string, string[]> = {};
   let unresolvedCount = 0;
   for (const src of Object.keys(unresolved)) {
     if (!included.has(src)) continue;
@@ -582,8 +594,23 @@ export async function computeStats(
       unresolvedCount += n;
       inc(unresolvedMap, name, n);
       if (!(name in unresolvedSource)) unresolvedSource[name] = src;
+      (unresolvedFrom[name] = unresolvedFrom[name] || []).push(src);
     }
   }
+  const allNotes = app.vault.getMarkdownFiles().map((f) => f.path);
+  const suggestions: Record<string, LinkSuggestion> = {};
+  for (const name of unresolvedMap.keys()) {
+    const sug = suggestTarget(name, allNotes);
+    if (sug) suggestions[name] = sug;
+  }
+  const sameName = sameNameGroups(files.map((f) => f.path));
+  // 附件：被任何笔记（不只是统计范围内的）链接或嵌入过就算用到了
+  const referenced = new Set<string>();
+  for (const targets of Object.values(resolved)) for (const dst of Object.keys(targets)) referenced.add(dst);
+  const allFiles = app.vault.getFiles ? app.vault.getFiles() : [];
+  const { excluded } = folderLists(settings);
+  const unusedSet = new Set(unusedAttachments(allFiles.map((f) => f.path).filter((p) => !isExcluded(p, excluded) && !p.startsWith(app.vault.configDir + "/")), referenced));
+  const unusedFiles = allFiles.filter((f) => unusedSet.has(f.path));
 
   // 4. 写作量（热力图 / 打卡）
   const logStart = pdata.logStartDay || dayKey(now);
@@ -676,6 +703,10 @@ export async function computeStats(
     links: {
       topLinked,
       orphans,
+      unresolvedFrom,
+      suggestions,
+      sameName,
+      unusedAttachments: unusedFiles,
       unresolvedCount,
       topUnresolved: sortedEntries(unresolvedMap, 50),
       unresolvedSource,

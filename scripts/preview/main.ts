@@ -76,6 +76,13 @@ const stats: VaultStats = {
     topLinked: [], orphans: big ? files.slice(20, 260).map((f) => f.file) : [files[4].file, files[6].file, files[5].file], unresolvedCount: big ? 420 : 40,
     topUnresolved: big ? Array.from({ length: 10 }, (_, i): [string, number] => [`断链 ${i + 1}`, 30 - i * 2]) : [["年度复盘 2025", 3], ["竞品分析-v2", 2], ["TypeScript 类型", 1], ["周会纪要", 1]],
     unresolvedSource: { "年度复盘 2025": "工作/周会.md" },
+    unresolvedFrom: { "竞品分析-v2": ["工作/周会.md", "工作/需求评审.md"] },
+    suggestions: { "竞品分析-v2": { name: "竞品分析-v2", target: "工作/竞品分析 v2.md", kind: "loose" } },
+    sameName: [["harness/README.md", "墨笔/README.md"], ["harness/Track C/TG03-边界与确认门.md", "harness/公众号文章/TG03-边界与确认门.md"]],
+    unusedAttachments: [
+      Object.assign(mk("大模型学习/附件/Pasted image 20260325130021.png", 0), { name: "Pasted image 20260325130021.png", stat: { mtime: 0, ctime: 0, size: 412_000 } }),
+      Object.assign(mk("大模型学习/大模型学习顺序.svg", 0), { name: "大模型学习顺序.svg", stat: { mtime: 0, ctime: 0, size: 38_000 } }),
+    ],
   },
   folders: [{ folder: "工作", notes: 505, words: 1_200_000 }, { folder: "读书", notes: 252, words: 800_000 }],
 };
@@ -88,7 +95,7 @@ const dedupe = {
   openReport: async () => undefined, startCleanup: () => undefined,
 };
 const app = {
-  vault: { getName: () => "我的知识库", getMarkdownFiles: () => [] },
+  vault: { getName: () => "我的知识库", getMarkdownFiles: () => [], getAbstractFileByPath: (p: string) => mk(p, 0) },
   metadataCache: { getFileCache: () => null },
   workspace: { openLinkText: async () => undefined },
   fileManager: { trashFile: async () => undefined },

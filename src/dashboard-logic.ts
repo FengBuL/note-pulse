@@ -3,6 +3,7 @@ import type { TFile } from "obsidian";
 import { addDays, dayKey, isCheckinDay, startOfDay } from "./stats";
 import type { FileStat, VaultStats } from "./stats";
 import { weekdayLetter, weekdayName } from "./i18n";
+import type { LinkSuggestion } from "./checkup-logic";
 
 
 /** 本地日历周的周一 */
@@ -214,11 +215,14 @@ export function busiestWeekday(s: VaultStats, from: Date, to: Date): string | nu
 /* ---------------- 库体检 ---------------- */
 
 export interface CheckupModel {
-  unresolved: { name: string; count: number; source: string | null }[];
+  /** 能修的（有唯一建议）排在前面，其余按出现次数 */
+  unresolved: { name: string; count: number; source: string | null; fix: LinkSuggestion | null; from: string[] }[];
   unresolvedCount: number;
   orphans: TFile[];
   empty: FileStat[];
   big: FileStat[];
+  sameName: string[][];
+  unusedAttachments: TFile[];
 }
 
 /**
@@ -227,8 +231,14 @@ export interface CheckupModel {
  */
 export function checkupModel(s: VaultStats): CheckupModel {
   const source = s.links.unresolvedSource || {};
+  const sug = s.links.suggestions || {};
+  const from = s.links.unresolvedFrom || {};
+  const unresolved = s.links.topUnresolved.map(([name, count]) => ({ name, count, source: source[name] ?? null, fix: sug[name] ?? null, from: from[name] ?? [] }));
+  unresolved.sort((a, b) => Number(!!b.fix) - Number(!!a.fix) || b.count - a.count);
   return {
-    unresolved: s.links.topUnresolved.map(([name, count]) => ({ name, count, source: source[name] ?? null })),
+    unresolved,
+    sameName: s.links.sameName || [],
+    unusedAttachments: [...(s.links.unusedAttachments || [])].sort((a, b) => b.stat.size - a.stat.size),
     unresolvedCount: s.links.unresolvedCount,
     orphans: [...s.links.orphans].sort((a, b) => b.stat.mtime - a.stat.mtime),
     empty: s.files.filter((f) => f.words === 0 && f.links === 0 && (f.embeds ?? 0) === 0).sort((a, b) => b.mtime - a.mtime),
