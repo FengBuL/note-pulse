@@ -437,6 +437,12 @@ export default class NotePulsePlugin extends Plugin {
     await this.persist();
   }
 
+  /** 只保存看板上的显示偏好（如本周圆点 / 柱状），不重新统计 */
+  async saveViewSetting() {
+    this.data.dirty = true;
+    await this.persist();
+  }
+
   /** 用已有统计结果重绘看板（比如显示 / 隐藏入口卡片） */
   refreshViewsOnly() {
     if (this.lastStats) for (const v of this.getViews()) v.render(this.lastStats);

@@ -1,9 +1,26 @@
 import { ItemView, Notice, Platform, TFile, WorkspaceLeaf, setIcon } from "obsidian";
 import type NotePulsePlugin from "./main";
-import { reportPeriod, summarizeWritingDays, writingReportOverview } from "./report-logic";
+import { ConfirmModal } from "./dedupe/modals";
+import { writingReportOverview } from "./report-logic";
 import { latestWritingReport } from "./report-storage";
-import { groupKey as groupKeyOf } from "./dedupe/core/summary";
+import { overview as dedupeOverview } from "./dedupe/core/summary";
+import { groupItem } from "./dedupe/core/plan";
+import {
+  TrendMetric,
+  TrendRange,
+  busiestWeekday,
+  checkupModel,
+  headline,
+  monthWriting,
+  trendModel,
+  weekDays,
+  weekStart,
+  weeklyCheckins,
+  weeklyNotes,
+  weeklyWords,
+} from "./dashboard-logic";
 import { GroupStat, Hint, TaskInfo, VaultStats, addDays, dayKey, isCheckinDay, pad2, startOfDay } from "./stats";
+import { MOTION, SegRect, animateHeight, countUp, drawLines, markStagger, reducedMotion, segRect, slideSeg } from "./motion";
 import {
   BarItem,
   SeriesPoint,
@@ -15,6 +32,7 @@ import {
   drawTrendChart,
   fmtFull,
   fmtNum,
+  fmtParts,
   srLabel,
   svgEl,
 } from "./charts";
@@ -23,15 +41,11 @@ let reportDetailsId = 0;
 
 export const VIEW_TYPE_PULSE = "note-pulse-view";
 
-type Range = 30 | 90 | 365;
-type Metric = "words" | "notes";
-type Gran = "day" | "week" | "month";
-type TaskTab = "due" | "folder" | "note";
+type TaskTab = "due" | "folder";
 type TagTab = "tags" | "folders";
 type LinkTab = "top" | "orphans" | "unresolved";
 
 const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
-const LIST_LIMIT = 6;
 
 interface Checkin {
   isActive: (k: string) => boolean;
@@ -46,12 +60,14 @@ interface Checkin {
 
 export class DashboardView extends ItemView {
   plugin: NotePulsePlugin;
-  private range: Range = 90;
-  private metric: Metric = "notes";
+  private range: TrendRange = 182;
+  private metric: TrendMetric = "words";
   private taskTab: TaskTab = "due";
   private tagTab: TagTab = "tags";
   private linkTab: LinkTab = "top";
   private selectedDay: string | null = null;
+  /** 热力图选中某天后，当天修改的笔记是否全部展开 */
+  private dayExpanded = false;
   private bodyEl!: HTMLElement;
   private statusEl!: HTMLElement;
   private subtitleEl!: HTMLElement;
@@ -65,8 +81,18 @@ export class DashboardView extends ItemView {
   private bodyHost!: HTMLElement;
   private helpPop: HTMLElement | null = null;
   private helpAnchor: HTMLElement | null = null;
-  /** 分页卡片（任务 / 标签 / 链接）见过的最大高度：切换标签页时只增不减，避免整页高度塌缩导致滚动跳动 */
-  private cardMinH = new Map<string, number>();
+  /**
+   * 动效模式：intro 首次打开（卡片依次出现、数字从 0 滚动）；update 自动刷新（只有变了的数字滚动）；
+   * swap 切换标签页 / 范围（新内容淡入、图表重新长出）；resize 展开收起（只过渡高度）
+   */
+  private motionMode: "intro" | "update" | "swap" | "resize" = "intro";
+  private introPlayed = false;
+  private introUntil = 0;
+  private introElapsed = 0;
+  /** 上一次画出来的数字，用来判断数值有没有变 */
+  private lastNums = new Map<string, number>();
+  private enterOrder = 0;
+  private motionTimers: number[] = [];
   private tapGuardCleanup: (() => void) | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: NotePulsePlugin) {
@@ -118,6 +144,8 @@ export class DashboardView extends ItemView {
 
     if (Platform.isMobile) this.installTapGuard(root);
 
+    this.introPlayed = false;
+    this.introUntil = 0;
     if (this.plugin.lastStats) this.render(this.plugin.lastStats);
     else this.showLoading("正在统计…");
     void this.plugin.requestRefresh(false);
@@ -200,6 +228,8 @@ export class DashboardView extends ItemView {
   }
 
   async onClose() {
+    for (const t of this.motionTimers) window.clearTimeout(t);
+    this.motionTimers = [];
     this.tapGuardCleanup?.();
     this.tapGuardCleanup = null;
     this.disconnectObservers();
@@ -270,8 +300,25 @@ export class DashboardView extends ItemView {
     // 重绘期间把内容区高度撑住，避免清空 → 重建的瞬间页面塌缩、滚动位置被夹到顶部
     const hold = this.bodyEl.offsetHeight;
     if (hold > 0) this.bodyEl.setCssProps({ "--vp-held-height": `${hold}px` });
+    const motion = this.motionOn();
+    // 打开看板时 onOpen 先用缓存画一次，紧接着 requestRefresh 再画一次：
+    // 第二次落在首次动画期间时整体按首次处理，否则首次动画会被打断、数字直接跳到终点
+    const now = performance.now();
+    const inIntro = now < this.introUntil;
+    this.motionMode = motion && (!this.introPlayed || inIntro) ? "intro" : "update";
+    this.contentEl.toggleClass("vp-motion", motion);
+    this.enterOrder = 0;
+    if (this.motionMode === "intro" && !inIntro) {
+      this.introPlayed = true;
+      this.introUntil = now + MOTION.introTotal;
+      this.flagFor(this.contentEl, "is-intro", MOTION.introTotal);
+    }
+    // 重绘落在首次动画期间：CSS 动画从已经播放到的位置接着放（负延迟），数字从 0 起算但跳过已经过去的时间
+    this.introElapsed = inIntro ? MOTION.introTotal - (this.introUntil - now) : 0;
+    this.contentEl.setCssProps({ "--vp-intro-offset": `${this.introElapsed}ms` });
     this.keepScroll(() => this.renderNow(stats));
-    this.cardMinH.clear();
+    // 之后的局部重绘（悬停读数恢复、展开收起）不再按首次打开处理
+    this.motionMode = "update";
     if (hold > 0) {
       const win = this.contentEl.ownerDocument.defaultView;
       win?.requestAnimationFrame(() => {
@@ -308,16 +355,16 @@ export class DashboardView extends ItemView {
     const ck = this.computeCheckin(stats);
     this.bodyHost = body;
     this.define("hints", body, (h) => this.renderHints(h, stats));
+    this.define("headline", body, (h) => this.renderHeadline(h, stats, ck));
     const grid = body.createDiv({ cls: "vp-grid" });
     this.define("hero", grid, (h) => this.renderHero(h, stats, ck));
+    this.define("tasks", grid, (h) => this.renderTasks(h, stats));
     this.define("kpis", grid, (h) => this.renderKpis(h, stats));
     this.define("heat", grid, (h) => this.renderHeatmap(h, stats, ck));
     this.define("trend", grid, (h) => this.renderTrend(h, stats));
-    this.define("tasks", grid, (h) => this.renderTasks(h, stats));
     this.define("tags", grid, (h) => this.renderTags(h, stats));
-    this.define("links", grid, (h) => this.renderLinks(h, stats));
+    this.define("checkup", grid, (h) => this.renderCheckup(h, stats));
     this.define("reports", grid, (h) => this.renderReports(h));
-    if (this.plugin.settings.dedupeEnabled && this.plugin.settings.dedupeCard) this.define("dedupe", grid, (h) => this.renderDedupe(h));
   }
 
   /** 登记并渲染一个区块；每个渲染函数必须恰好生成一个根元素 */
@@ -329,27 +376,100 @@ export class DashboardView extends ItemView {
   private mount(key: string, parent: HTMLElement, fn: (host: HTMLElement) => void) {
     const prev = this.currentPart;
     this.currentPart = key;
+    // 首次打开：各区块按顺序依次浮现，区块里的数字和图表跟着这个延迟开始
+    const intro = this.motionMode === "intro";
+    const enter = intro ? Math.min(0.6, this.enterOrder / 14) : 0;
+    this.enterDelay = enter * MOTION.stagger - this.introElapsed;
     try {
       fn(parent);
     } finally {
       this.currentPart = prev;
     }
     const el = parent.lastElementChild as HTMLElement | null;
-    if (el) this.parts.set(key, el);
+    if (!el) return;
+    this.parts.set(key, el);
+    if (intro) {
+      markStagger(el);
+      drawLines(el, this.enterDelay);
+    }
+    if (intro) {
+      const targets = el.hasClass("vp-kpis") ? Array.from(el.children) as HTMLElement[] : [el];
+      for (const t of targets) {
+        t.addClass("vp-enter");
+        t.setCssProps({ "--vp-enter": String(Math.min(0.6, this.enterOrder++ / 14)) });
+      }
+    }
+  }
+
+  /** 首次打开时当前区块的入场延迟（毫秒），数字滚动用 */
+  private enterDelay = 0;
+
+  private motionOn(): boolean {
+    return this.plugin.settings.motion && !reducedMotion(this.contentEl.ownerDocument.defaultView);
+  }
+
+  /** 给元素加一个类，过一会儿自动去掉（动效只在那一瞬间生效，之后的重绘不再重播） */
+  private flagFor(el: HTMLElement, cls: string, ms: number) {
+    el.addClass(cls);
+    this.motionTimers.push(window.setTimeout(() => el.removeClass(cls), ms));
   }
 
   /**
-   * 只重绘一个区块（点击标签页、切换范围时），不打断其它区块，并保持键盘焦点和滚动位置。
-   * 任务 / 标签 / 链接这类分页卡片：高度只增不减，切到较短的标签页时卡片不会收缩，
-   * 否则页面总高度变小，处在底部时浏览器会把滚动位置夹回去，看起来就是整页“弹”了一下。
+   * 数字：首次打开从 0 滚到当前值；自动刷新时只有变了的才从旧值滚过去并闪一下强调色；
+   * 切换标签页时新出现的数字从 0 滚动。el 是 bigNumber 返回的元素。
    */
-  private rerender(key: string) {
+  private tweenNum(key: string, el: HTMLElement, value: number, unit = "") {
+    const prev = this.lastNums.get(key);
+    this.lastNums.set(key, value);
+    const m = this.motionMode;
+    if (!this.motionOn() || m === "resize") return;
+    let from: number | null = null;
+    if (m === "intro") from = 0;
+    else if (prev !== undefined && prev !== value) from = prev;
+    else if (prev === undefined && m === "swap") from = 0;
+    if (from === null || from === value) return;
+    countUp(el, from, value, unit, MOTION.count, m === "intro" ? this.enterDelay : 0);
+    if (m === "update") this.flagFor(el, "is-changed", MOTION.count + 600);
+  }
+
+  /** 圆环：从 0（首次）或旧比例画到新比例 */
+  private tweenRing(key: string, wrap: HTMLElement, ratio: number) {
+    const v = Math.max(0, Math.min(1, ratio));
+    const prev = this.lastNums.get(key);
+    this.lastNums.set(key, v);
+    const circle = wrap.querySelector<SVGCircleElement>(".vp-ring-value");
+    const m = this.motionMode;
+    if (!circle || !circle.animate || !this.motionOn() || m === "resize") return;
+    const from = m === "intro" ? 0 : prev;
+    if (from === undefined || Math.abs(from - v) < 0.001) return;
+    const c = parseFloat(circle.getAttribute("stroke-dasharray")?.split(" ")[1] ?? "0");
+    if (!c) return;
+    circle.animate([{ strokeDasharray: `${c * from} ${c}` }, { strokeDasharray: `${c * v} ${c}` }], {
+      duration: MOTION.count + 200,
+      delay: m === "intro" ? this.enterDelay : 0,
+      easing: MOTION.ease,
+      fill: "backwards",
+    });
+  }
+
+  /**
+   * 只重绘一个区块，不打断其它区块，并保持键盘焦点和滚动位置。
+   * mode = swap：点击标签页、切换范围 / 样式。新内容淡入、图表重新长出、分段控件的选中底色滑过去。
+   * mode = resize：展开 / 收起 / 选中某天。只把卡片高度平滑过渡到新高度，不锁高度（锁了就收不回去）。
+   * 没开动效时，切换标签页沿用旧办法：高度只增不减，避免整页高度塌缩、处在底部时滚动位置被夹回去；
+   * 展开状态下不锁，否则切到别的标签页后卡片会停在展开时的高度。
+   */
+  private rerender(key: string, mode: "swap" | "resize" = "swap") {
     const old = this.parts.get(key);
     const fn = this.renderers.get(key);
     if (!old || !fn || !this.stats) return;
     const focusId = (this.contentEl.ownerDocument.activeElement as HTMLElement | null)?.getAttribute("data-fid") || null;
-    const sticky = key === "tasks" || key === "tags" || key === "links";
-    const prevH = Math.max(this.cardMinH.get(key) ?? 0, sticky ? old.getBoundingClientRect().height : 0);
+    const motion = this.motionOn();
+    const prevH = old.getBoundingClientRect().height;
+    const hold = !motion && mode === "swap" && !old.hasClass("is-expanded");
+    const segs: (SegRect | null)[] = motion ? Array.from(old.querySelectorAll<HTMLElement>(".vp-seg")).map(segRect) : [];
+    const prevMode = this.motionMode;
+    this.motionMode = mode;
     this.keepScroll(() => {
       this.disconnectObservers(key);
       // 先用一个 display: contents 的占位容器就地渲染，这样图表量到的是最终宽度，不会闪烁
@@ -363,14 +483,26 @@ export class DashboardView extends ItemView {
         return;
       }
       wrapper.replaceWith(fresh);
-      if (sticky && prevH > 0) {
+      if (hold && prevH > 0) {
         fresh.addClass("vp-held-height");
         fresh.setCssProps({ "--vp-held-height": `${Math.ceil(prevH)}px` });
-        this.cardMinH.set(key, Math.max(prevH, fresh.getBoundingClientRect().height));
+      }
+      if (motion) {
+        if (mode === "swap") {
+          markStagger(fresh);
+          drawLines(fresh, 0);
+          this.flagFor(fresh, "is-swap", MOTION.swapTotal);
+        }
+        fresh.querySelectorAll<HTMLElement>(".vp-seg").forEach((seg, i) => {
+          const from = segs[i];
+          if (from) slideSeg(seg, from);
+        });
+        animateHeight(fresh, prevH);
       }
       // preventScroll：聚焦时不要让浏览器把元素滚进视野（手机上会拖着整页跳）
       if (focusId) fresh.querySelector<HTMLElement>(`[data-fid="${focusId}"]`)?.focus({ preventScroll: true });
     });
+    this.motionMode = prevMode;
   }
 
   /* ---------- 通用组件 ---------- */
@@ -622,16 +754,39 @@ export class DashboardView extends ItemView {
     }
   }
 
-  /* ---------- 1. 焦点：今日写作 ---------- */
+  /* ---------- 1. 页首一句话 ---------- */
+
+  private renderHeadline(parent: HTMLElement, s: VaultStats, ck: Checkin) {
+    const goal = this.plugin.settings.dailyWordGoal;
+    const h = headline(s, goal, new Date(s.generatedAt));
+    const el = parent.createDiv({ cls: "vp-headline" });
+    const lead = el.createDiv({ cls: "vp-headline-lead" });
+    lead.createSpan({ text: "本周已写 " });
+    lead.createSpan({ cls: "vp-grad-text", text: fmtFull(h.weekWords) });
+    lead.createSpan({ text: " 字" });
+    if (h.changePct !== null && h.changePct !== 0) lead.createSpan({ text: `，比上周同期${h.changePct > 0 ? "多" : "少"} ${Math.abs(h.changePct)}%` });
+    else if (h.changePct === 0) lead.createSpan({ text: "，和上周同期持平" });
+    lead.createSpan({ text: "。" });
+    const bits: string[] = [];
+    if (ck.current > 0) bits.push(`连续写作第 ${ck.current} 天`);
+    bits.push(h.todayDone ? "今天已达成目标" : goal > 0 ? `今天还差 ${fmtFull(Math.max(0, goal - h.todayWords))} 字` : "今天还没动笔");
+    if (h.dueToday > 0) bits.push(`${h.dueToday} 项任务今天到期`);
+    if (h.overdue > 0) bits.push(`${h.overdue} 项已逾期`);
+    el.createDiv({ cls: "vp-headline-sub", text: bits.join(" · ") });
+  }
+
+  /* ---------- 2. 焦点：今日写作 ---------- */
 
   private renderHero(grid: HTMLElement, s: VaultStats, ck: Checkin) {
-    const goal = this.plugin.settings.dailyWordGoal;
+    const settings = this.plugin.settings;
+    const goal = settings.dailyWordGoal;
+    const now = new Date(s.generatedAt);
     const hero = grid.createDiv({ cls: "vp-card vp-hero" });
     const todayDone = ck.isActive(ck.todayKey);
 
-    const head = hero.createDiv({ cls: "vp-hero-head" });
+    const head = hero.createDiv({ cls: "vp-card-head" });
     const ht = head.createDiv({ cls: "vp-card-title" });
-    setIcon(ht.createSpan({ cls: "vp-card-icon" }), "pencil");
+    setIcon(ht.createSpan({ cls: "vp-card-icon", attr: { "aria-hidden": "true" } }), "pencil");
     ht.createSpan({ text: "今日写作" });
     this.help(
       ht,
@@ -639,180 +794,236 @@ export class DashboardView extends ItemView {
     );
     const pill = head.createDiv({ cls: "vp-pill " + (todayDone ? "is-success" : "is-muted") });
     setIcon(pill.createSpan({ cls: "vp-pill-icon" }), todayDone ? "check" : "clock");
-    pill.createSpan({ text: todayDone ? "今日已打卡" : "今天还没打卡" });
+    pill.createSpan({ text: todayDone ? "已打卡" : "还没打卡" });
 
     const main = hero.createDiv({ cls: "vp-hero-main" });
 
-    // 左：今日字数 / 目标 圆环
+    // 今日字数 / 目标 圆环
     const ratio = goal > 0 ? ck.todayWords / goal : ck.todayWords > 0 ? 1 : 0;
-    const center = drawRing(main, ratio, 132, 12, "vp-hero-ring" + (ratio >= 1 ? " is-complete" : ""));
+    const center = drawRing(main, ratio, 132, 10, "vp-hero-ring");
     const ringWrap = center.parentElement as HTMLElement;
+    this.tweenRing("hero:ring", ringWrap, ratio);
     ringWrap.setAttr("role", "img");
     srLabel(ringWrap, goal > 0 ? `今日 ${fmtFull(ck.todayWords)} 字，目标 ${fmtFull(goal)} 字` : `今日 ${fmtFull(ck.todayWords)} 字`);
-    bigNumber(center, ck.todayWords, undefined, "vp-num vp-ring-num");
+    this.tweenNum("hero:today", bigNumber(center, ck.todayWords, undefined, "vp-num vp-ring-num"), ck.todayWords);
     center.createDiv({ cls: "vp-ring-caption", text: goal > 0 ? `目标 ${fmtNum(goal)} 字` : "今日字数" });
 
-    // 右：连续打卡
+    // 连续打卡
     const streak = main.createDiv({ cls: "vp-hero-streak" });
     streak.createDiv({ cls: "vp-label", text: "连续打卡" });
-    bigNumber(streak, String(ck.current), "天", "vp-num vp-num-hero");
-    const note = streak.createDiv({ cls: "vp-hero-note" });
-    if (goal > 0 && ck.todayWords < goal) note.setText(`距离今日目标还差 ${fmtFull(goal - ck.todayWords)} 字`);
-    else if (goal > 0) note.setText(ratio >= 2 ? `已达成今日目标，超额 ${Math.round((ratio - 1) * 100)}%` : ratio > 1 ? "已超额完成今日目标" : "今日目标已达成");
-    else note.setText(ck.todayWords > 0 ? "今天已经动笔了" : "写点什么吧");
-
-    const week = streak.createDiv({ cls: "vp-week" });
-    for (const day of ck.last7) {
-      const c = week.createDiv({ cls: "vp-week-day" + (day.active ? " is-active" : "") + (day.isToday ? " is-today" : "") });
-      const dot = c.createDiv({ cls: "vp-week-dot", attr: { role: "img", "aria-label": `${day.key}${day.active ? " 已打卡" : " 未打卡"}` } }); // 小圆点没有别的气泡，保留 Obsidian 自带提示
-      if (day.active) setIcon(dot, "check");
-      c.createDiv({ cls: "vp-week-label", text: day.isToday ? "今" : day.label });
-    }
-
-    const weeklyGoal = this.plugin.settings.weeklyWordGoal;
-    const weekly = summarizeWritingDays(s, this.plugin.settings, reportPeriod("week", new Date(s.generatedAt)));
-    const weeklyBox = hero.createDiv({ cls: "vp-weekly-goal" });
-    weeklyBox.createDiv({ cls: "vp-label", text: `本周打卡 ${weekly.checkins}/7 天 · 周一到周日` });
-    if (weeklyGoal > 0) {
-      weeklyBox.createDiv({ text: `本周 ${fmtFull(weekly.words)} / ${fmtFull(weeklyGoal)} 字` });
-      const meter = weeklyBox.createDiv({ cls: "vp-meter", attr: {
-        role: "progressbar", "aria-label": "每周字数目标", "aria-valuemin": "0",
-        "aria-valuemax": String(weeklyGoal), "aria-valuenow": String(Math.min(weekly.words, weeklyGoal)),
-        "aria-valuetext": `已写 ${weekly.words} 字，目标 ${weeklyGoal} 字`,
-      } });
-      meter.createDiv({ cls: "vp-meter-fill vp-weekly-fill" }).setCssProps({ "--vp-weekly-progress": `${Math.min(100, weekly.words / weeklyGoal * 100)}%` });
-    }
-
-    // 底部统计
-    const foot = hero.createDiv({ cls: "vp-hero-foot" });
-    const stat = (label: string, value: string, unit: string) => {
-      const x = foot.createDiv({ cls: "vp-hero-stat" });
-      x.createDiv({ cls: "vp-label", text: label });
-      const v = x.createDiv({ cls: "vp-hero-stat-value" });
-      v.createSpan({ text: value });
-      v.createSpan({ cls: "vp-num-unit", text: unit });
-      return x;
-    };
-    stat("近一年最长连续", String(ck.longest), "天");
-    stat("近一年打卡", String(ck.activeDays), "天");
-    const diary = stat("本月日记", String(ck.diaryMonth), "篇");
+    this.tweenNum("hero:streak", bigNumber(streak, String(ck.current), "天", "vp-num vp-num-hero"), ck.current, "天");
+    streak.createDiv({ cls: "vp-hero-note", text: `最长 ${ck.longest} 天 · 近一年 ${ck.activeDays} 天` });
+    const diary = streak.createDiv({ cls: "vp-hero-note", text: `本月日记 ${ck.diaryMonth} 篇` });
     const todayDiary = s.dailyNotes[ck.todayKey];
     if (todayDiary) this.clickable(diary, "打开今天的日记", (e) => void this.plugin.openFile(todayDiary, undefined, e));
+
+    // 本周
+    main.appendChild(this.renderWeek(s, goal, now));
+
+    // 今天动过的笔记（来自每天修改过的笔记列表；不估算单篇字数）
+    const foot = hero.createDiv({ cls: "vp-hero-foot" });
+    const todayCreated = s.dayCreated[ck.todayKey] || 0;
+    const todayFiles = s.dayModified[ck.todayKey] || [];
+    const stat = (key: string, label: string, value: number, unit: string) => {
+      const x = foot.createDiv({ cls: "vp-hero-stat" });
+      x.createDiv({ cls: "vp-label", text: label });
+      this.tweenNum(key, bigNumber(x, String(value), unit, "vp-num vp-num-sm"), value, unit);
+    };
+    stat("hero:created", "今日新建", todayCreated, "篇");
+    stat("hero:modified", "今日改动", todayFiles.length, "篇");
+    const recent = foot.createDiv({ cls: "vp-hero-recent" });
+    recent.createDiv({ cls: "vp-label", text: "今天写过" });
+    const chips = recent.createDiv({ cls: "vp-chips" });
+    if (todayFiles.length === 0) chips.createSpan({ cls: "vp-chip-empty", text: "今天还没有改动的笔记" });
+    for (const f of [...todayFiles].sort((a, b) => b.stat.mtime - a.stat.mtime).slice(0, 3)) {
+      const c = chips.createSpan({ cls: "vp-chip", text: f.basename, attr: { title: f.path } });
+      this.clickable(c, `打开 ${f.basename}`, (e) => void this.plugin.openFile(f, undefined, e));
+    }
   }
 
-  /* ---------- 2. KPI ---------- */
+  /** 本周七天：圆点或柱状，用户在卡片上切换，选择记在设置里 */
+  private renderWeek(s: VaultStats, goal: number, now: Date): HTMLElement {
+    const settings = this.plugin.settings;
+    const style = settings.weekStyle;
+    const days = weekDays(s, goal, now);
+    const weekWords = days.reduce((a, d) => a + d.words, 0);
+    const box = createDiv({ cls: `vp-week-box is-${style}` });
+    const top = box.createDiv({ cls: "vp-week-top" });
+    const sum = top.createDiv({ cls: "vp-week-sum" });
+    sum.createSpan({ cls: "vp-label", text: "本周 " });
+    sum.createSpan({ cls: "vp-week-total", text: fmtFull(weekWords) });
+    if (settings.weeklyWordGoal > 0) sum.createSpan({ cls: "vp-week-goal", text: ` / ${fmtFull(settings.weeklyWordGoal)}` });
+    this.segmented<"dots" | "bars">(
+      top,
+      [["dots", "圆点"], ["bars", "柱状"]],
+      style,
+      (v) => {
+        settings.weekStyle = v;
+        void this.plugin.saveViewSetting();
+        this.rerender("hero");
+      },
+      "本周显示方式"
+    );
+
+    const row = box.createDiv({ cls: "vp-week" });
+    const max = Math.max(goal, ...days.map((d) => d.words), 1);
+    for (const d of days) {
+      const c = row.createDiv({ cls: "vp-week-day" + (d.done ? " is-active" : "") + (d.isToday ? " is-today" : "") + (d.future ? " is-future" : "") });
+      const desc = d.future ? "还没到" : d.done ? `已打卡，${fmtFull(d.words)} 字` : d.words > 0 ? `${fmtFull(d.words)} 字，未达标` : "没有写";
+      if (style === "dots") {
+        const dot = c.createDiv({ cls: "vp-week-dot", attr: { role: "img", "aria-label": `周${d.label} ${desc}` } });
+        if (d.done) setIcon(dot, "check");
+        else if (d.pct !== null) dot.createSpan({ cls: "vp-week-pct", text: `${d.pct}%` });
+      } else {
+        const lane = c.createDiv({ cls: "vp-week-lane", attr: { role: "img", "aria-label": `周${d.label} ${desc}` } });
+        const bar = lane.createDiv({ cls: "vp-week-bar" });
+        bar.setCssProps({ "--vp-week-h": `${d.future ? 0 : Math.max(4, (d.words / max) * 100)}%` });
+      }
+      c.createDiv({ cls: "vp-week-label", text: d.isToday ? "今" : d.label });
+    }
+    if (style === "bars" && goal > 0) {
+      row.addClass("has-goal");
+      row.setCssProps({ "--vp-week-goal": `${(goal / max) * 100}%` });
+    }
+
+    if (settings.weeklyWordGoal > 0) {
+      const pct = Math.min(100, (weekWords / settings.weeklyWordGoal) * 100);
+      const meter = box.createDiv({
+        cls: "vp-meter vp-week-meter",
+        attr: {
+          role: "progressbar",
+          "aria-label": "每周字数目标",
+          "aria-valuemin": "0",
+          "aria-valuemax": String(settings.weeklyWordGoal),
+          "aria-valuenow": String(Math.min(weekWords, settings.weeklyWordGoal)),
+          "aria-valuetext": `已写 ${weekWords} 字，目标 ${settings.weeklyWordGoal} 字`,
+        },
+      });
+      meter.createDiv({ cls: "vp-meter-fill" }).setCssProps({ "--vp-meter-width": `${pct}%` });
+    }
+    const legend = box.createDiv({ cls: "vp-week-legend" });
+    if (style === "dots") legend.setText("✓ 达标 · 百分比为未达标的进度 · 虚线为还没到的日子");
+    else legend.setText(goal > 0 ? `实色为达标 · 虚线为每日目标 ${fmtFull(goal)} 字` : "柱高为当天字数");
+    return box;
+  }
+
+  /* ---------- 3. 数据卡 ---------- */
 
   private renderKpis(grid: HTMLElement, s: VaultStats) {
     const wrap = grid.createDiv({ cls: "vp-kpis" });
-    const today = startOfDay(Date.now());
+    const now = new Date(s.generatedAt);
+    const goal = this.plugin.settings.dailyWordGoal;
+    const today = startOfDay(now);
     const d30 = addDays(today, -29).getTime();
-    const d60 = addDays(today, -59).getTime();
     let n30 = 0,
-      nPrev = 0,
-      w30 = 0,
-      wPrev = 0;
+      w30 = 0;
     for (const f of s.files) {
-      if (f.collected) continue;
-      if (f.created >= d30) {
-        n30++;
-        w30 += f.writeWords;
-      } else if (f.created >= d60) {
-        nPrev++;
-        wPrev += f.writeWords;
-      }
+      if (f.collected || f.created < d30) continue;
+      n30++;
+      w30 += f.writeWords;
     }
-
-    // 近 12 周的累计曲线
-    const weeks = 12;
-    const weekStarts: number[] = [];
-    for (let i = weeks - 1; i >= 0; i--) weekStarts.push(addDays(today, -7 * i + 1).getTime());
-    const sorted = s.files.filter((f) => !f.collected).sort((a, b) => a.created - b.created);
-    const cumNotes: number[] = [],
-      cumWords: number[] = [];
-    let p = 0,
-      cn = 0,
-      cw = 0;
-    for (const end of weekStarts) {
-      while (p < sorted.length && sorted[p].created < end) {
-        cn++;
-        cw += sorted[p].writeWords;
-        p++;
-      }
-      cumNotes.push(cn);
-      cumWords.push(cw);
-    }
+    const range = (a: Date, b: Date) => (dayKey(a) === dayKey(b) ? `${a.getMonth() + 1}/${a.getDate()}` : `${a.getMonth() + 1}/${a.getDate()} – ${b.getMonth() + 1}/${b.getDate()}`);
 
     const kpi = (icon: string, label: string, help: string) => {
       const c = wrap.createDiv({ cls: "vp-card vp-kpi", attr: { role: "group" } });
       srLabel(c, label);
       const top = c.createDiv({ cls: "vp-kpi-top" });
-      setIcon(top.createSpan({ cls: "vp-kpi-icon" }), icon);
+      setIcon(top.createSpan({ cls: "vp-card-icon", attr: { "aria-hidden": "true" } }), icon);
       top.createSpan({ cls: "vp-label", text: label });
       this.help(top, help);
-      return c;
+      const row = c.createDiv({ cls: "vp-kpi-row" });
+      const num = row.createDiv({ cls: "vp-kpi-num" });
+      const side = row.createDiv({ cls: "vp-kpi-side" });
+      return { c, num, side };
     };
-    const delta = (parent: HTMLElement, cur: number, prev: number, caption: string) => {
-      const row = parent.createDiv({ cls: "vp-kpi-delta" });
-      if (prev > 0 || cur > 0) {
-        const pct = prev > 0 ? Math.round(((cur - prev) / prev) * 100) : 100;
-        const up = cur >= prev;
-        const pill = row.createSpan({ cls: "vp-delta " + (cur === prev ? "is-flat" : up ? "is-up" : "is-down") });
-        setIcon(pill.createSpan({ cls: "vp-delta-icon" }), cur === prev ? "minus" : up ? "trending-up" : "trending-down");
-        pill.createSpan({ text: prev > 0 ? `${Math.abs(pct)}%` : "新增" });
-        pill.setAttr("aria-label", `与前 30 天相比（${fmtFull(prev)} → ${fmtFull(cur)}）`);
-      }
-      row.createSpan({ cls: "vp-kpi-caption", text: caption });
+    /** 主数字和右侧说明；悬停趋势线时换成那一周的读数，离开时恢复 */
+    const readout = (
+      k: { c: HTMLElement; num: HTMLElement; side: HTMLElement },
+      base: () => void,
+      at: (i: number) => { value: string; unit: string; date: string; note: string; up?: boolean }
+    ) => {
+      base();
+      return (i: number | null) => {
+        k.num.empty();
+        k.side.empty();
+        k.c.toggleClass("is-scrubbing", i !== null);
+        if (i === null) return base();
+        const r = at(i);
+        bigNumber(k.num, r.value, r.unit);
+        k.side.createSpan({ cls: "vp-date-chip", text: r.date });
+        k.side.createSpan({ cls: r.up ? "vp-delta is-up" : "vp-kpi-caption", text: r.note });
+      };
     };
 
     // 笔记
-    const a = kpi("files", "笔记", "统计所有未被排除的 Markdown 笔记。曲线是近 12 周的累计新建数（不含采集文件夹）；百分比是近 30 天与前 30 天相比的变化。");
-    bigNumber(a, s.totalNotes, "篇");
-    delta(a, n30, nPrev, `近 30 天新建 ${fmtFull(n30)} 篇`);
-    drawSparkline(a.createDiv({ cls: "vp-kpi-viz" }), cumNotes);
+    const notes = weeklyNotes(s, 12, now);
+    const a = kpi("files", "笔记", "统计所有未被排除的 Markdown 笔记。曲线是近 12 周每周结束时的累计数（不含采集文件夹），按创建日期计。");
+    const aOn = readout(
+      a,
+      () => {
+        this.tweenNum("kpi:notes", bigNumber(a.num, s.totalNotes, "篇"), s.totalNotes, "篇");
+        a.side.createSpan({ cls: "vp-kpi-caption", text: "近 30 天" });
+        a.side.createSpan({ cls: "vp-delta is-up", text: `+${fmtFull(n30)}` });
+      },
+      (i) => ({ value: fmtFull(notes[i].value), unit: "篇", date: range(notes[i].start, notes[i].end), note: `当周 +${fmtFull(notes[i].extra)}`, up: true })
+    );
+    drawSparkline(a.c.createDiv({ cls: "vp-kpi-viz" }), notes.map((p) => p.value), {
+      onPoint: aOn,
+      label: (i) => `${range(notes[i].start, notes[i].end)}，累计 ${notes[i].value} 篇，当周新增 ${notes[i].extra} 篇`,
+    });
 
     // 字数
+    const words = weeklyWords(s, 12, now);
     const skipped = s.totalWords - s.writeWordsTotal;
     const b = kpi(
       "type",
       "总字数",
-      `所有笔记的字数合计。曲线是近 12 周累计的写作字数；百分比是近 30 天与前 30 天相比的变化。${
-        skipped > 0 ? `\n其中 ${fmtNum(skipped)} 字来自采集文件夹或超大笔记，不计入趋势图、热力图和“新增字数”，可在设置里调整。` : ""
+      `所有笔记的字数合计。曲线是近 12 周累计的写作字数（按笔记创建日期、用笔记当前字数计）。${
+        skipped > 0 ? `\n其中 ${fmtNum(skipped)} 字来自采集文件夹或超大笔记，不计入曲线、热力图和“新增字数”。` : ""
       }`
     );
-    bigNumber(b, s.totalWords, "字");
-    delta(b, w30, wPrev, `近 30 天新增 ${fmtNum(w30)} 字`);
-    drawSparkline(b.createDiv({ cls: "vp-kpi-viz" }), cumWords);
+    const bOn = readout(
+      b,
+      () => {
+        this.tweenNum("kpi:words", bigNumber(b.num, s.totalWords, "字"), s.totalWords, "字");
+        b.side.createSpan({ cls: "vp-kpi-caption", text: "近 30 天" });
+        b.side.createSpan({ cls: "vp-delta is-up", text: `+${fmtNum(w30)}` });
+      },
+      (i) => {
+        const p = fmtParts(words[i].value);
+        return { value: p.num, unit: `${p.unit}字`, date: range(words[i].start, words[i].end), note: `当周 +${fmtNum(words[i].extra)}`, up: true };
+      }
+    );
+    drawSparkline(b.c.createDiv({ cls: "vp-kpi-viz" }), words.map((p) => p.value), {
+      onPoint: bOn,
+      label: (i) => `${range(words[i].start, words[i].end)}，累计 ${words[i].value} 字，当周新增 ${words[i].extra} 字`,
+    });
 
-    // 任务
+    // 任务（没有每周历史，不画走势，只画完成进度）
     const t = s.tasks;
     const rate = t.total ? Math.round((t.done / t.total) * 100) : 0;
-    const c = kpi("list-checks", "任务完成率", "已完成任务占全部任务的比例，已取消的任务不计。逾期指截止日期（📅 或 [due::]）早于今天、还没完成的任务。");
-    bigNumber(c, t.total ? String(rate) : "—", t.total ? "%" : "");
-    const cd = c.createDiv({ cls: "vp-kpi-delta" });
-    const op = cd.createSpan({ cls: "vp-delta " + (t.overdue.length ? "is-down" : "is-up") });
-    setIcon(op.createSpan({ cls: "vp-delta-icon" }), t.overdue.length ? "alarm-clock" : "check");
-    op.createSpan({ text: t.overdue.length ? `逾期 ${t.overdue.length}` : "无逾期" });
-    cd.createSpan({ cls: "vp-kpi-caption", text: `${fmtFull(t.done)} / ${fmtFull(t.total)} 已完成` });
-    this.meter(c.createDiv({ cls: "vp-kpi-viz" }), t.total ? t.done / t.total : 0, "is-success");
+    const c = kpi("list-checks", "任务完成率", "已完成任务占全部任务的比例，已取消的任务不计。");
+    const rateEl = bigNumber(c.num, t.total ? String(rate) : "—", t.total ? "%" : "");
+    if (t.total) this.tweenNum("kpi:rate", rateEl, rate, "%");
+    c.side.createSpan({ cls: "vp-kpi-caption", text: `${fmtFull(t.done)} / ${fmtFull(t.total)}` });
+    this.meter(c.c.createDiv({ cls: "vp-kpi-viz" }), t.total ? t.done / t.total : 0, "");
 
-    // 链接
-    const linked = s.totalNotes - s.links.orphans.length;
-    const conn = s.totalNotes ? linked / s.totalNotes : 0;
-    const dd = kpi(
-      "link",
-      "链接",
-      `笔记之间的链接总数。孤立指没有任何链接指向它、它也没有链到别处的笔记。\n底部进度条是连通率：有链接的笔记占全部笔记的比例，现在是 ${Math.round(conn * 100)}%。`
+    // 本月写作
+    const month = monthWriting(s, goal, now);
+    const weeks = weeklyCheckins(s, goal, 12, now);
+    const d = kpi("flame", "本月写作", `本月打卡的天数，和本月每天平均写的字数。曲线是近 12 周每周打卡的天数。`);
+    const dOn = readout(
+      d,
+      () => {
+        this.tweenNum("kpi:month", bigNumber(d.num, String(month.days), "天"), month.days, "天");
+        d.side.createSpan({ cls: "vp-kpi-caption", text: `日均 ${fmtFull(month.average)} 字` });
+      },
+      (i) => ({ value: String(weeks[i].value), unit: "天", date: i === weeks.length - 1 ? "本周" : range(weeks[i].start, weeks[i].end), note: `${fmtFull(weeks[i].extra)} 字` })
     );
-    bigNumber(dd, s.totalLinks, "条");
-    const ld = dd.createDiv({ cls: "vp-kpi-delta" });
-    const lp = ld.createSpan({ cls: "vp-delta is-flat" });
-    setIcon(lp.createSpan({ cls: "vp-delta-icon" }), "unlink");
-    lp.createSpan({ text: `孤立 ${fmtFull(s.links.orphans.length)}` });
-    ld.createSpan({
-      cls: "vp-kpi-caption",
-      text: `平均每篇 ${(s.totalLinks / Math.max(1, s.totalNotes)).toFixed(1)} 条`,
+    drawSparkline(d.c.createDiv({ cls: "vp-kpi-viz" }), weeks.map((p) => p.value), {
+      onPoint: dOn,
+      label: (i) => `${range(weeks[i].start, weeks[i].end)}，打卡 ${weeks[i].value} 天，写了 ${weeks[i].extra} 字`,
     });
-    this.meter(dd.createDiv({ cls: "vp-kpi-viz" }), conn, "");
   }
 
   private meter(parent: HTMLElement, ratio: number, cls: string, label?: string) {
@@ -845,16 +1056,13 @@ export class DashboardView extends ItemView {
       .filter(Boolean)
       .join("\n");
     const { el, head, body } = this.card(grid, "vp-heat-card", "写作热力图", "calendar-days", heatHelp);
-    const rangeLabel = head.createDiv({ cls: "vp-card-aside" });
-    const summary = body.createDiv({ cls: "vp-trend-summary" });
+    const summary = head.createDiv({ cls: "vp-heat-summary" });
     const wrap = body.createDiv({ cls: "vp-heatmap-wrap" });
     const tip = new Tooltip(wrap);
     const svgHost = wrap.createDiv({ cls: "vp-heatmap-host" });
     this.responsive(wrap, (w) => {
       svgHost.empty();
       const weeks = this.drawHeatmap(svgHost, s, ck, w, tip);
-      rangeLabel.setText(`近 ${weeks} 周`);
-      // 与右侧趋势卡对齐的摘要行
       const today = startOfDay(Date.now());
       const from = addDays(today, -((today.getDay() + 6) % 7) - (weeks - 1) * 7);
       let total = 0,
@@ -867,18 +1075,28 @@ export class DashboardView extends ItemView {
         days++;
       }
       summary.empty();
-      const m = summary.createDiv({ cls: "vp-trend-main" });
-      m.createDiv({ cls: "vp-label", text: "期间写作" });
-      bigNumber(m, total, "字", "vp-num vp-num-lg");
-      const a = summary.createDiv({ cls: "vp-trend-side" });
-      a.createDiv({ cls: "vp-label", text: "打卡天数" });
-      bigNumber(a, String(active), `/ ${days} 天`, "vp-num vp-num-sm");
-      const b = summary.createDiv({ cls: "vp-trend-side" });
-      b.createDiv({ cls: "vp-label", text: "日均" });
-      bigNumber(b, Math.round(total / Math.max(1, days)), "字", "vp-num vp-num-sm");
+      const item = (label: string, value: string, unit = "") => {
+        const x = summary.createSpan({ cls: "vp-heat-sum" });
+        x.createSpan({ text: label + " " });
+        x.createEl("b", { text: value });
+        if (unit) x.createSpan({ text: " " + unit });
+      };
+      const p = fmtParts(total);
+      item(weeks >= 52 ? "近一年" : `近 ${weeks} 周`, p.num, `${p.unit}字`);
+      item("打卡", String(active), "天");
+      item("日均", fmtFull(Math.round(total / Math.max(1, days))), "字");
+      const busy = busiestWeekday(s, from, today);
+      if (busy) item("最活跃", busy);
     });
 
     const foot = body.createDiv({ cls: "vp-heat-foot" });
+    const note: string[] = [];
+    if (s.estimatedBefore) {
+      const [, em, ed] = s.estimatedBefore.split("-").map(Number);
+      note.push(`${em}月${ed}日之前为估算`);
+    }
+    note.push("点击某天查看当天改动的笔记");
+    foot.createSpan({ text: note.join(" · ") });
     const legend = foot.createDiv({ cls: "vp-heat-legend" });
     legend.createSpan({ text: "少" });
     for (let i = 0; i <= 4; i++) legend.createSpan({ cls: `vp-heat-swatch vp-l${i}` });
@@ -897,13 +1115,21 @@ export class DashboardView extends ItemView {
       setIcon(close, "x");
       close.addEventListener("click", () => {
         this.selectedDay = null;
-        this.rerender("heat");
+        this.dayExpanded = false;
+        this.rerender("heat", "resize");
       });
       const list = det.createDiv({ cls: "vp-rows" });
       if (s.dailyNotes[k]) this.noteRow(list, s.dailyNotes[k], "日记");
       const mods = (s.dayModified[k] || []).filter((f) => f !== s.dailyNotes[k]);
-      for (const f of mods.slice(0, 8)) this.noteRow(list, f, "当天修改");
-      if (mods.length > 8) list.createDiv({ cls: "vp-more", text: `还有 ${mods.length - 8} 篇` });
+      const shown = this.dayExpanded ? mods : mods.slice(0, 8);
+      const area = this.dayExpanded && mods.length > 8 ? list.createDiv({ cls: "vp-rows vp-scroll", attr: { tabindex: "0", role: "region", "aria-label": "当天修改的笔记" } }) : list;
+      for (const f of shown) this.noteRow(area, f, "当天修改");
+      if (mods.length > 8) {
+        this.moreLink(det.createDiv({ cls: "vp-card-foot" }), this.dayExpanded ? "收起" : `展开另外 ${mods.length - 8} 篇`, () => {
+          this.dayExpanded = !this.dayExpanded;
+          this.rerender("heat", "resize");
+        });
+      }
       if (mods.length === 0 && !s.dailyNotes[k]) this.empty(list, "coffee", "这一天没有留下笔记，休息也很重要");
     }
   }
@@ -915,7 +1141,7 @@ export class DashboardView extends ItemView {
     const left = 22,
       top = 20,
       gap = 4;
-    const targetCell = 15;
+    const targetCell = 14;
     const weeks = Math.max(8, Math.min(53, Math.floor((width - left + gap) / (targetCell + gap))));
     const cell = Math.min(20, Math.floor((width - left + gap) / weeks - gap));
     const gridStart = addDays(today, -((today.getDay() + 6) % 7) - (weeks - 1) * 7);
@@ -1005,7 +1231,8 @@ export class DashboardView extends ItemView {
         rect.addEventListener("mouseleave", () => tip.hide());
         rect.addEventListener("click", () => {
           this.selectedDay = this.selectedDay === k ? null : k;
-          this.rerender("heat");
+          this.dayExpanded = false;
+          this.rerender("heat", "resize");
         });
       }
     }
@@ -1044,7 +1271,8 @@ export class DashboardView extends ItemView {
       } else if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
         this.selectedDay = this.selectedDay === cursor ? null : cursor;
-        this.rerender("heat");
+        this.dayExpanded = false;
+        this.rerender("heat", "resize");
       } else if (e.key === "Escape") {
         tip.hide();
       }
@@ -1052,19 +1280,21 @@ export class DashboardView extends ItemView {
     return weeks;
   }
 
-  /* ---------- 4. 趋势 ---------- */
+  /* ---------- 5. 每周写作 ---------- */
 
   private renderTrend(grid: HTMLElement, s: VaultStats) {
-    const gran0: Gran = this.range === 365 ? "week" : "day";
-    const trendHelp =
-      this.metric === "words"
-        ? "按笔记的创建日期累计，用的是笔记“当前”的字数：之后修改旧笔记会改变历史曲线。"
-        : `每${gran0 === "day" ? "天" : "周"}新建的笔记数（不含采集文件夹）。`;
-    const { head, body } = this.card(grid, "vp-trend-card", "增长趋势", "trending-up", trendHelp);
+    const goal = this.plugin.settings.dailyWordGoal;
+    const isWords = this.metric === "words";
+    const m = trendModel(s, this.range, this.metric, goal, new Date(s.generatedAt));
+    const per = m.gran === "day" ? "天" : "周";
+    const trendHelp = isWords
+      ? `每${per}写作的字数，与热力图同一来源（排除超大和采集笔记）。最右边一根是本${per === "天" ? "日" : "周"}，用实色标出。`
+      : `每${per}新建的笔记数（不含采集文件夹）。`;
+    const { head, body } = this.card(grid, "vp-trend-card", isWords ? `每${per}写作` : `每${per}新建笔记`, "trending-up", trendHelp);
     const ctrls = head.createDiv({ cls: "vp-ctrls" });
-    this.segmented<Metric>(
+    this.segmented<TrendMetric>(
       ctrls,
-      [["notes", "新建笔记"], ["words", "累计字数"]],
+      [["words", "字数"], ["notes", "新建笔记"]],
       this.metric,
       (v) => {
         this.metric = v;
@@ -1072,9 +1302,9 @@ export class DashboardView extends ItemView {
       },
       "指标"
     );
-    this.segmented<Range>(
+    this.segmented<TrendRange>(
       ctrls,
-      [[30, "30天"], [90, "90天"], [365, "1年"]],
+      [[30, "30 天"], [182, "半年"], [365, "一年"]],
       this.range,
       (v) => {
         this.range = v;
@@ -1083,38 +1313,36 @@ export class DashboardView extends ItemView {
       "时间范围"
     );
 
-    const isWords = this.metric === "words";
-    const gran: Gran = this.range === 365 ? "week" : "day";
-    const unitText = gran === "day" ? "天" : "周";
-    const { points, added } = this.buildTrend(s, gran);
-
+    const unit = isWords ? "字" : "篇";
+    const rangeName = this.range === 30 ? "30 天" : this.range === 182 ? "半年" : "一年";
     const summary = body.createDiv({ cls: "vp-trend-summary" });
-    const main = summary.createDiv({ cls: "vp-trend-main" });
-    main.createDiv({ cls: "vp-label", text: isWords ? `近 ${this.rangeText()}新增字数` : `近 ${this.rangeText()}新建笔记` });
-    bigNumber(main, added, isWords ? "字" : "篇", "vp-num vp-num-lg");
-    const side = summary.createDiv({ cls: "vp-trend-side" });
-    side.createDiv({ cls: "vp-label", text: isWords ? "累计字数（写作口径）" : `平均每${unitText}` });
-    if (isWords) bigNumber(side, s.writeWordsTotal, "字", "vp-num vp-num-sm");
-    else bigNumber(side, String(Math.round((added / Math.max(1, points.length)) * 10) / 10), "篇", "vp-num vp-num-sm");
+    const stat = (key: string, label: string, value: number) => {
+      const x = summary.createDiv({ cls: "vp-trend-side" });
+      this.tweenNum(`trend:${this.metric}:${key}`, bigNumber(x, value, unit, "vp-num vp-num-sm"), value, unit);
+      x.createDiv({ cls: "vp-label", text: label });
+    };
+    stat("total", `${rangeName}合计`, m.total);
+    stat("avg", `${per}均`, m.average);
+    if (m.best) stat("best", `最高一${per}`, m.best.value);
 
+    const fmtDay = (d: Date) => `${d.getMonth() + 1}/${d.getDate()}`;
+    const points: SeriesPoint[] = m.buckets.map((bk) => {
+      const title = m.gran === "day" ? `${bk.start.getMonth() + 1}月${bk.start.getDate()}日` : `${fmtDay(bk.start)} – ${fmtDay(bk.end)}`;
+      const rows = [{ label: isWords ? "写作" : "新建笔记", value: `${fmtFull(bk.value)} ${unit}`, dot: "is-accent" }];
+      if (m.gran === "week") rows.push({ label: "打卡", value: `${bk.checkins} 天`, dot: "" });
+      return { label: fmtDay(bk.start), value: bk.value, tipTitle: title, tipRows: rows };
+    });
     if (points.every((p) => p.value === 0)) {
-      this.empty(body.createDiv({ cls: "vp-chart-empty" }), "line-chart", isWords ? "还没有笔记字数，开始写第一篇吧" : "这段时间还没有新建笔记");
+      this.empty(body.createDiv({ cls: "vp-chart-empty" }), "line-chart", isWords ? "这段时间还没有写作记录" : "这段时间还没有新建笔记");
     } else {
       const chartWrap = body.createDiv({ cls: "vp-chart-wrap" });
       const tip = new Tooltip(chartWrap);
       const host = chartWrap.createDiv({ cls: "vp-chart-host" });
-      const last = points[points.length - 1];
       host.setAttr("role", "img");
-      srLabel(
-        host,
-        isWords
-          ? `累计字数曲线，近 ${this.rangeText()}新增 ${fmtFull(added)} 字，当前累计 ${fmtFull(last.value)} 字`
-          : `新建笔记柱状图，近 ${this.rangeText()}共新建 ${fmtFull(added)} 篇`,
-        chartWrap
-      );
+      srLabel(host, `${rangeName}${isWords ? "写作字数" : "新建笔记"}柱状图，合计 ${fmtFull(m.total)} ${unit}`, chartWrap);
       this.responsive(chartWrap, (w) => {
         host.empty();
-        drawTrendChart(host, points, { width: w, height: 236, kind: isWords ? "area" : "bar", tooltip: tip });
+        drawTrendChart(host, points, { width: w, height: 220, kind: "bar", tooltip: tip, highlightLast: true });
       });
     }
     this.renderOutlierRow(body, s);
@@ -1146,185 +1374,134 @@ export class DashboardView extends ItemView {
     this.help(row, lines.join("\n"));
   }
 
-  private rangeText(): string {
-    return this.range === 365 ? "1 年" : `${this.range} 天`;
-  }
+  /* ---------- 6. 接下来：任务 ---------- */
 
-  private buildTrend(s: VaultStats, gran: Gran): { points: SeriesPoint[]; added: number } {
-    const today = startOfDay(Date.now());
-    const start = addDays(today, -(this.range - 1));
-    const sorted = s.files.filter((f) => !f.collected).map((f) => [f.created, f.writeWords] as [number, number]).sort((a, b) => a[0] - b[0]);
-    let ptr = 0,
-      cum = 0;
-    const cumUntil = (endExclusive: number) => {
-      while (ptr < sorted.length && sorted[ptr][0] < endExclusive) {
-        cum += sorted[ptr][1];
-        ptr++;
-      }
-      return cum;
-    };
-    const base = cumUntil(start.getTime());
-
-    type Bucket = { key: string; label: string; start: Date; end: Date; count: number };
-    const buckets: Bucket[] = [];
-    let cur: Bucket | null = null;
-    for (let d = new Date(start); d.getTime() <= today.getTime(); d = addDays(d, 1)) {
-      let key: string, label: string, bs: Date;
-      if (gran === "day") {
-        key = dayKey(d);
-        bs = d;
-        label = `${d.getMonth() + 1}/${d.getDate()}`;
-      } else if (gran === "week") {
-        bs = addDays(d, -((d.getDay() + 6) % 7));
-        key = dayKey(bs);
-        label = `${bs.getMonth() + 1}/${bs.getDate()}`;
-      } else {
-        bs = new Date(d.getFullYear(), d.getMonth(), 1);
-        key = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
-        label = `${d.getMonth() + 1}月`;
-      }
-      if (!cur || cur.key !== key) {
-        cur = { key, label, start: new Date(d), end: new Date(d), count: 0 };
-        buckets.push(cur);
-      }
-      cur.end = new Date(d);
-      cur.count += s.dayCreated[dayKey(d)] || 0;
-    }
-    const fmtDay = (d: Date) => `${d.getMonth() + 1}月${d.getDate()}日`;
-    const isWords = this.metric === "words";
-    let added = 0;
-    const points = buckets.map((b) => {
-      const c = cumUntil(addDays(b.end, 1).getTime());
-      added += b.count;
-      const title =
-        gran === "day"
-          ? fmtDay(b.start)
-          : gran === "month"
-          ? `${b.start.getFullYear()}年${b.start.getMonth() + 1}月`
-          : `${fmtDay(b.start)} – ${fmtDay(b.end)}`;
-      return {
-        label: b.label,
-        value: isWords ? c : b.count,
-        tipTitle: title,
-        tipRows: isWords
-          ? [
-              { label: "累计字数（当前字数口径）", value: fmtFull(c), dot: "is-accent" },
-              { label: "新建笔记", value: `${b.count} 篇` },
-            ]
-          : [
-              { label: "新建笔记", value: `${b.count} 篇`, dot: "is-accent" },
-              { label: "累计字数", value: fmtNum(c) },
-            ],
-      };
-    });
-    return { points, added: isWords ? cum - base : added };
-  }
-
-  /* ---------- 5. 任务 ---------- */
+  private taskExpanded = false;
 
   private renderTasks(grid: HTMLElement, s: VaultStats) {
-    const { head, body } = this.card(
+    const { el, head, body } = this.card(
       grid,
       "vp-tasks-card",
-      "任务",
+      "接下来",
       "list-todo",
-      "统计笔记里的待办（- [ ] / - [x]）。完成率不含已取消的任务。逾期指截止日期（📅 或 [due::]）早于今天；7 天内到期指截止日期在今天起 7 天内。"
+      "笔记里带截止日期（📅 或 [due::]）的待办：已逾期的单独列出，下面是今天起 7 天内到期的。点任务直接跳到那一行。"
     );
     const t = s.tasks;
-    if (t.total === 0 && t.cancelled === 0) {
-      head.createDiv({ cls: "vp-card-aside", text: "0 项" });
+    this.segmented<TaskTab>(head, [["due", "到期"], ["folder", "按文件夹"]], this.taskTab, (v) => {
+      this.taskTab = v;
+      this.taskExpanded = false;
+      this.rerender("tasks");
+    });
+    if (t.total === 0) {
       this.empty(body, "list-checks", "还没有任务。在笔记里写 - [ ] 就会出现在这里");
       return;
     }
-    head.createDiv({ cls: "vp-card-aside", text: `共 ${fmtFull(t.total)} 项` });
-
-    const top = body.createDiv({ cls: "vp-task-top" });
-    const ratio = t.total ? t.done / t.total : 0;
-    const center = drawRing(top, ratio, 96, 10, "vp-task-ring");
-    bigNumber(center, String(Math.round(ratio * 100)), "%", "vp-num vp-ring-num-sm");
-    const legend = top.createDiv({ cls: "vp-stat-list" });
-    const stat = (cls: string, label: string, value: number) => {
-      const r = legend.createDiv({ cls: "vp-stat" });
-      r.createSpan({ cls: `vp-dot ${cls}` });
-      r.createSpan({ cls: "vp-stat-label", text: label });
-      r.createSpan({ cls: "vp-stat-value", text: fmtFull(value) });
-    };
-    stat("is-success", "已完成", t.done);
-    stat("is-accent", "未完成", t.pending);
-    stat("is-danger", "已逾期", t.overdue.length);
-    stat("is-warning", "7 天内到期", t.dueSoon.length);
-
-    const bar = body.createDiv({ cls: "vp-subhead" });
-    this.segmented<TaskTab>(bar, [["due", "到期"], ["folder", "按文件夹"], ["note", "按笔记"]], this.taskTab, (v) => {
-      this.taskTab = v;
-      this.rerender("tasks");
-    });
-    const list = body.createDiv({ cls: "vp-rows" });
     const todayKey = dayKey(Date.now());
+    const limit = this.taskExpanded ? 50 : 4;
 
     if (this.taskTab === "due") {
-      const items: TaskInfo[] = [...t.overdue, ...t.dueSoon];
-      if (items.length === 0) {
-        this.empty(list, "party-popper", "没有逾期或即将到期的任务");
-        return;
+      const area = this.listArea(el, body, this.taskExpanded);
+      if (t.overdue.length) {
+        const od = area.createDiv({ cls: "vp-overdue" });
+        od.createDiv({ cls: "vp-overdue-title", text: `已逾期 ${t.overdue.length}` });
+        const list = od.createDiv({ cls: "vp-rows" });
+        for (const it of t.overdue.slice(0, this.taskExpanded ? 50 : 2)) this.taskRow(list, it, true);
       }
-      for (const it of items.slice(0, LIST_LIMIT)) {
-        const row = list.createDiv({ cls: "vp-row" });
-        const overdue = (it.due || "") < todayKey;
-        const due = it.due ? it.due.slice(5).replace("-", "/") : "";
-        row.createSpan({ cls: "vp-due" + (overdue ? " is-overdue" : ""), text: due });
-        const text = cleanTaskText(it.text);
-        row.createSpan({ cls: "vp-row-name", text: text || "（空任务）", attr: { title: `${text}\n${it.file.path}` } });
-        row.createSpan({ cls: "vp-row-meta", text: it.file.basename });
-        this.clickable(row, `${text || "空任务"}，${it.file.basename}${overdue ? "，已逾期" : ""}`, (e) => void this.plugin.openFile(it.file, it.line, e));
+      const list = area.createDiv({ cls: "vp-rows" });
+      if (t.dueSoon.length === 0 && !t.overdue.length) this.empty(list, "party-popper", "7 天内没有到期的任务");
+      for (const it of t.dueSoon.slice(0, limit)) this.taskRow(list, it, false, it.due === todayKey);
+      const hidden = Math.max(0, t.dueSoon.length - limit) + Math.max(0, t.overdue.length - (this.taskExpanded ? 50 : 2));
+      const more = body.createDiv({ cls: "vp-card-foot" });
+      if (hidden > 0 || this.taskExpanded) {
+        this.moreLink(more, this.taskExpanded ? "收起" : `展开另外 ${hidden} 项`, () => {
+          this.taskExpanded = !this.taskExpanded;
+          this.rerender("tasks", "resize");
+        });
       }
-      if (items.length > LIST_LIMIT) list.createDiv({ cls: "vp-more", text: `还有 ${items.length - LIST_LIMIT} 项` });
+      this.moreLink(more, `全部 ${fmtFull(t.pending)} 项待办`, () => this.plugin.openSearch("task-todo:\"\""));
     } else {
-      const groups: GroupStat[] = (this.taskTab === "folder" ? t.byFolder : t.byNote).filter((g) => g.pending > 0);
+      const groups: GroupStat[] = t.byFolder.filter((g) => g.pending > 0);
+      const list = this.listArea(el, body, this.taskExpanded).createDiv({ cls: "vp-rows" });
       if (groups.length === 0) {
         this.empty(list, "party-popper", "所有任务都完成了");
         return;
       }
-      for (const g of groups.slice(0, LIST_LIMIT)) {
+      for (const g of groups.slice(0, this.taskExpanded ? 50 : 6)) {
         const row = list.createDiv({ cls: "vp-row vp-group-row" });
-        row.createSpan({ cls: "vp-row-name", text: g.key, attr: { title: g.file ? g.file.path : g.key } });
-        const m = row.createDiv({ cls: "vp-meter is-success is-inline" });
+        row.createSpan({ cls: "vp-row-name", text: g.key });
+        const m = row.createDiv({ cls: "vp-meter is-inline" });
         m.createDiv({ cls: "vp-meter-fill" }).setCssProps({ "--vp-meter-width": `${(g.done / Math.max(1, g.total)) * 100}%` });
         row.createSpan({ cls: "vp-row-meta vp-tabular", text: `待办 ${g.pending}` });
-        if (g.file) {
-          const f = g.file;
-          this.clickable(row, `${g.key}，待办 ${g.pending}`, (e) => void this.plugin.openFile(f, undefined, e));
-        } else if (g.key !== "(根目录)") this.clickable(row, `${g.key}，待办 ${g.pending}`, () => this.plugin.revealFolder(g.key));
+        if (g.key !== "(根目录)") this.clickable(row, `${g.key}，待办 ${g.pending}`, () => this.plugin.revealFolder(g.key));
+      }
+      if (groups.length > 6) {
+        this.moreLink(body.createDiv({ cls: "vp-card-foot" }), this.taskExpanded ? "收起" : `展开另外 ${groups.length - 6} 个文件夹`, () => {
+          this.taskExpanded = !this.taskExpanded;
+          this.rerender("tasks", "resize");
+        });
       }
     }
   }
 
-  /* ---------- 6. 标签 / 文件夹 ---------- */
+  private taskRow(list: HTMLElement, it: TaskInfo, overdue: boolean, today = false) {
+    const row = list.createDiv({ cls: "vp-row vp-task-row" + (overdue ? " is-overdue" : "") + (today ? " is-today" : "") });
+    row.createSpan({ cls: "vp-task-box", attr: { "aria-hidden": "true" } });
+    const due = it.due ? it.due.slice(5).replace("-", "/").replace(/^0/, "") : "";
+    row.createSpan({ cls: "vp-due", text: today ? "今天" : due });
+    const text = cleanTaskText(it.text);
+    row.createSpan({ cls: "vp-row-name", text: text || "（空任务）", attr: { title: `${text}\n${it.file.path}` } });
+    row.createSpan({ cls: "vp-row-meta", text: it.file.basename });
+    this.clickable(row, `${text || "空任务"}，${it.file.basename}${overdue ? "，已逾期" : ""}`, (e) => void this.plugin.openFile(it.file, it.line, e));
+  }
+
+  /**
+   * 展开后的列表放进限高的滚动区：卡片最多长到大约 8 行，整页不会被拉长，
+   * “收起”就在滚动区下面，不用滚过整张列表去找。
+   */
+  private listArea(card: HTMLElement, body: HTMLElement, expanded: boolean): HTMLElement {
+    if (!expanded) return body;
+    card.addClass("is-expanded");
+    return body.createDiv({ cls: "vp-scroll", attr: { tabindex: "0", role: "region", "aria-label": "展开的列表" } });
+  }
+
+  /** 卡片底部的文字链接（展开 / 查看全部） */
+  private moreLink(parent: HTMLElement, text: string, onClick: () => void) {
+    const b = parent.createEl("button", { cls: "vp-link", attr: { type: "button" } });
+    b.createSpan({ text });
+    setIcon(b.createSpan({ cls: "vp-link-icon", attr: { "aria-hidden": "true" } }), text === "收起" ? "chevron-up" : "chevron-right");
+    b.addEventListener("click", onClick);
+    return b;
+  }
+
+  /* ---------- 7. 标签 / 文件夹 ---------- */
+
+  private tagsExpanded = false;
 
   private renderTags(grid: HTMLElement, s: VaultStats) {
-    const { head, body } = this.card(
+    const isTags = this.tagTab === "tags";
+    const { el, head, body } = this.card(
       grid,
       "vp-tags-card",
-      this.tagTab === "tags" ? "标签" : "文件夹",
-      this.tagTab === "tags" ? "tag" : "folder",
-      this.tagTab === "tags" ? "统计笔记里的 #标签，点击标签可在搜索里查看对应的笔记。" : "按顶层文件夹统计笔记数和字数，点击可在文件列表里定位。"
+      isTags ? "常用标签" : "文件夹",
+      isTags ? "tag" : "folder",
+      isTags ? "按使用的笔记数排列。“本周 +n”是本周新建的笔记里用到这个标签的篇数。点击标签在搜索里查看。" : "按顶层文件夹统计笔记数和字数，点击可在文件列表里定位。"
     );
-    head.createDiv({
-      cls: "vp-card-aside",
-      text: this.tagTab === "tags" ? `${fmtFull(s.uniqueTags)} 个 · 使用 ${fmtFull(s.tagOccurrences)} 次` : `${s.folders.length} 个顶层文件夹`,
-    });
-    const bar = body.createDiv({ cls: "vp-subhead" });
-    this.segmented<TagTab>(bar, [["tags", "标签"], ["folders", "文件夹"]], this.tagTab, (v) => {
+    this.segmented<TagTab>(head, [["tags", "标签"], ["folders", "文件夹"]], this.tagTab, (v) => {
       this.tagTab = v;
+      this.tagsExpanded = false;
       this.rerender("tags");
     });
-    const limit = 7;
+    const limit = this.tagsExpanded ? 30 : 6;
     let items: BarItem[];
-    if (this.tagTab === "tags") {
+    if (isTags) {
+      const since = weekStart(new Date(s.generatedAt)).getTime();
+      const fresh = new Map<string, number>();
+      for (const f of s.files) if (f.created >= since) for (const t of f.tags) fresh.set(t, (fresh.get(t) || 0) + 1);
       items = s.tags.slice(0, limit).map(([tag, n]) => ({
         label: tag,
         value: n,
-        valueText: `${fmtFull(n)} 篇`,
+        valueText: fmtFull(n),
+        note: fresh.get(tag) ? `本周 +${fresh.get(tag)}` : undefined,
         onClick: () => this.plugin.openSearch(`tag:${tag}`),
       }));
     } else {
@@ -1336,66 +1513,148 @@ export class DashboardView extends ItemView {
       }));
     }
     drawBarList(
-      body,
+      this.listArea(el, body, this.tagsExpanded),
       items,
-      this.tagTab === "tags" ? "还没有标签。给笔记加上 #标签，这里就会热闹起来" : "仓库里还没有文件夹",
-      (el) => setIcon(el.createDiv({ cls: "vp-empty-icon" }), this.tagTab === "tags" ? "tag" : "folder")
+      isTags ? "还没有标签。给笔记加上 #标签，这里就会热闹起来" : "仓库里还没有文件夹",
+      (el) => setIcon(el.createDiv({ cls: "vp-empty-icon" }), isTags ? "tag" : "folder")
     );
-    const total = this.tagTab === "tags" ? s.tags.length : s.folders.length;
-    if (total > limit) body.createDiv({ cls: "vp-more", text: this.tagTab === "tags" ? `还有 ${total - limit} 个标签` : `还有 ${total - limit} 个文件夹` });
-  }
-
-  /* ---------- 7. 链接 ---------- */
-
-  private renderLinks(grid: HTMLElement, s: VaultStats) {
-    const { head, body } = this.card(
-      grid,
-      "vp-links-card",
-      "链接",
-      "network",
-      "孤立笔记：没有任何链接指向它、它也没有链到别处。未解析：指向尚不存在的笔记的链接（断链）。孤立列表按最近修改排序。"
-    );
-    head.createDiv({ cls: "vp-card-aside", text: `${fmtFull(s.totalLinks)} 条` });
-    const L = s.links;
-    const orphanPct = s.totalNotes ? Math.round((L.orphans.length / s.totalNotes) * 100) : 0;
-
-    const stats = body.createDiv({ cls: "vp-mini-stats" });
-    const mini = (label: string, value: string, sub: string, cls = "") => {
-      const m = stats.createDiv({ cls: `vp-mini ${cls}` });
-      m.createDiv({ cls: "vp-label", text: label });
-      m.createDiv({ cls: "vp-mini-value", text: value });
-      m.createDiv({ cls: "vp-mini-sub", text: sub });
-    };
-    mini("已连接", fmtFull(s.totalNotes - L.orphans.length), "篇有链接");
-    mini("孤立笔记", fmtFull(L.orphans.length), `占 ${orphanPct}%`, orphanPct > 30 ? "is-warning" : "");
-    mini("未解析", fmtFull(L.unresolvedCount), "条断链", L.unresolvedCount > 0 ? "is-warning" : "");
-
-    const bar = body.createDiv({ cls: "vp-subhead" });
-    this.segmented<LinkTab>(bar, [["top", "最常被链"], ["orphans", "孤立"], ["unresolved", "未解析"]], this.linkTab, (v) => {
-      this.linkTab = v;
-      this.rerender("links");
-    });
-    const list = body.createDiv({ cls: "vp-rows" });
-    if (this.linkTab === "top") {
-      if (L.topLinked.length === 0) return this.empty(list, "link", "还没有双向链接，试试用 [[ ]] 连接笔记");
-      for (const x of L.topLinked.slice(0, LIST_LIMIT)) this.noteRow(list, x.file, `${x.count} 次引用`);
-    } else if (this.linkTab === "orphans") {
-      if (L.orphans.length === 0) return this.empty(list, "sparkles", "没有孤立笔记，每篇都连上了");
-      const sorted = [...L.orphans].sort((a, b) => b.stat.mtime - a.stat.mtime);
-      for (const f of sorted.slice(0, LIST_LIMIT)) this.noteRow(list, f, f.parent && f.parent.path !== "/" ? f.parent.path : "根目录");
-      if (sorted.length > LIST_LIMIT) list.createDiv({ cls: "vp-more", text: `还有 ${sorted.length - LIST_LIMIT} 篇` });
-    } else {
-      if (L.topUnresolved.length === 0) return this.empty(list, "sparkles", "没有断开的链接");
-      for (const [name, n] of L.topUnresolved.slice(0, LIST_LIMIT)) {
-        const row = list.createDiv({ cls: "vp-row" });
-        row.createSpan({ cls: "vp-row-name is-unresolved", text: name });
-        row.createSpan({ cls: "vp-row-meta", text: `${n} 处` });
-        this.clickable(row, `未解析的链接 ${name}，${n} 处，点击搜索`, () => this.plugin.openSearch(`"[[${name}]]"`));
-      }
+    const total = isTags ? s.tags.length : s.folders.length;
+    if (total > 6) {
+      this.moreLink(body.createDiv({ cls: "vp-card-foot" }), this.tagsExpanded ? "收起" : `全部 ${total} 个${isTags ? "标签" : "文件夹"}`, () => {
+        this.tagsExpanded = !this.tagsExpanded;
+        this.rerender("tags", "resize");
+      });
     }
   }
 
-  /* ---------- 8. 重复内容清理入口（轻量，详细功能在独立标签页） ---------- */
+  /* ---------- 8. 库体检 ---------- */
+
+  /** 库体检里展开的那一栏：一次只展开一栏（手风琴），展开别的栏会收起这一栏 */
+  private checkupOpen: string | null = null;
+
+  private renderCheckup(grid: HTMLElement, s: VaultStats) {
+    const c = checkupModel(s);
+    const dd = this.plugin.dedupe;
+    const dupOn = this.plugin.settings.dedupeEnabled && this.plugin.settings.dedupeCard;
+    const dup = dupOn && dd.analysis ? dedupeOverview(dd.analysis, dd.ignoredSet()) : null;
+    const { el: cardEl, head, body } = this.card(
+      grid,
+      "vp-checkup-card",
+      "库体检",
+      "heart-pulse",
+      "随看板一起刷新。断链和孤立笔记来自 Obsidian 的链接索引；重复内容来自最近一次扫描。会改动笔记的操作都先确认，删除的笔记进回收站。"
+    );
+    const live = head.createDiv({ cls: "vp-live" });
+    live.createSpan({ cls: "vp-live-dot", attr: { "aria-hidden": "true" } });
+    const at = new Date(s.generatedAt);
+    live.createSpan({ text: `实时 · ${pad2(at.getHours())}:${pad2(at.getMinutes())} 更新` });
+    const total = c.unresolved.length + c.orphans.length + c.empty.length + c.big.length + (dup ? dup.groups.length : 0);
+    head.createDiv({ cls: "vp-card-aside", text: total ? `共 ${fmtFull(c.unresolvedCount + c.orphans.length + c.empty.length + c.big.length + (dup ? dup.groups.length : 0))} 项可整理` : "一切正常" });
+
+    const cols = body.createDiv({ cls: "vp-checkup" });
+    const col = (key: string, title: string, count: number, sev: "warn" | "", empty: string) => {
+      const el = cols.createDiv({ cls: "vp-checkup-col" });
+      const h = el.createDiv({ cls: "vp-checkup-head" });
+      h.createSpan({ cls: "vp-checkup-title", text: title });
+      h.createSpan({ cls: "vp-count" + (count && sev ? " is-warn" : ""), text: fmtFull(count) });
+      const open = this.checkupOpen === key;
+      if (open) {
+        el.addClass("is-open");
+        cardEl.addClass("is-expanded");
+      }
+      const list = el.createDiv({ cls: "vp-rows" + (open ? " vp-scroll" : "") });
+      if (open) {
+        list.setAttr("tabindex", "0");
+        list.setAttr("role", "region");
+        list.setAttr("aria-label", `${title}，展开的列表`);
+      }
+      if (count === 0) list.createDiv({ cls: "vp-checkup-ok", text: empty });
+      return { el, list, limit: open ? 50 : 3, open };
+    };
+    const item = (list: HTMLElement, name: string, label: string, onOpen: (() => void) | null, actText: string, act: () => void) => {
+      const row = list.createDiv({ cls: "vp-row vp-checkup-row" });
+      const n = row.createSpan({ cls: "vp-row-name", text: name, attr: { title: name } });
+      if (onOpen) this.clickable(n, `打开 ${label}`, () => onOpen());
+      const b = row.createEl("button", { cls: "vp-act", text: actText, attr: { type: "button" } });
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        act();
+      });
+    };
+    /** shown：列表里实际有多少条可以展开（断链只保留出现最多的 10 个名字，比总处数少） */
+    const foot = (k: { el: HTMLElement; open: boolean }, key: string, shown: number, unit: string) => {
+      if (shown <= 3) return;
+      this.moreLink(k.el.createDiv({ cls: "vp-card-foot" }), k.open ? "收起" : `展开 ${fmtFull(shown)} ${unit}`, () => {
+        this.checkupOpen = k.open ? null : key;
+        this.rerender("checkup", "resize");
+      });
+    };
+
+    // 断链：按出现次数排；新建笔记用 Obsidian 自己的规则（和点断链时一样）
+    const u = col("unresolved", "断链", c.unresolvedCount, "warn", "没有断开的链接");
+    for (const x of c.unresolved.slice(0, u.limit)) {
+      item(u.list, `[[${x.name}]] · ${x.count} 处`, x.name, () => this.plugin.openSearch(`"[[${x.name}]]"`), "创建笔记", () => {
+        void this.app.workspace.openLinkText(x.name, x.source ?? "", "tab");
+      });
+    }
+    foot(u, "unresolved", c.unresolved.length, "个");
+
+    // 孤立笔记
+    const o = col("orphans", "孤立笔记", c.orphans.length, "", "每篇笔记都连上了");
+    for (const f of c.orphans.slice(0, o.limit)) {
+      item(o.list, f.basename, f.basename, () => void this.plugin.openFile(f), "打开", () => void this.plugin.openFile(f));
+    }
+    foot(o, "orphans", c.orphans.length, "篇");
+
+    // 重复内容
+    if (dupOn) {
+      const n = dup ? dup.groups.length : 0;
+      const d = col("dupes", "重复内容", n, "warn", dd.scanning ? "正在扫描…" : dd.analysis ? "没有重复内容" : "还没扫描过");
+      if (!dd.analysis && !dd.scanning) {
+        item(d.list, "扫描只读，不会改动笔记", "", null, "开始扫描", () => void dd.openReport(true));
+      }
+      if (dup) {
+        for (const g of dup.groups.slice(0, d.limit)) {
+          const first = g.occs[0];
+          const name = first ? `${first.path.split("/").pop()?.replace(/\.md$/, "")} 等 ${g.occs.length} 篇` : `${g.occs.length} 篇`;
+          item(d.list, name, name, () => void dd.openReport(false), "保留最早", () => dd.startCleanup([groupItem(g, 0)], "mark"));
+        }
+      }
+      if (n > 3) this.moreLink(d.el.createDiv({ cls: "vp-card-foot" }), `全部 ${fmtFull(n)} 段`, () => void dd.openReport(false));
+      if (dd.stale && dd.analysis) d.el.createDiv({ cls: "vp-checkup-note", text: "笔记有改动，建议重新扫描" });
+    }
+
+    // 空笔记与超大笔记
+    const eb = c.empty.length + c.big.length;
+    const e = col("emptybig", "空笔记与超大笔记", eb, "", "没有空笔记或超大笔记");
+    let shown = 0;
+    for (const f of c.empty) {
+      if (shown++ >= e.limit) break;
+      item(e.list, `${f.file.basename} · 0 字`, f.file.basename, () => void this.plugin.openFile(f.file), "删除", () => this.trashNote(f.file));
+    }
+    for (const f of c.big) {
+      if (shown++ >= e.limit) break;
+      const folder = f.folder === "(根目录)" ? null : f.folder;
+      item(
+        e.list,
+        `${f.file.basename} · ${fmtNum(f.words)} 字`,
+        f.file.basename,
+        () => void this.plugin.openFile(f.file),
+        folder ? "整夹不计入" : "打开",
+        () => (folder ? void this.plugin.setClippingFolder(folder) : void this.plugin.openFile(f.file))
+      );
+    }
+    foot(e, "emptybig", eb, "篇");
+  }
+
+  /** 删除前确认；进系统 / Obsidian 回收站（按用户的“删除文件”设置），可以找回 */
+  private trashNote(file: TFile) {
+    new ConfirmModal(this.app, "删除空笔记", `“${file.basename}” 没有任何内容。删除后会进回收站，可以从回收站找回。`, "删除", async () => {
+      await this.app.fileManager.trashFile(file);
+    }).open();
+  }
+
+  /* ---------- 9. 写作回顾 ---------- */
 
   private renderReports(grid: HTMLElement) {
     if (!this.stats) return;
@@ -1500,29 +1759,6 @@ export class DashboardView extends ItemView {
         void this.plugin.openFile(latest, undefined, event);
       });
     }
-  }
-
-  private renderDedupe(grid: HTMLElement) {
-    const dd = this.plugin.dedupe;
-    const el = grid.createDiv({ cls: "vp-card vp-dedupe-card" });
-    setIcon(el.createSpan({ cls: "vp-dedupe-icon", attr: { "aria-hidden": "true" } }), "layers");
-    const main = el.createDiv({ cls: "vp-dedupe-main" });
-    const title = main.createDiv({ cls: "vp-dedupe-title" });
-    title.createSpan({ text: "重复内容清理" });
-    this.help(
-      title,
-      "同一段文字出现在好几篇笔记里（反复剪藏的文章、每天自动生成的报告、复制粘贴的模板），会让笔记库越来越乱。\n扫描只读，不会改动任何笔记；处理前会先给你看改动前后的对比，处理后随时可以撤销。"
-    );
-    let line = "找出在多篇笔记里重复出现的段落，先预览、再处理，可撤销。";
-    if (dd.scanning) line = "正在扫描…";
-    else if (dd.analysis) {
-      const ignored = dd.ignoredSet();
-      const n = dd.analysis.groups.filter((g) => !ignored.has(groupKeyOf(g))).length;
-      line = n > 0 ? `上次扫描发现 ${fmtFull(n)} 段内容在多篇笔记里重复出现。` : "上次扫描没有发现重复内容。";
-    }
-    main.createDiv({ cls: "vp-dedupe-text", text: line });
-    const b = el.createEl("button", { cls: "vp-btn is-compact is-primary vp-dedupe-btn", text: dd.analysis ? "查看" : "开始" });
-    b.addEventListener("click", () => void dd.openReport(false));
   }
 }
 

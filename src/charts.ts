@@ -185,6 +185,8 @@ export interface ChartOptions {
   height: number;
   kind: "area" | "bar";
   zeroBased?: boolean;
+  /** 柱状图：最后一根（本日 / 本周）用实色，其余用浅色 */
+  highlightLast?: boolean;
   tooltip: Tooltip;
 }
 
@@ -243,6 +245,9 @@ export function drawTrendChart(container: HTMLElement, points: SeriesPoint[], o:
     const bgrad = svgEl("linearGradient", { id: bgid, x1: 0, y1: 0, x2: 0, y2: 1 }, defs);
     svgEl("stop", { offset: "0%", class: "vp-bargrad-top" }, bgrad);
     svgEl("stop", { offset: "100%", class: "vp-bargrad-bottom" }, bgrad);
+    const hgrad = svgEl("linearGradient", { id: `${bgid}-hi`, x1: 0, y1: 0, x2: 0, y2: 1 }, defs);
+    svgEl("stop", { offset: "0%", class: "vp-stroke-b" }, hgrad);
+    svgEl("stop", { offset: "100%", class: "vp-stroke-a" }, hgrad);
     const bw = Math.max(2, Math.min(28, step * 0.62));
     points.forEach((p, i) => {
       const y = yOf(p.value);
@@ -250,7 +255,15 @@ export function drawTrendChart(container: HTMLElement, points: SeriesPoint[], o:
       bars.push(
         svgEl(
           "rect",
-          { x: xOf(i) - bw / 2, y: padT + ch - h, width: bw, height: h, rx: Math.min(4, bw / 2), class: "vp-bar", fill: `url(#${bgid})` },
+          {
+            x: xOf(i) - bw / 2,
+            y: padT + ch - h,
+            width: bw,
+            height: h,
+            rx: Math.min(4, bw / 2),
+            class: "vp-bar" + (o.highlightLast && i === n - 1 ? " is-current" : ""),
+            fill: `url(#${o.highlightLast && i === n - 1 ? `${bgid}-hi` : bgid})`,
+          },
           svg
         )
       );
@@ -305,7 +318,14 @@ export function drawTrendChart(container: HTMLElement, points: SeriesPoint[], o:
 
 /* ---------------- 迷你折线 ---------------- */
 
-export function drawSparkline(container: HTMLElement, values: number[]) {
+export interface SparkScrub {
+  /** 悬停 / 方向键移到第 i 个点时调用；i 为 null 表示离开，恢复默认 */
+  onPoint: (i: number | null) => void;
+  /** 读屏文字 */
+  label: (i: number) => string;
+}
+
+export function drawSparkline(container: HTMLElement, values: number[], scrub?: SparkScrub) {
   const W = 120,
     H = 36;
   const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: "none", class: "vp-spark" }, container);
@@ -320,9 +340,66 @@ export function drawSparkline(container: HTMLElement, values: number[]) {
   const grad = svgEl("linearGradient", { id: gid, x1: 0, y1: 0, x2: 0, y2: 1 }, defs);
   svgEl("stop", { offset: "0%", class: "vp-grad-top" }, grad);
   svgEl("stop", { offset: "100%", class: "vp-grad-bottom" }, grad);
+  const sgrad = svgEl("linearGradient", { id: `${gid}-s`, x1: 0, y1: 0, x2: 1, y2: 0 }, defs);
+  svgEl("stop", { offset: "0%", class: "vp-stroke-a" }, sgrad);
+  svgEl("stop", { offset: "100%", class: "vp-stroke-b" }, sgrad);
   const line = monotonePath(xs, ys);
   svgEl("path", { d: `${line} L${W},${H} L0,${H} Z`, fill: `url(#${gid})`, class: "vp-spark-area" }, svg);
-  svgEl("path", { d: line, class: "vp-spark-line" }, svg);
+  svgEl("path", { d: line, class: "vp-spark-line", stroke: `url(#${gid}-s)` }, svg);
+  if (!scrub) return;
+
+  // 参考线和圆点用 HTML 叠在上面：SVG 被横向拉伸（preserveAspectRatio=none），圆点画在里面会变成椭圆
+  container.addClass("vp-spark-host");
+  const guide = container.createDiv({ cls: "vp-spark-guide" });
+  const dot = container.createDiv({ cls: "vp-spark-dot" });
+  const live = container.createDiv({ cls: "vp-sr-only", attr: { "aria-live": "polite" } });
+  let cur: number | null = null;
+  const show = (i: number | null) => {
+    if (i === cur) return;
+    cur = i;
+    container.toggleClass("is-scrubbing", i !== null);
+    if (i !== null) {
+      const left = `${(xs[i] / W) * 100}%`;
+      guide.setCssProps({ "--vp-spark-x": left });
+      dot.setCssProps({ "--vp-spark-x": left, "--vp-spark-y": `${(ys[i] / H) * 100}%` });
+      live.setText(scrub.label(i));
+    }
+    scrub.onPoint(i);
+  };
+  const indexAt = (clientX: number) => {
+    const r = container.getBoundingClientRect();
+    const ratio = r.width > 0 ? (clientX - r.left) / r.width : 1;
+    return Math.max(0, Math.min(values.length - 1, Math.round(ratio * (values.length - 1))));
+  };
+  container.setAttr("tabindex", "0");
+  container.setAttr("role", "slider");
+  container.setAttr("aria-valuemin", "1");
+  container.setAttr("aria-valuemax", String(values.length));
+  srLabel(container, "近 12 周走势。用左右方向键逐周查看。");
+  container.addEventListener("pointermove", (e: PointerEvent) => {
+    if (e.pointerType === "mouse" || e.buttons > 0) show(indexAt(e.clientX));
+  });
+  container.addEventListener("pointerdown", (e: PointerEvent) => {
+    if (e.pointerType !== "mouse") show(indexAt(e.clientX));
+  });
+  container.addEventListener("pointerleave", () => show(null));
+  container.addEventListener("pointerup", (e: PointerEvent) => {
+    if (e.pointerType !== "mouse") show(null);
+  });
+  container.addEventListener("pointercancel", () => show(null));
+  container.addEventListener("focus", () => show(values.length - 1));
+  container.addEventListener("blur", () => show(null));
+  container.addEventListener("keydown", (e: KeyboardEvent) => {
+    const step = e.key === "ArrowLeft" ? -1 : e.key === "ArrowRight" ? 1 : 0;
+    if (e.key === "Home" || e.key === "End") {
+      e.preventDefault();
+      show(e.key === "Home" ? 0 : values.length - 1);
+    } else if (step) {
+      e.preventDefault();
+      show(Math.max(0, Math.min(values.length - 1, (cur ?? values.length - 1) + step)));
+    } else if (e.key === "Escape") show(null);
+    if (cur !== null) container.setAttr("aria-valuenow", String(cur + 1));
+  });
 }
 
 /* ---------------- 圆环 ---------------- */
@@ -335,6 +412,10 @@ export function drawRing(container: HTMLElement, ratio: number, size: number, st
   const r = (size - stroke) / 2;
   const c = 2 * Math.PI * r;
   const svg = svgEl("svg", { width: size, height: size, viewBox: `0 0 ${size} ${size}` }, wrap);
+  const gid = `vp-ring-${++uid}`;
+  const grad = svgEl("linearGradient", { id: gid, x1: 0, y1: 0, x2: 1, y2: 1 }, svgEl("defs", {}, svg));
+  svgEl("stop", { offset: "0%", class: "vp-stroke-a" }, grad);
+  svgEl("stop", { offset: "100%", class: "vp-stroke-b" }, grad);
   svgEl("circle", { cx: size / 2, cy: size / 2, r, class: "vp-ring-track", "stroke-width": stroke, fill: "none" }, svg);
   const v = Math.max(0, Math.min(1, ratio));
   if (v > 0) {
@@ -345,6 +426,7 @@ export function drawRing(container: HTMLElement, ratio: number, size: number, st
         cy: size / 2,
         r,
         class: "vp-ring-value",
+        stroke: `url(#${gid})`,
         "stroke-width": stroke,
         fill: "none",
         "stroke-dasharray": `${c * v} ${c}`,
@@ -363,6 +445,8 @@ export interface BarItem {
   label: string;
   value: number;
   valueText?: string;
+  /** 数值左边的小字，比如“本周 +3” */
+  note?: string;
   title?: string;
   onClick?: (evt: MouseEvent) => void;
 }
@@ -380,13 +464,15 @@ export function drawBarList(container: HTMLElement, items: BarItem[], emptyText:
     const row = list.createDiv({ cls: "vp-barrow" });
     const top = row.createDiv({ cls: "vp-barrow-top" });
     top.createSpan({ cls: "vp-barlabel", text: it.label, attr: { title: it.title ?? it.label } });
-    top.createSpan({ cls: "vp-barvalue", text: it.valueText ?? fmtNum(it.value) });
+    const val = top.createSpan({ cls: "vp-barvalue" });
+    if (it.note) val.createSpan({ cls: "vp-barnote", text: it.note });
+    val.createSpan({ text: it.valueText ?? fmtNum(it.value) });
     const track = row.createDiv({ cls: "vp-bartrack" });
     const fill = track.createDiv({ cls: "vp-barfill" });
     fill.setCssProps({ "--vp-bar-width": `${Math.max(2, (it.value / max) * 100)}%` });
-    // 排名越靠前颜色越饱和：同一强调色的不同浓度
-    const strength = Math.round(100 - (idx / Math.max(1, items.length - 1)) * 55);
-    fill.setCssProps({ "--vp-bar-background": `color-mix(in srgb, var(--vp-accent) ${strength}%, transparent)` });
+    // 排名越靠前颜色越饱和
+    const strength = Math.round(100 - (idx / Math.max(1, items.length - 1)) * 50);
+    fill.setCssProps({ "--vp-bar-strength": `${strength}%` });
     if (it.onClick) {
       const cb = it.onClick;
       row.addClass("is-clickable");

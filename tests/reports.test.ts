@@ -116,6 +116,15 @@ test("旧设置补齐默认值，明确关闭的周目标和根目录保留", ()
   assert.equal(migrated.reportMonthExpanded, undefined);
 });
 
+test("本周显示方式：旧设置默认圆点，已选的柱状保留", () => {
+  const old = { ...DEFAULT_SETTINGS, weekStyle: undefined } as unknown as typeof DEFAULT_SETTINGS;
+  migrateWritingSettings(old);
+  assert.equal(old.weekStyle, "dots");
+  old.weekStyle = "bars";
+  migrateWritingSettings(old);
+  assert.equal(old.weekStyle, "bars");
+});
+
 test("旧的独立展开状态合并一次，后续共享收起不被旧月报状态覆盖", () => {
   for (const week of [false, true]) {
     for (const month of [false, true]) {

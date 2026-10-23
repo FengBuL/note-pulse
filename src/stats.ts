@@ -84,6 +84,8 @@ export interface FileStat {
   folder: string;
   tags: string[];
   links: number;
+  /** 图片 / 附件 / 笔记嵌入的数量 */
+  embeds?: number;
 }
 
 export type HintKind = "folder" | "spike" | "onboarding";
@@ -142,6 +144,8 @@ export interface VaultStats {
     orphans: TFile[];
     unresolvedCount: number;
     topUnresolved: [string, number][];
+    /** 断链名 -> 第一篇出现它的笔记路径（新建笔记时按 Obsidian 的规则决定放在哪） */
+    unresolvedSource?: Record<string, string>;
   };
   folders: { folder: string; notes: number; words: number }[];
 }
@@ -507,7 +511,7 @@ export async function computeStats(
       }
     }
 
-    const fs: FileStat = { file: f, created, mtime, words, writeWords, collected, big, folder, tags, links };
+    const fs: FileStat = { file: f, created, mtime, words, writeWords, collected, big, folder, tags, links, embeds: cache?.embeds?.length || 0 };
     fileStats.push(fs);
     if (words > 0 && writeWords === 0) outlierFiles.push(fs);
   }
@@ -535,12 +539,14 @@ export async function computeStats(
     .filter((x): x is { file: TFile; count: number } => !!x.file);
   const orphans = files.filter((f) => !inbound.has(f.path) && !hasOutbound.has(f.path));
   const unresolvedMap = new Map<string, number>();
+  const unresolvedSource: Record<string, string> = {};
   let unresolvedCount = 0;
   for (const src of Object.keys(unresolved)) {
     if (!included.has(src)) continue;
     for (const [name, n] of Object.entries(unresolved[src])) {
       unresolvedCount += n;
       inc(unresolvedMap, name, n);
+      if (!(name in unresolvedSource)) unresolvedSource[name] = src;
     }
   }
 
@@ -637,7 +643,8 @@ export async function computeStats(
       topLinked,
       orphans,
       unresolvedCount,
-      topUnresolved: sortedEntries(unresolvedMap, 10),
+      topUnresolved: sortedEntries(unresolvedMap, 50),
+      unresolvedSource,
     },
     folders,
   };

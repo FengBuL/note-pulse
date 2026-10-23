@@ -23,15 +23,16 @@ The UI is in Chinese. It follows your light or dark theme, has no external depen
 
 | Panel | What it shows |
 | --- | --- |
-| Today's writing | Progress ring for today's words vs. your daily goal, current streak, last 7 days, longest streak, check-in days in the past year, daily notes this month; weekly word goal and check-ins (Monday–Sunday) |
+| Headline | One sentence at the top: words written this week compared with the same days last week, your streak, today's goal and tasks due today |
+| Today's writing | Progress ring for today's words vs. your daily goal, current and longest streak, this week as dots or bars (switch on the card), weekly goal progress, and the notes you touched today |
+| Up next | Overdue tasks listed separately, then tasks due in the next 7 days; click to jump to the line. Understands `📅 YYYY-MM-DD`, `⏳` and `[due:: ]`; `- [-]` counts as cancelled |
+| Stat cards | Total notes, total words, task completion rate and this month's check-in days. Hover a sparkline (or focus it and use the arrow keys) to read any of the last 12 weeks |
+| Writing heatmap | Up to a full year, sized to the view width; hover for words written and notes changed or created; click a day to list notes modified that day. Keyboard: focus it, then use the arrow keys and Enter |
+| Weekly writing | Words written (or new notes) per day over 30 days, or per week over six months or a year, with total, average and best period |
+| Tags and folders | Most used tags with how many of this week's new notes use them (click to search), note and word counts per top-level folder (click to reveal) |
+| Vault check-up | Updated with the dashboard: broken links (create the note in one click), orphan notes, repeated passages from the last duplicate scan, empty notes and oversized notes. Anything that changes a note asks first; deleted notes go to the trash |
 | Writing reports (new in 1.5.0) | Weekly and monthly Markdown reports, preview before saving, previous-period comparisons, optional links to changed notes, and overwrite or save-as-new choices |
-| Stat cards | Total notes and total words (with 30-day change and a 12-week sparkline), task completion rate (with overdue count), total links (with orphan notes and connectivity) |
-| Writing heatmap | Recent weeks sized to the view width; hover for words written and notes changed or created; click a day to list notes modified that day. Keyboard: focus it, then use the arrow keys and Enter |
-| Growth trend | New notes per day (default) or cumulative words, over 30 days, 90 days or 1 year, with hover values. A switch excludes oversized notes so auto-collected files cannot distort the curve |
-| Tasks | Done, open, overdue and due within 7 days; due list jumps straight to the task line; open tasks by folder or by note. Understands `📅 YYYY-MM-DD`, `⏳` and `[due:: ]`; `- [-]` counts as cancelled |
-| Tags and folders | Most used tags (click to search), note and word counts per top-level folder (click to reveal) |
-| Links | Linked notes, orphan notes, unresolved links; lists of most linked notes, orphans and common unresolved links |
-| Duplicate cleanup (new in 1.4.0) | A separate tab that finds passages repeated across notes (re-saved clippings, daily captures, AI reports) and helps you keep one copy. A small card at the bottom of the dashboard opens it |
+| Duplicate cleanup (new in 1.4.0) | A separate tab that finds passages repeated across notes (re-saved clippings, daily captures, AI reports) and helps you keep one copy. Its results also show up in the vault check-up |
 
 Every note in the dashboard is clickable (mouse or keyboard). The dashboard refreshes automatically (debounced) when your vault changes, and only computes while it is visible. Word counts are cached on disk, so a restart only re-reads notes that changed. Tags, links and tasks come from Obsidian's metadata cache; word counts are cached by modification time, so later refreshes only re-read changed files.
 
@@ -170,12 +171,24 @@ npm install
 npm run dev     # watch build
 npm run build   # type check + production build -> main.js
 npm test        # unit tests for counting and the write decision, plus an in-memory simulation of the update flow
+npm run check:css     # browser compatibility of styles.css
+npm run check:tokens  # dashboard styles only use the design tokens (font sizes, radii, shadows, durations)
 ```
+
+To look at the dashboard in a browser with sample data, without Obsidian:
+
+```bash
+node scripts/preview/build.mjs
+open scripts/preview/index.html            # add ?theme=dark and/or &week=bars
+```
+
+The preview runs the real `src/view.ts` and `styles.css` with a small stand-in for Obsidian's DOM helpers; the numbers are sample data. Icons come from `scripts/preview/icons.json`, generated with `node scripts/preview/build-icons.mjs <lucide>/dist/esm/icons`. Design rules are in `docs/design/2026-10-22-质感规范.md`.
 
 ```
 src/
 ├── main.ts      # entry: view, commands, ribbon icon, auto refresh, background word tracking, persistence
 ├── view.ts      # dashboard view and panels
+├── dashboard-logic.ts # pure calculations for the dashboard: this week, headline, weekly series, check-up
 ├── stats.ts     # statistics (tasks, links, tags, folders, daily notes)
 ├── count.ts     # word counting (pure, CJK-aware)
 ├── wordprops.ts # word count properties: triggers, batch update, remove, confirm dialogs
@@ -286,14 +299,16 @@ Note Pulse（笔记脉搏）是一个 Obsidian 插件，在一个页面里集中
 
 | 区块 | 内容 |
 | --- | --- |
-| 今日写作 | 今日字数与每日目标的进度环、当前连续打卡天数、近 7 天打卡、最长连续、近一年打卡天数、本月日记数 |
-| 指标卡 | 笔记总数、总字数（带近 30 天变化和近 12 周迷你折线）、任务完成率（含逾期数）、链接总数（含孤立笔记数和连通率） |
-| 写作热力图 | 按看板宽度显示最近若干周；悬停查看当天写作字数、修改和新建笔记数；点击格子查看当天修改过的笔记；聚焦后可用方向键和回车操作 |
-| 增长趋势 | 默认显示每天新建笔记数，也可看累计字数；范围 30 天、90 天、1 年。有“排除超大笔记”开关，自动采集的文件不会再把曲线拉歪 |
-| 任务 | 已完成、未完成、已逾期、7 天内到期；到期列表点击直接跳到任务所在行；可按文件夹或笔记查看未完成任务。识别 `📅 YYYY-MM-DD`、`⏳`、`[due:: ]`，`- [-]` 视为已取消 |
-| 标签 / 文件夹 | 标签使用排行（点击搜索）、各顶层文件夹的笔记数和字数（点击在文件列表中定位） |
-| 链接 | 已连接笔记、孤立笔记、未解析链接；最常被链接、孤立笔记、常见未解析链接三个列表 |
-| 重复内容清理（1.4.0 新增） | 独立标签页：找出在多篇笔记里重复出现的段落（反复剪藏的文章、每日采集、AI 报告），帮你只留一份。看板底部有一张小卡片可以直接打开 |
+| 页首一句话 | 本周写了多少、和上周同期比、连续写作天数、今天是否达标、今天到期的任务 |
+| 今日写作 | 今日字数与每日目标的进度环、当前与最长连续打卡、本周七天（圆点或柱状，卡片上切换）、每周目标进度、今天动过的笔记 |
+| 接下来 | 已逾期的任务单独列出，下面是 7 天内到期的；点击直接跳到任务所在行。识别 `📅 YYYY-MM-DD`、`⏳`、`[due:: ]`，`- [-]` 视为已取消 |
+| 数据卡 | 笔记总数、总字数、任务完成率、本月打卡天数。鼠标停在走势线上（或聚焦后按左右方向键）可以逐周查看近 12 周的数值 |
+| 写作热力图 | 按看板宽度最多显示一整年；悬停查看当天写作字数、修改和新建笔记数；点击格子查看当天修改过的笔记；聚焦后可用方向键和回车操作 |
+| 每周写作 | 30 天按天、半年和一年按周显示写作字数（或新建笔记数），附合计、平均和最高的一段 |
+| 标签 / 文件夹 | 标签使用排行，附本周新建笔记里用到它的篇数（点击搜索）；各顶层文件夹的笔记数和字数（点击在文件列表中定位） |
+| 库体检 | 随看板一起刷新：断链（一键新建笔记）、孤立笔记、上次扫描发现的重复内容、空笔记和超大笔记。会改动笔记的操作都先确认，删除的笔记进回收站 |
+| 写作回顾（1.5.0 新增） | 周报、月报，先预览再保存为笔记 |
+| 重复内容清理（1.4.0 新增） | 独立标签页：找出在多篇笔记里重复出现的段落（反复剪藏的文章、每日采集、AI 报告），帮你只留一份。扫描结果也会显示在库体检里 |
 
 看板中的笔记都可以点击（也支持键盘）打开。仓库内容变化后会自动刷新（带防抖，只在看板可见时计算）。字数缓存会保存在磁盘上，重启后只重新读取改动过的笔记。
 

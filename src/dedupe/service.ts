@@ -120,6 +120,8 @@ export class DedupeService {
 
   notifyViews() {
     for (const v of this.getViews()) v.refresh();
+    // 看板上的“库体检”也显示重复内容，一起更新
+    this.host.refreshViewsOnly();
   }
 
   async openReport(scanNow: boolean) {

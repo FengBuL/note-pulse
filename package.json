@@ -11,7 +11,8 @@
     "test": "node tests/run.mjs",
     "lint": "eslint src",
     "check:css": "node scripts/check-css.cjs styles.css",
-    "sample:report": "node scripts/sample-report.mjs"
+    "sample:report": "node scripts/sample-report.mjs",
+    "check:tokens": "node scripts/check-tokens.cjs styles.css"
   },
   "keywords": [
     "obsidian",

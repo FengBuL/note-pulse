@@ -5,6 +5,7 @@ import { ClipDedupeSettings, DEFAULT_SETTINGS as DEDUPE_DEFAULTS, dedupeSections
 
 export type HeatmapMode = "auto" | "mtime" | "delta";
 export type OutlierMode = "exclude" | "off";
+export type WeekStyle = "dots" | "bars";
 
 /** 设置结构版本：用于一次性迁移旧设置 */
 export const SETTINGS_VERSION = 3;
@@ -31,6 +32,10 @@ export interface DashboardSettings {
   /** 仅用于迁移旧版独立展开状态。 */
   reportMonthExpanded?: boolean;
   heatmapMode: HeatmapMode;
+  /** 今日写作卡里“本周”的显示方式 */
+  weekStyle: WeekStyle;
+  /** 看板动效（系统开了“减弱动态效果”时始终不播放） */
+  motion: boolean;
   autoRefresh: boolean;
   refreshDelaySec: number;
   openInNewTab: boolean;
@@ -48,7 +53,7 @@ export interface DashboardSettings {
   wordPropExcludeFolders: string;
   /* 重复内容清理（1.4.0 起由 Clip Dedupe 并入） */
   dedupeEnabled: boolean;
-  /** 看板底部的入口卡片 */
+  /** 看板“库体检”里的重复内容一栏 */
   dedupeCard: boolean;
   dedupe: ClipDedupeSettings;
 }
@@ -68,6 +73,8 @@ export const DEFAULT_SETTINGS: DashboardSettings = {
   reportFolder: "Note Pulse",
   reportWeekExpanded: false,
   heatmapMode: "auto",
+  weekStyle: "dots",
+  motion: true,
   autoRefresh: true,
   refreshDelaySec: 3,
   openInNewTab: true,
@@ -254,6 +261,22 @@ export class DashboardSettingTab extends PluginSettingTab {
               ),
           },
           {
+            name: "本周的显示方式",
+            desc: "今日写作卡里本周七天的样子。圆点：达标打勾，没达标显示完成百分比。柱状：柱高是当天字数，虚线是每日目标。也可以直接在看板上切换。",
+            render: (setting) =>
+              setting.addDropdown((d) =>
+                d
+                  .addOption("dots", "圆点")
+                  .addOption("bars", "柱状")
+                  .setValue(st.weekStyle)
+                  .onChange(async (v) => {
+                    st.weekStyle = v as WeekStyle;
+                    await this.plugin.saveViewSetting();
+                    this.plugin.refreshViewsOnly();
+                  })
+              ),
+          },
+          {
             name: "创建日期字段名",
             desc:
               "如果 frontmatter 中有这些字段且为 YYYY-MM-DD 日期，则用它作为创建日期，否则使用文件创建时间。" +
@@ -289,6 +312,17 @@ export class DashboardSettingTab extends PluginSettingTab {
                 t.setValue(String(st.refreshDelaySec)).onChange(async (v) => {
                   const n = parseFloat(v);
                   st.refreshDelaySec = isNaN(n) || n < 0.5 ? 0.5 : n;
+                  await save();
+                })
+              ),
+          },
+          {
+            name: "动效",
+            desc: "打开看板时卡片依次出现、数字滚动到当前值，切换和展开时平滑过渡；自动刷新只让变化了的数字动。系统开了“减弱动态效果”时始终关闭。",
+            render: (setting) =>
+              setting.addToggle((t) =>
+                t.setValue(st.motion).onChange(async (v) => {
+                  st.motion = v;
                   await save();
                 })
               ),
@@ -480,8 +514,8 @@ export class DashboardSettingTab extends PluginSettingTab {
               ),
           },
           {
-            name: "在看板上显示入口",
-            desc: "看板底部的“重复内容清理”小卡片。",
+            name: "在库体检里显示重复内容",
+            desc: "看板“库体检”卡里的“重复内容”一栏。",
             render: (setting) =>
               setting.addToggle((tg) =>
                 tg.setValue(st.dedupeCard).onChange(async (v) => {
@@ -567,4 +601,5 @@ export function migrateWritingSettings(settings: DashboardSettings): void {
   if (typeof settings.reportFolder !== "string") settings.reportFolder = DEFAULT_SETTINGS.reportFolder;
   settings.reportWeekExpanded = settings.reportWeekExpanded === true || settings.reportMonthExpanded === true;
   delete settings.reportMonthExpanded;
+  if (settings.weekStyle !== "dots" && settings.weekStyle !== "bars") settings.weekStyle = DEFAULT_SETTINGS.weekStyle;
 }

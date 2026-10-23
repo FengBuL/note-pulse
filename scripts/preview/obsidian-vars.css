@@ -1,0 +1,40 @@
+/* Obsidian 默认主题的几个变量（近似值），只用于本地预览 */
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", sans-serif;
+  font-size: 13px;
+  -webkit-font-smoothing: antialiased;
+  --interactive-accent: #7f5af0;
+  --text-on-accent: #fff;
+  --font-ui-small: 13px;
+  --font-ui-smaller: 12px;
+}
+body.theme-light {
+  --background-primary: #ffffff;
+  --background-secondary: #f6f6f6;
+  --background-modifier-border: #e3e3e3;
+  --background-modifier-hover: rgba(0, 0, 0, 0.05);
+  --text-normal: #222222;
+  --text-muted: #5c5c5c;
+  --text-faint: #ababab;
+  background: #f6f6f6;
+  color: #222;
+}
+body.theme-dark {
+  --interactive-accent: #9a80ff;
+  --background-primary: #1e1e1e;
+  --background-secondary: #262626;
+  --background-modifier-border: #363636;
+  --background-modifier-hover: rgba(255, 255, 255, 0.06);
+  --text-normal: #dadada;
+  --text-muted: #a3a3a3;
+  --text-faint: #666666;
+  background: #1e1e1e;
+  color: #dadada;
+}
+button {
+  font: inherit;
+}
+#app {
+  min-height: 100vh;
+}
