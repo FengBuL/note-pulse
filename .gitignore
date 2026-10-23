@@ -18,3 +18,4 @@ data.json
 .test-build/
 .preview-build/
 scripts/preview/preview.js
+scripts/preview/widgets.js

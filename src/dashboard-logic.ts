@@ -245,3 +245,57 @@ export function checkupModel(s: VaultStats): CheckupModel {
     big: s.files.filter((f) => f.big && !f.collected).sort((a, b) => b.words - a.words),
   };
 }
+
+/* ---------------- 2.0 新卡片 ---------------- */
+
+/**
+ * 写作节奏：近 n 周里，每个星期几平均写多少字（周一在前）。
+ * 只算有记录以来的日子，避免把启用插件之前的空白日拉低平均。
+ */
+export function weekdayRhythm(s: VaultStats, now: Date, weeks = 12): { day: number; average: number; days: number }[] {
+  const today = startOfDay(now);
+  const start = addDays(today, -(weeks * 7 - 1));
+  const sums = Array(7).fill(0) as number[];
+  const counts = Array(7).fill(0) as number[];
+  const first = s.logStartDay && s.logStartDay > dayKey(start) ? s.logStartDay : dayKey(start);
+  for (let d = start; d.getTime() <= today.getTime(); d = addDays(d, 1)) {
+    const k = dayKey(d);
+    if (k < first) continue;
+    const wd = d.getDay();
+    sums[wd] += s.dayWords[k] || 0;
+    counts[wd]++;
+  }
+  return [1, 2, 3, 4, 5, 6, 0].map((day) => ({ day, average: counts[day] ? Math.round(sums[day] / counts[day]) : 0, days: counts[day] }));
+}
+
+/** 笔记活跃度：近 30 天新建和修改（修改里去掉新建的，避免一篇算两次） */
+export function noteActivity(s: VaultStats, now: Date): { created: number; edited: number } {
+  const since = addDays(startOfDay(now), -29).getTime();
+  let created = 0;
+  let edited = 0;
+  for (const f of s.files) {
+    if (f.collected) continue;
+    if (f.created >= since) created++;
+    else if (f.mtime >= since) edited++;
+  }
+  return { created, edited };
+}
+
+/** 链接密度：平均每篇笔记的链接数，以及有链接相连的笔记占比 */
+export function linkDensity(s: VaultStats): { perNote: number; connected: number } {
+  const n = s.totalNotes || 0;
+  if (!n) return { perNote: 0, connected: 0 };
+  // 向下取整：只有真的没有孤立笔记才显示 100%
+  return { perNote: Math.round((s.totalLinks / n) * 10) / 10, connected: Math.floor(((n - s.links.orphans.length) / n) * 100) };
+}
+
+/** 文件夹构成：笔记数最多的前 top 个文件夹，其余并成“其他”；share 为占全部笔记的比例 */
+export function folderShares(s: VaultStats, top = 4): { folder: string; notes: number; share: number; other: boolean }[] {
+  const total = s.folders.reduce((a, f) => a + f.notes, 0);
+  if (!total) return [];
+  const sorted = [...s.folders].sort((a, b) => b.notes - a.notes);
+  const head = sorted.slice(0, top).map((f) => ({ folder: f.folder, notes: f.notes, share: f.notes / total, other: false }));
+  const rest = sorted.slice(top).reduce((a, f) => a + f.notes, 0);
+  if (rest > 0) head.push({ folder: "", notes: rest, share: rest / total, other: true });
+  return head;
+}

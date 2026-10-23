@@ -1,0 +1,149 @@
+/* 2.0 小组件原型的网格和新卡片样式（只给原型用；正式实现时并进 styles.css，改用令牌） */
+.wg-root {
+  /* 文件夹构成的分类色：已用 dataviz 校验脚本验证（亮 / 暗两套，色盲区分度 ≥ 9） */
+  --wg-c1: #6250d6;
+  --wg-c2: #1baf7a;
+  --wg-c3: #eb6834;
+  --wg-c4: #2a78d6;
+  --wg-other: color-mix(in srgb, var(--text-normal) 22%, transparent);
+  min-height: 100vh;
+  background: var(--vp-page, var(--background-secondary));
+}
+.theme-dark .wg-root {
+  --wg-c1: #9085e9;
+  --wg-c2: #199e70;
+  --wg-c3: #d95926;
+  --wg-c4: #3987e5;
+}
+.wg-bar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.wg-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  grid-auto-rows: 168px;
+  grid-auto-flow: row dense;
+  gap: 16px;
+}
+.wg-card {
+  overflow: hidden;
+  transition: box-shadow 240ms cubic-bezier(0.2, 0, 0, 1);
+}
+.wg-card.is-s { grid-column: span 3; }
+.wg-card.is-m { grid-column: span 6; }
+.wg-card.is-l { grid-column: span 6; grid-row: span 2; }
+.wg-card.is-xl { grid-column: 1 / -1; }
+@media (max-width: 1000px) {
+  .wg-card.is-s { grid-column: span 6; }
+  .wg-card.is-m, .wg-card.is-l, .wg-card.is-xl { grid-column: 1 / -1; }
+}
+@media (max-width: 560px) {
+  .wg-grid { grid-auto-rows: minmax(168px, auto); }
+  .wg-card.is-s { grid-column: 1 / -1; }
+}
+.wg-grid.is-editing .wg-card {
+  outline: 1.5px dashed color-mix(in srgb, var(--vp-accent) 45%, transparent);
+  outline-offset: 3px;
+}
+.wg-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+.wg-icon {
+  color: var(--vp-accent);
+  font-size: 12px;
+}
+.wg-note {
+  margin-top: auto;
+  padding-top: 8px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--vp-subtle, var(--text-muted));
+}
+
+/* 今日写作示意 */
+.wg-row { display: flex; align-items: center; gap: 20px; }
+.wg-ring {
+  display: grid;
+  place-items: center;
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  background:
+    radial-gradient(closest-side, var(--vp-surface) 82%, transparent 83%),
+    conic-gradient(var(--vp-accent) calc(var(--p) * 360deg), var(--vp-track) 0);
+}
+.wg-week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; margin-top: 20px; }
+.wg-week-day { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.wg-week-dot {
+  display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%;
+  border: 1.5px solid var(--vp-line-strong); font-size: 10px; color: var(--vp-accent-ink);
+}
+.wg-week-day.is-done .wg-week-dot { border: none; background: var(--vp-grad); color: #fff; }
+.wg-week-label { font-size: 11px; color: var(--vp-subtle); }
+
+/* 写作节奏：单一系列 = 单一颜色，只突出最常写的一天 */
+.wg-rhythm { display: flex; align-items: flex-end; gap: 8px; height: 76px; margin-top: 4px; }
+.wg-rhythm.is-mini { height: 40px; gap: 4px; margin-top: auto; }
+.wg-rhythm-col { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; gap: 4px; }
+.wg-rhythm-bar {
+  width: 100%; max-width: 22px; height: var(--h); min-height: 3px;
+  border-radius: 4px 4px 0 0;
+  background: color-mix(in srgb, var(--vp-accent) 35%, transparent);
+}
+.wg-rhythm-col.is-best .wg-rhythm-bar { background: var(--vp-accent); }
+.wg-rhythm-val { font-size: 11px; font-weight: 600; color: var(--text-normal); min-height: 14px; }
+.wg-rhythm-label { font-size: 11px; color: var(--vp-subtle); }
+
+/* 笔记活跃度：两个数 + 分段条（两段之间留 2px 间隙） */
+.wg-pair { display: flex; gap: 28px; }
+.wg-pair-item .vp-label::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 6px; vertical-align: 1px; }
+.wg-pair-item.is-a .vp-label::before { background: var(--vp-accent); }
+.wg-pair-item.is-b .vp-label::before { background: color-mix(in srgb, var(--vp-accent) 35%, transparent); }
+.wg-split { display: flex; gap: 2px; height: 8px; margin-top: 12px; }
+.wg-split-a, .wg-split-b { width: var(--w); border-radius: 4px; }
+.wg-split-a { background: var(--vp-accent); }
+.wg-split-b { background: color-mix(in srgb, var(--vp-accent) 35%, transparent); }
+
+/* 文件夹构成：堆叠横条，段与段之间 2px 间隙，必须带图例 */
+.wg-stack { display: flex; gap: 2px; height: 14px; margin: 6px 0 12px; }
+.wg-stack-seg { width: var(--w); min-width: 3px; }
+.wg-stack-seg:first-child { border-radius: 4px 0 0 4px; }
+.wg-stack-seg:last-child { border-radius: 0 4px 4px 0; }
+.is-c1 { background: var(--wg-c1); }
+.is-c2 { background: var(--wg-c2); }
+.is-c3 { background: var(--wg-c3); }
+.is-c4 { background: var(--wg-c4); }
+.is-other { background: var(--wg-other); }
+.wg-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; }
+.wg-legend.is-list { flex-direction: column; gap: 8px; }
+.wg-legend-item { display: flex; align-items: center; gap: 6px; }
+.wg-legend.is-list .wg-legend-item { justify-content: flex-start; }
+.wg-swatch { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.wg-legend-name { color: var(--text-normal); }
+.wg-legend-val { color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.wg-legend.is-list .wg-legend-val { margin-left: auto; }
+
+/* 添加卡片 */
+.wg-add { margin-top: 16px; }
+.wg-add-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px; margin-top: 12px; }
+.wg-add-item {
+  text-align: left; padding: 10px 12px; border-radius: 8px; cursor: pointer;
+  border: 1px solid var(--vp-line); background: var(--vp-surface);
+}
+.wg-add-item:hover { border-color: var(--vp-accent); }
+.wg-add-name { font-weight: 600; font-size: 13px; }
+.wg-add-desc { margin-top: 2px; font-size: 12px; color: var(--text-muted); }
+.wg-nowrap { white-space: nowrap; min-width: max-content; }
+.wg-chips { margin-top: 18px; display: flex; flex-direction: column; gap: 6px; }
+.wg-why {
+  display: inline-grid; place-items: center; width: 15px; height: 15px; margin-left: 6px;
+  border-radius: 50%; border: 1px solid var(--vp-line-strong); font-size: 10px; color: var(--text-muted); cursor: help;
+}
+.wg-card.is-m .vp-barrow { padding-top: 4px; padding-bottom: 4px; }

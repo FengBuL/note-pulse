@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { TFile } from "obsidian";
-import { busiestWeekday, checkupModel, headline, monthWriting, trendModel, weekDays, weekStart, weeklyCheckins, weeklyNotes, weeklyWords } from "../src/dashboard-logic";
+import { busiestWeekday, checkupModel, folderShares, headline, linkDensity, monthWriting, noteActivity, trendModel, weekDays, weekStart, weekdayRhythm, weeklyCheckins, weeklyNotes, weeklyWords } from "../src/dashboard-logic";
 import { dayKey } from "../src/stats";
 import type { FileStat, VaultStats } from "../src/stats";
 
@@ -174,4 +174,43 @@ test("库体检：能修的断链排在前面，同名笔记和未引用附件�
   assert.deepEqual(c.unresolved[0].fix, fix);
   assert.deepEqual(c.unresolved[0].from, ["a.md"]);
   assert.deepEqual(c.sameName, [["a/README.md", "b/README.md"]]);
+});
+
+test("写作节奏：按星期几平均，周一在前；启用记录之前的日子不算", () => {
+  const dayWords: Record<string, number> = {};
+  // 2026-10-19 周一 … 2026-10-24 周六（今天）
+  dayWords["2026-10-19"] = 1000;
+  dayWords["2026-10-12"] = 3000; // 上周一
+  dayWords["2026-10-24"] = 600;
+  const s = stats({ dayWords, logStartDay: "2026-10-12" });
+  const r = weekdayRhythm(s, NOW, 12);
+  assert.deepEqual(r.map((x) => x.day), [1, 2, 3, 4, 5, 6, 0]);
+  assert.equal(r[0].average, 2000, "两个周一平均");
+  assert.equal(r[0].days, 2, "只算 10-12 之后的周一");
+  assert.equal(r[5].average, 300, "两个周六（10-17 没写、10-24 写 600）");
+  assert.equal(r[6].days, 1, "10-12 之后只有一个周日（10-18）");
+});
+
+test("笔记活跃度：近 30 天新建和修改，新建的不重复算修改，采集不算", () => {
+  const s = stats({
+    files: [
+      file("新.md", at(2026, 10, 20), 100, { mtime: at(2026, 10, 23) }),
+      file("改.md", at(2026, 1, 1), 100, { mtime: at(2026, 10, 10) }),
+      file("旧.md", at(2026, 1, 1), 100, { mtime: at(2026, 8, 1) }),
+      file("剪藏.md", at(2026, 10, 20), 100, { collected: true }),
+    ],
+  });
+  assert.deepEqual(noteActivity(s, NOW), { created: 1, edited: 1 });
+});
+
+test("链接密度和文件夹构成", () => {
+  const s = stats({ totalNotes: 10, totalLinks: 25, links: { topLinked: [], orphans: [{} as TFile, {} as TFile], unresolvedCount: 0, topUnresolved: [] } });
+  assert.deepEqual(linkDensity(s), { perNote: 2.5, connected: 80 });
+  assert.deepEqual(linkDensity(stats()), { perNote: 0, connected: 0 });
+  const f = folderShares(
+    stats({ folders: [{ folder: "a", notes: 50, words: 0 }, { folder: "b", notes: 30, words: 0 }, { folder: "c", notes: 10, words: 0 }, { folder: "d", notes: 6, words: 0 }, { folder: "e", notes: 4, words: 0 }] }),
+    3
+  );
+  assert.deepEqual(f.map((x) => [x.folder, x.notes, x.other]), [["a", 50, false], ["b", 30, false], ["c", 10, false], ["", 10, true]]);
+  assert.equal(f.reduce((a, x) => a + x.share, 0), 1);
 });
