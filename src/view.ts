@@ -24,7 +24,7 @@ import {
   weeklyWords,
 } from "./dashboard-logic";
 import { GroupStat, Hint, TaskInfo, VaultStats, addDays, dayKey, isCheckinDay, pad2, startOfDay } from "./stats";
-import { WidgetId, WidgetSize } from "./widgets";
+import { WidgetId, WidgetLayout, WidgetSize, addWidget, defaultLayout, hiddenWidgets, moveWidget, placeWidget, removeWidget, sameLayout, setSize, widgetInfo } from "./widgets";
 import { MOTION, SegRect, animateHeight, countUp, drawLines, markStagger, reducedMotion, segRect, slideSeg } from "./motion";
 import {
   BarItem,
@@ -52,6 +52,30 @@ const folderName = (key: string) => (key === ROOT_FOLDER ? L("(根目录)", "(va
 /** “收起”按钮的文字；moreLink 靠它决定箭头朝上 */
 const COLLAPSE = () => L("收起", "Show less");
 const fmtSize = (bytes: number) => (bytes >= 1e6 ? `${(bytes / 1e6).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1e3))} KB`);
+/** 卡片名字和一句说明（编辑看板、添加卡片里用） */
+const WIDGET_TEXT: Record<WidgetId, [() => string, () => string]> = {
+  hero: [() => L("今日写作", "Today"), () => L("今日字数、连续打卡、本周七天", "Today's words, streak, this week")],
+  tasks: [() => L("接下来", "Next up"), () => L("逾期和 7 天内到期的任务", "Overdue tasks and those due within 7 days")],
+  notes: [() => L("笔记", "Notes"), () => L("笔记总数和近 12 周走势", "Note count and 12-week trend")],
+  words: [() => L("总字数", "Words"), () => L("总字数和近 12 周走势", "Word count and 12-week trend")],
+  taskRate: [() => L("任务完成率", "Tasks done"), () => L("已完成任务的比例", "Share of tasks done")],
+  month: [() => L("本月写作", "This month"), () => L("本月打卡天数和日均字数", "Streak days and daily average this month")],
+  heat: [() => L("写作热力图", "Writing heatmap"), () => L("最多一年的每日写作", "Daily writing for up to a year")],
+  trend: [() => L("每周写作", "Weekly writing"), () => L("每周或每天的字数、新建笔记", "Words or new notes per week or day")],
+  tags: [() => L("常用标签", "Top tags"), () => L("标签和文件夹排行", "Tag and folder ranking")],
+  checkup: [() => L("库体检", "Vault checkup"), () => L("断链、孤立笔记、重复内容等", "Broken links, orphans, duplicates and more")],
+  reports: [() => L("写作回顾", "Writing review"), () => L("周报和月报", "Weekly and monthly reports")],
+  topLinked: [() => L("最常被链接", "Most linked"), () => L("哪些笔记是你的核心", "Which notes are your hubs")],
+  rhythm: [() => L("写作节奏", "Writing rhythm"), () => L("一般星期几写", "Which weekdays you write")],
+  activity: [() => L("笔记活跃度", "Note activity"), () => L("写新的还是改旧的", "New notes or reworking old ones")],
+  taskNotes: [() => L("任务最多的笔记", "Notes with most tasks"), () => L("任务压在哪几篇", "Where tasks pile up")],
+  density: [() => L("链接密度", "Link density"), () => L("库连得紧不紧", "How connected the vault is")],
+  folders: [() => L("文件夹构成", "Folder mix"), () => L("内容都在哪些文件夹", "Where your notes live")],
+};
+const widgetName = (id: WidgetId) => WIDGET_TEXT[id][0]();
+const widgetDesc = (id: WidgetId) => WIDGET_TEXT[id][1]();
+const sizeName = (s: WidgetSize) => ({ s: L("小", "Small"), m: L("中", "Medium"), l: L("大", "Large"), xl: L("整行", "Full width") })[s];
+
 /** "2026-10-24" → 星期几（0 是周日） */
 const dayIndex = (key: string) => {
   const [y, m, d] = key.split("-").map(Number);
@@ -143,6 +167,7 @@ export class DashboardView extends ItemView {
 
     const actions = header.createDiv({ cls: "vp-header-actions" });
     this.statusEl = actions.createSpan({ cls: "vp-status" });
+    this.editBtn = this.iconButton(actions, "pencil", L("编辑看板", "Edit dashboard"), () => this.toggleEditing());
     this.refreshBtn = this.iconButton(actions, "refresh-cw", L("刷新数据", "Refresh data"), () => void this.plugin.requestRefresh(true));
     this.iconButton(actions, "settings", L("看板设置", "Dashboard settings"), () => this.plugin.openSettings());
 
@@ -376,14 +401,119 @@ export class DashboardView extends ItemView {
     this.define("headline", body, (h) => this.renderHeadline(h, stats, ck));
     const grid = body.createDiv({ cls: "vp-grid" });
     this.gridEl = grid;
+    grid.toggleClass("is-editing", this.editing);
     for (const item of this.plugin.settings.layout.items) {
       const fn = this.widgetRenderer(item.id, stats, ck);
       if (fn) this.define(item.id, grid, fn);
+    }
+    if (this.editing) this.renderAddPanel(body);
+    else if (this.plugin.settings.layout.items.length === 0) {
+      const e = body.createDiv({ cls: "vp-card vp-fullempty" });
+      this.empty(e, "layout-dashboard", L("看板上没有卡片。点右上角的铅笔添加。", "The dashboard has no cards. Use the pencil at the top right to add some."));
     }
   }
 
   /** 看板栅格（编辑模式要在上面挂类） */
   private gridEl: HTMLElement | null = null;
+  private editBtn: HTMLElement | null = null;
+  /** 编辑看板：卡片上出现尺寸、隐藏、移动，底部出现“添加卡片” */
+  private editing = false;
+
+  private toggleEditing() {
+    this.editing = !this.editing;
+    this.editBtn?.toggleClass("is-active", this.editing);
+    this.editBtn?.setAttr("aria-pressed", String(this.editing));
+    if (this.stats) this.render(this.stats);
+  }
+
+  /** 改布局：立刻保存（随 data.json 同步），用已有统计重画 */
+  private applyLayout(next: WidgetLayout, focusId?: string) {
+    if (sameLayout(next, this.plugin.settings.layout)) return;
+    this.plugin.settings.layout = next;
+    void this.plugin.saveViewSetting();
+    if (this.stats) this.render(this.stats);
+    if (focusId) this.contentEl.querySelector<HTMLElement>(`[data-fid="${focusId}"]`)?.focus({ preventScroll: true });
+  }
+
+  /** 编辑模式下每张卡片右上角的工具条：尺寸、前移、后移、隐藏；整张卡可以拖动换位置 */
+  private editTools(el: HTMLElement, id: WidgetId) {
+    const info = widgetInfo(id);
+    if (!info) return;
+    const layout = this.plugin.settings.layout;
+    const size = layout.items.find((i) => i.id === id)?.size;
+    const idx = layout.items.findIndex((i) => i.id === id);
+    const name = widgetName(id);
+    el.addClass("is-editing");
+    const bar = el.createDiv({ cls: "vp-w-tools", attr: { role: "toolbar", "aria-label": L(`${name}：编辑`, `Edit ${name}`) } });
+    el.prepend(bar);
+    bar.createSpan({ cls: "vp-w-name", text: L(`拖动或用箭头换位置`, "Drag or use the arrows to move") });
+    if (info.sizes.length > 1) {
+      const seg = bar.createDiv({ cls: "vp-seg", attr: { role: "radiogroup", "aria-label": L("尺寸", "Size") } });
+      for (const sz of ["s", "m", "l", "xl"] as WidgetSize[]) {
+        if (!info.sizes.includes(sz)) continue;
+        const b = seg.createEl("button", {
+          cls: "vp-seg-btn" + (sz === size ? " is-active" : ""),
+          text: sz.toUpperCase(),
+          attr: { type: "button", role: "radio", "aria-checked": String(sz === size), "aria-label": `${sizeName(sz)}`, "data-fid": `edit:${id}:${sz}` },
+        });
+        b.addEventListener("click", () => this.applyLayout(setSize(this.plugin.settings.layout, id, sz), `edit:${id}:${sz}`));
+      }
+    }
+    const btn = (icon: string, label: string, fid: string, disabled: boolean, fn: () => void) => {
+      const b = bar.createEl("button", { cls: "vp-icon-btn is-small", attr: { type: "button", "aria-label": label, "data-fid": fid } });
+      setIcon(b, icon);
+      if (disabled) b.setAttr("disabled", "true");
+      b.addEventListener("click", fn);
+    };
+    btn("chevron-up", L("往前挪", "Move earlier"), `edit:${id}:up`, idx <= 0, () => this.applyLayout(moveWidget(this.plugin.settings.layout, id, -1), `edit:${id}:up`));
+    btn("chevron-down", L("往后挪", "Move later"), `edit:${id}:down`, idx >= layout.items.length - 1, () => this.applyLayout(moveWidget(this.plugin.settings.layout, id, 1), `edit:${id}:down`));
+    btn("x", L("从看板上移除", "Remove from dashboard"), `edit:${id}:hide`, false, () => this.applyLayout(removeWidget(this.plugin.settings.layout, id)));
+    // 拖动换位置（鼠标）；键盘用上面的前移 / 后移
+    el.setAttr("draggable", "true");
+    el.addEventListener("dragstart", (e) => {
+      if ((e.target as HTMLElement).closest?.(".vp-w-tools")) return;
+      e.dataTransfer?.setData("text/plain", id);
+      if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+      el.addClass("is-dragging");
+    });
+    el.addEventListener("dragend", () => el.removeClass("is-dragging"));
+    el.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      el.addClass("is-drop");
+    });
+    el.addEventListener("dragleave", () => el.removeClass("is-drop"));
+    el.addEventListener("drop", (e) => {
+      e.preventDefault();
+      el.removeClass("is-drop");
+      const from = e.dataTransfer?.getData("text/plain") as WidgetId | undefined;
+      if (from && from !== id) this.applyLayout(placeWidget(this.plugin.settings.layout, from, id));
+    });
+  }
+
+  /** 编辑模式：看板最下面的“添加卡片”和“恢复默认布局” */
+  private renderAddPanel(parent: HTMLElement) {
+    const panel = parent.createDiv({ cls: "vp-card vp-add-panel" });
+    const head = panel.createDiv({ cls: "vp-card-head" });
+    const t = head.createDiv({ cls: "vp-card-title" });
+    setIcon(t.createSpan({ cls: "vp-card-icon", attr: { "aria-hidden": "true" } }), "plus");
+    t.createSpan({ text: L("添加卡片", "Add a card") });
+    const reset = head.createEl("button", { cls: "vp-link", text: L("恢复默认布局", "Restore default layout"), attr: { type: "button" } });
+    reset.addEventListener("click", () => this.applyLayout(defaultLayout()));
+    const hidden = hiddenWidgets(this.plugin.settings.layout);
+    if (hidden.length === 0) {
+      panel.createDiv({ cls: "vp-kpi-caption", text: L("所有卡片都在看板上了。点卡片右上角的 × 可以移除。", "Every card is on the dashboard. Use × on a card to remove it.") });
+    }
+    const list = panel.createDiv({ cls: "vp-add-list" });
+    for (const w of hidden) {
+      const b = list.createEl("button", { cls: "vp-add-item", attr: { type: "button", "data-fid": `add:${w.id}` } });
+      b.createDiv({ cls: "vp-add-name", text: widgetName(w.id) });
+      b.createDiv({ cls: "vp-add-desc", text: `${widgetDesc(w.id)} · ${w.sizes.map((x) => x.toUpperCase()).join(" / ")}` });
+      b.addEventListener("click", () => this.applyLayout(addWidget(this.plugin.settings.layout, w.id)));
+    }
+    const done = panel.createDiv({ cls: "vp-card-foot" });
+    const fin = done.createEl("button", { cls: "vp-btn is-primary", text: L("完成", "Done"), attr: { type: "button" } });
+    fin.addEventListener("click", () => this.toggleEditing());
+  }
 
   /** 每张卡片的渲染函数；尺寸由 mount 挂到卡片根元素上（is-s / is-m / is-l / is-xl） */
   private widgetRenderer(id: WidgetId, stats: VaultStats, ck: Checkin): ((host: HTMLElement) => void) | null {
@@ -454,6 +584,7 @@ export class DashboardView extends ItemView {
     if (size) {
       el.addClass("vp-w", `is-${size}`);
       el.setAttr("data-widget", key);
+      if (this.editing) this.editTools(el, key as WidgetId);
     }
     if (intro) {
       markStagger(el);

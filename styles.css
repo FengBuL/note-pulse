@@ -2027,6 +2027,91 @@ body.is-mobile .vp-root :is(button, [role="button"], [role="tab"], .is-clickable
   display: block;
 }
 
+/* ---------------- 编辑看板 ---------------- */
+
+.vp-icon-btn.is-active {
+  color: var(--vp-accent-ink);
+  background: color-mix(in srgb, var(--vp-accent) 12%, transparent);
+}
+.vp-grid.is-editing > .vp-w {
+  outline: 1.5px dashed color-mix(in srgb, var(--vp-accent) 45%, transparent);
+  outline-offset: 3px;
+  cursor: move;
+}
+/* 编辑时卡片里的内容不响应点击，避免拖动时误点开笔记 */
+.vp-grid.is-editing > .vp-w > :not(.vp-w-tools) {
+  pointer-events: none;
+}
+.vp-w.is-dragging {
+  opacity: 0.5;
+}
+.vp-w.is-drop {
+  outline-style: solid;
+  outline-color: var(--vp-accent);
+}
+/* 工具条占卡片顶部单独一条，不盖住卡片自己的标题和控件 */
+.vp-w-tools {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: var(--vp-s1);
+  margin: calc(var(--vp-s2) * -1) calc(var(--vp-s2) * -1) var(--vp-s3);
+  padding: 0 0 var(--vp-s2);
+  border-bottom: 1px dashed var(--vp-line-strong);
+  cursor: default;
+}
+.vp-w.is-s .vp-w-tools .vp-w-name {
+  visibility: hidden;
+}
+.vp-w-tools .vp-w-name {
+  margin-right: auto;
+  font-size: var(--vp-fs-12);
+  font-weight: 600;
+  color: var(--vp-accent-ink);
+}
+.vp-w-tools .vp-icon-btn[disabled] {
+  opacity: 0.35;
+  cursor: default;
+}
+.vp-add-panel {
+  margin-top: var(--vp-s4);
+}
+.vp-add-panel .vp-card-head .vp-link {
+  margin-left: auto;
+}
+.vp-add-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: var(--vp-s2);
+  margin-top: var(--vp-s3);
+}
+.vp-root .vp-shell .vp-add-item {
+  display: block;
+  height: auto;
+  padding: 10px var(--vp-s3);
+  border: 1px solid var(--vp-line);
+  border-radius: var(--vp-r-s);
+  background: var(--vp-surface);
+  box-shadow: none;
+  text-align: left;
+  cursor: pointer;
+}
+.vp-root .vp-shell .vp-add-item:hover {
+  border-color: var(--vp-accent);
+}
+.vp-add-name {
+  font-size: var(--vp-fs-13);
+  font-weight: 600;
+  color: var(--text-normal);
+}
+.vp-add-desc {
+  margin-top: 2px;
+  font-size: var(--vp-fs-12);
+  color: var(--text-muted);
+  white-space: normal;
+}
+
 /* ---------------- 动效 ----------------
    只在 .vp-motion（设置里开着动效）下生效；系统“减弱动态效果”时下面的媒体查询一并关掉。
    is-intro：首次打开看板，挂在根上约 1.8 秒；is-swap：切换标签页 / 范围后挂在那张卡上约 1.2 秒。
