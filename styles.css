@@ -1847,6 +1847,186 @@ body.is-mobile .vp-root :is(button, [role="button"], [role="tab"], .is-clickable
 }
 
 
+/* ---------------- 2.0 新卡片 ---------------- */
+
+/* 文件夹构成的分类色：dataviz 校验脚本验证过（亮暗两套，相邻色色盲区分度 ≥ 9.2）。亮色青绿对背景不足 3:1，所以图例必须显示名字和百分比 */
+.vp-root {
+  --vp-cat-1: #6250d6;
+  --vp-cat-2: #1baf7a;
+  --vp-cat-3: #eb6834;
+  --vp-cat-4: #2a78d6;
+  --vp-cat-other: color-mix(in srgb, var(--text-normal) 22%, transparent);
+}
+.theme-dark .vp-root {
+  --vp-cat-1: #9085e9;
+  --vp-cat-2: #199e70;
+  --vp-cat-3: #d95926;
+  --vp-cat-4: #3987e5;
+}
+
+/* 写作节奏：单一系列只用强调色，最常写的一天实色 */
+.vp-rhythm {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--vp-s2);
+  height: 84px;
+  margin-top: var(--vp-s3);
+}
+.vp-rhythm.is-mini {
+  height: 40px;
+  gap: var(--vp-s1);
+}
+.vp-rhythm-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--vp-s1);
+  height: 100%;
+}
+.vp-rhythm-bar {
+  width: 100%;
+  max-width: 22px;
+  height: var(--vp-rhythm-h, 4%);
+  min-height: 3px;
+  border-radius: var(--vp-r-xs) var(--vp-r-xs) 0 0;
+  background: color-mix(in srgb, var(--vp-accent) 35%, transparent);
+}
+.vp-rhythm-col.is-best .vp-rhythm-bar {
+  background: var(--vp-accent);
+}
+.vp-rhythm-label {
+  font-size: var(--vp-fs-11);
+  color: var(--vp-subtle);
+}
+
+/* 笔记活跃度：两个数 + 分段条（两段之间 2px 间隙） */
+.vp-pair {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--vp-s2) 28px;
+}
+.vp-pair-item .vp-label::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: var(--vp-r-xs);
+  vertical-align: 1px;
+}
+.vp-pair-item.is-a .vp-label::before,
+.vp-split-a {
+  background: var(--vp-accent);
+}
+.vp-pair-item.is-b .vp-label::before,
+.vp-split-b {
+  background: color-mix(in srgb, var(--vp-accent) 35%, transparent);
+}
+.vp-split {
+  display: flex;
+  gap: 2px;
+  height: 8px;
+  margin: var(--vp-s3) 0 var(--vp-s2);
+}
+.vp-split.is-empty {
+  background: var(--vp-track);
+  border-radius: var(--vp-r-f);
+}
+.vp-split-a,
+.vp-split-b {
+  width: var(--vp-split-w, 0%);
+  border-radius: var(--vp-r-f);
+}
+
+/* 任务最多的笔记：“待办 N”不截断 */
+.vp-row-meta.is-fit {
+  max-width: none;
+  min-width: max-content;
+}
+
+/* 文件夹构成：堆叠横条，段之间 2px 间隙，带图例 */
+.vp-stack {
+  display: flex;
+  gap: 2px;
+  height: 14px;
+  margin: var(--vp-s2) 0 var(--vp-s3);
+}
+.vp-stack-seg {
+  width: var(--vp-stack-w, 0%);
+  min-width: 3px;
+}
+.vp-stack-seg:first-child {
+  border-radius: var(--vp-r-xs) 0 0 var(--vp-r-xs);
+}
+.vp-stack-seg:last-child {
+  border-radius: 0 var(--vp-r-xs) var(--vp-r-xs) 0;
+}
+.vp-stack-seg.is-c1,
+.vp-swatch.is-c1 {
+  background: var(--vp-cat-1);
+}
+.vp-stack-seg.is-c2,
+.vp-swatch.is-c2 {
+  background: var(--vp-cat-2);
+}
+.vp-stack-seg.is-c3,
+.vp-swatch.is-c3 {
+  background: var(--vp-cat-3);
+}
+.vp-stack-seg.is-c4,
+.vp-swatch.is-c4 {
+  background: var(--vp-cat-4);
+}
+.vp-stack-seg.is-other,
+.vp-swatch.is-other {
+  background: var(--vp-cat-other);
+}
+.vp-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px var(--vp-s4);
+  font-size: var(--vp-fs-12);
+}
+.vp-legend.is-list {
+  flex-direction: column;
+  gap: var(--vp-s2);
+}
+.vp-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.vp-swatch {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: var(--vp-r-xs);
+}
+.vp-legend-name {
+  color: var(--text-normal);
+}
+.vp-legend-val {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.vp-legend.is-list .vp-legend-val {
+  margin-left: auto;
+}
+.vp-legend-item.is-clickable {
+  cursor: pointer;
+}
+.vp-legend-item.is-clickable:hover .vp-legend-name {
+  color: var(--vp-accent-ink);
+}
+
+/* 小卡片（S）里的主数字和说明上下排 */
+.vp-w.is-s .vp-kpi-caption {
+  display: block;
+}
+
 /* ---------------- 动效 ----------------
    只在 .vp-motion（设置里开着动效）下生效；系统“减弱动态效果”时下面的媒体查询一并关掉。
    is-intro：首次打开看板，挂在根上约 1.8 秒；is-swap：切换标签页 / 范围后挂在那张卡上约 1.2 秒。

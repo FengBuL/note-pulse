@@ -65,11 +65,11 @@ export const stats: VaultStats = {
     total: 1175, done: 825, pending: 350, cancelled: 4,
     overdue: [task(k(-4), "更新年度旅行预算", "年度旅行"), task(k(-3), "检查家庭账本链接", "家庭账本")],
     dueSoon: [task(k(0), "整理读书笔记", "读书"), task(k(1), "周报模板改成双栏", "工作"), task(k(3), "回复个人网站改版评论", "个人网站改版"), task(k(5), "预约体检", "生活"), task(k(6), "需求评审", "需求评审")],
-    byFolder: [{ key: "工作", total: 400, done: 260, pending: 140 }, { key: "读书", total: 200, done: 150, pending: 50 }], byNote: [],
+    byFolder: [{ key: "工作", total: 400, done: 260, pending: 140 }, { key: "读书", total: 200, done: 150, pending: 50 }], byNote: [["墨笔-更新版/待办", 48, 31], ["TG04-动态工作流与编排归还", 22, 9], ["需求评审", 15, 12], ["个人网站改版", 12, 4], ["年度旅行", 9, 7], ["家庭账本", 8, 6], ["周会", 5, 5]].map(([k, t, d]) => ({ key: k as string, file: mk(`工作/${k}.md`, 0), total: t as number, done: d as number, pending: (t as number) - (d as number) })),
   },
   tags: big ? Array.from({ length: 60 }, (_, i): [string, number] => [`标签${i + 1}`, 400 - i * 6]) : [["日记", 184], ["读书", 120], ["ai", 66], ["产品", 50], ["写作", 50], ["效率", 41], ["学习", 38], ["旅行", 20]],
   links: {
-    topLinked: [], orphans: big ? files.slice(20, 260).map((f) => f.file) : [files[4].file, files[6].file, files[5].file], unresolvedCount: big ? 420 : 40,
+    topLinked: [["知识地图MOC", 64], ["harness/README", 41], ["pandas常用函数-重构版", 27], ["LangGraph入门完全指南", 22], ["API调用速查表", 18], ["RAG 代码落地-重构版", 15], ["Claude Code 使用指南", 12]].map(([n, c]) => ({ file: mk(`${n}.md`, 0), count: c as number })), orphans: big ? files.slice(20, 260).map((f) => f.file) : [files[4].file, files[6].file, files[5].file], unresolvedCount: big ? 420 : 40,
     topUnresolved: big ? Array.from({ length: 10 }, (_, i): [string, number] => [`断链 ${i + 1}`, 30 - i * 2]) : [["年度复盘 2025", 3], ["竞品分析-v2", 2], ["TypeScript 类型", 1], ["周会纪要", 1]],
     unresolvedSource: { "年度复盘 2025": "工作/周会.md" },
     unresolvedFrom: { "竞品分析-v2": ["工作/周会.md", "工作/需求评审.md"] },

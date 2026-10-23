@@ -10,6 +10,10 @@ import {
   TrendRange,
   busiestWeekday,
   checkupModel,
+  folderShares,
+  linkDensity,
+  noteActivity,
+  weekdayRhythm,
   headline,
   monthWriting,
   trendModel,
@@ -403,6 +407,18 @@ export class DashboardView extends ItemView {
         return (h) => this.renderCheckup(h, stats);
       case "reports":
         return (h) => this.renderReports(h);
+      case "topLinked":
+        return (h) => this.renderTopLinked(h, stats);
+      case "rhythm":
+        return (h) => this.renderRhythm(h, stats);
+      case "activity":
+        return (h) => this.renderActivity(h, stats);
+      case "taskNotes":
+        return (h) => this.renderTaskNotes(h, stats);
+      case "density":
+        return (h) => this.renderDensity(h, stats);
+      case "folders":
+        return (h) => this.renderFolders(h, stats);
       default:
         return null;
     }
@@ -1951,6 +1967,162 @@ export class DashboardView extends ItemView {
         await this.app.fileManager.trashFile(file);
       }
     ).open();
+  }
+
+  /* ---------- 10. 2.0 新卡片 ---------- */
+
+  /** 列表类卡片按尺寸放几行：M 3 行、L 6 行 */
+  private rowsFor(id: string): number {
+    return this.sizeOf(id) === "l" ? 6 : 3;
+  }
+
+  /** 最常被链接：哪些笔记是核心（links.topLinked） */
+  private renderTopLinked(grid: HTMLElement, s: VaultStats) {
+    const { body } = this.card(
+      grid,
+      "vp-toplinked-card",
+      L("最常被链接", "Most linked"),
+      "network",
+      L("被其它笔记链接次数最多的笔记，通常就是你的索引页和核心笔记。点击打开。", "Notes linked from other notes the most, usually your index pages and core notes. Click to open.")
+    );
+    const items: BarItem[] = s.links.topLinked.slice(0, this.rowsFor("topLinked")).map(({ file, count: n }) => ({
+      label: file.basename,
+      title: file.path,
+      value: n,
+      valueText: L(`${fmtFull(n)} 处链接`, `${fmtFull(n)} ${plural(n, "link")}`),
+      onClick: (e) => void this.plugin.openFile(file, undefined, e),
+    }));
+    drawBarList(body, items, L("还没有笔记被链接过", "No note is linked yet"), (el) => setIcon(el.createDiv({ cls: "vp-empty-icon" }), "network"));
+  }
+
+  /** 写作节奏：近 12 周每个星期几平均写多少字；单一系列，只突出最常写的一天 */
+  private renderRhythm(grid: HTMLElement, s: VaultStats) {
+    const size = this.sizeOf("rhythm");
+    const r = weekdayRhythm(s, new Date(s.generatedAt), 12);
+    const { body } = this.card(
+      grid,
+      "vp-rhythm-card",
+      L("写作节奏", "Writing rhythm"),
+      "bar-chart-3",
+      L("近 12 周里，每个星期几平均写了多少字（只算开始记录之后的日子）。最常写的一天用实色标出。", "Average words written on each weekday over the last 12 weeks (only days since recording started). The busiest day is solid.")
+    );
+    const max = Math.max(...r.map((x) => x.average), 0);
+    if (max === 0) {
+      this.empty(body, "bar-chart-3", L("还没有写作记录", "No writing recorded yet"));
+      return;
+    }
+    const best = r.reduce((a, b) => (b.average > a.average ? b : a));
+    const top = body.createDiv({ cls: "vp-kpi-row" });
+    bigNumber(top.createDiv({ cls: "vp-kpi-num" }), weekdayName(best.day), undefined);
+    top.createSpan({ cls: "vp-kpi-caption", text: L(`平均 ${fmtFull(best.average)} 字`, `${fmtFull(best.average)} words avg`) });
+    const bars = body.createDiv({ cls: "vp-rhythm" + (size === "s" ? " is-mini" : ""), attr: { role: "img" } });
+    srLabel(bars, r.map((x) => `${weekdayName(x.day)} ${fmtFull(x.average)}`).join(L("，", ", ")));
+    for (const x of r) {
+      const c = bars.createDiv({ cls: "vp-rhythm-col" + (x === best ? " is-best" : ""), attr: { title: `${weekdayName(x.day)} · ${count(fmtFull(x.average), "words")}` } });
+      c.createDiv({ cls: "vp-rhythm-bar" }).setCssProps({ "--vp-rhythm-h": `${Math.max(4, (x.average / max) * 100)}%` });
+      if (size !== "s") c.createDiv({ cls: "vp-rhythm-label", text: weekdayShort(x.day) });
+    }
+  }
+
+  /** 笔记活跃度：近 30 天新建和修改，两个数字 + 一条分段条（两段的环读不准，不用） */
+  private renderActivity(grid: HTMLElement, s: VaultStats) {
+    const a = noteActivity(s, new Date(s.generatedAt));
+    const { body } = this.card(
+      grid,
+      "vp-activity-card",
+      L("笔记活跃度", "Note activity"),
+      "activity",
+      L("近 30 天新建了多少篇、改了多少篇以前的笔记（新建的不重复算修改，不含采集文件夹）。看你是在写新的，还是在改旧的。", "Notes created and older notes edited in the last 30 days (new notes aren't counted again as edits; clipping folders left out): writing new or reworking old.")
+    );
+    const pair = body.createDiv({ cls: "vp-pair" });
+    const one = (cls: string, label: string, n: number, key: string) => {
+      const x = pair.createDiv({ cls: `vp-pair-item ${cls}` });
+      x.createDiv({ cls: "vp-label", text: label });
+      this.tweenNum(key, bigNumber(x, n, unit("notes", n), "vp-num vp-num-sm"), n, unit("notes", n));
+    };
+    one("is-a", L("新建", "New"), a.created, "act:new");
+    one("is-b", L("改旧的", "Edited"), a.edited, "act:edit");
+    const total = a.created + a.edited;
+    const bar = body.createDiv({ cls: "vp-split", attr: { role: "img" } });
+    srLabel(bar, L(`新建 ${a.created} 篇，修改 ${a.edited} 篇`, `${a.created} new, ${a.edited} edited`));
+    if (total === 0) bar.addClass("is-empty");
+    bar.createDiv({ cls: "vp-split-a" }).setCssProps({ "--vp-split-w": `${total ? (a.created / total) * 100 : 0}%` });
+    bar.createDiv({ cls: "vp-split-b" }).setCssProps({ "--vp-split-w": `${total ? (a.edited / total) * 100 : 0}%` });
+    body.createDiv({ cls: "vp-kpi-caption", text: L("近 30 天", "Last 30 days") });
+  }
+
+  /** 任务最多的笔记：任务压在哪几篇（tasks.byNote，按待办数排） */
+  private renderTaskNotes(grid: HTMLElement, s: VaultStats) {
+    const { body } = this.card(
+      grid,
+      "vp-tasknotes-card",
+      L("任务最多的笔记", "Notes with most tasks"),
+      "list-checks",
+      L("待办最多的几篇笔记，条是这篇里已完成的比例。“接下来”按截止日期，这张按笔记。点击打开。", "Notes with the most open tasks; the bar shows how much of each is done. Next up sorts by due date, this card by note. Click to open.")
+    );
+    const groups = s.tasks.byNote.filter((g) => g.pending > 0).slice(0, this.rowsFor("taskNotes"));
+    const list = body.createDiv({ cls: "vp-rows" });
+    if (groups.length === 0) {
+      this.empty(list, "party-popper", L("没有待办", "No open tasks"));
+      return;
+    }
+    for (const g of groups) {
+      const row = list.createDiv({ cls: "vp-row vp-group-row" });
+      row.createSpan({ cls: "vp-row-name", text: g.key, attr: { title: g.file?.path ?? g.key } });
+      const m = row.createDiv({ cls: "vp-meter is-inline" });
+      m.createDiv({ cls: "vp-meter-fill" }).setCssProps({ "--vp-meter-width": `${(g.done / Math.max(1, g.total)) * 100}%` });
+      row.createSpan({ cls: "vp-row-meta vp-tabular is-fit", text: L(`待办 ${g.pending}`, `${g.pending} open`) });
+      const f = g.file;
+      if (f) this.clickable(row, L(`${g.key}，待办 ${g.pending}`, `${g.key}, ${g.pending} open`), (e) => void this.plugin.openFile(f, undefined, e));
+    }
+  }
+
+  /** 链接密度：一个数字的卡片（一个数就是图，不画仪表盘） */
+  private renderDensity(grid: HTMLElement, s: VaultStats) {
+    const d = linkDensity(s);
+    const { body } = this.card(
+      grid,
+      "vp-density-card",
+      L("链接密度", "Link density"),
+      "link",
+      L("平均每篇笔记有几个链接，以及有多少笔记和别的笔记连着（孤立笔记的反面）。", "Average links per note, and how many notes are connected to another note (the opposite of orphans).")
+    );
+    const row = body.createDiv({ cls: "vp-kpi-row" });
+    // 一位小数：用字符串传，bigNumber 收到数字会取整；也不做数字滚动（滚动按整数走）
+    bigNumber(row.createDiv({ cls: "vp-kpi-num" }), d.perNote.toFixed(1), L("个/篇", "per note"));
+    body.createDiv({ cls: "vp-kpi-caption", text: L(`${d.connected}% 的笔记连着别的笔记`, `${d.connected}% of notes are linked`) });
+  }
+
+  /** 文件夹构成：堆叠横条，前 4 个文件夹各一色，其余并成“其他”；必须带图例 */
+  private renderFolders(grid: HTMLElement, s: VaultStats) {
+    const size = this.sizeOf("folders");
+    const parts = folderShares(s, 4);
+    const { body } = this.card(
+      grid,
+      "vp-folders-card",
+      L("文件夹构成", "Folder mix"),
+      "folder-tree",
+      L("按笔记数看内容都在哪些顶层文件夹。前 4 个各一种颜色，其余合成“其他”。", "Where your notes live, by top-level folder and note count. The top 4 get a color each, the rest is Other.")
+    );
+    if (parts.length === 0) {
+      this.empty(body, "folder", L("仓库里还没有文件夹", "No folders in the vault yet"));
+      return;
+    }
+    const name = (p: (typeof parts)[number]) => (p.other ? L("其他", "Other") : folderName(p.folder));
+    const bar = body.createDiv({ cls: "vp-stack", attr: { role: "img" } });
+    srLabel(bar, parts.map((p) => `${name(p)} ${Math.round(p.share * 100)}%`).join(L("，", ", ")));
+    parts.forEach((p, i) => {
+      const seg = bar.createDiv({ cls: `vp-stack-seg ${p.other ? "is-other" : `is-c${i + 1}`}`, attr: { title: `${name(p)} · ${count(p.notes, "notes")}` } });
+      seg.setCssProps({ "--vp-stack-w": `${p.share * 100}%` });
+    });
+    const legend = body.createDiv({ cls: "vp-legend" + (size === "l" ? " is-list" : "") });
+    parts.forEach((p, i) => {
+      const it = legend.createDiv({ cls: "vp-legend-item" });
+      it.createSpan({ cls: `vp-swatch ${p.other ? "is-other" : `is-c${i + 1}`}`, attr: { "aria-hidden": "true" } });
+      it.createSpan({ cls: "vp-legend-name", text: name(p) });
+      it.createSpan({ cls: "vp-legend-val", text: `${Math.round(p.share * 100)}%${size === "l" ? ` · ${count(fmtFull(p.notes), "notes")}` : ""}` });
+      if (!p.other && p.folder !== ROOT_FOLDER) this.clickable(it, L(`在文件列表里定位 ${p.folder}`, `Reveal ${p.folder} in the file list`), () => this.plugin.revealFolder(p.folder));
+    });
   }
 
   /* ---------- 9. 写作回顾 ---------- */
