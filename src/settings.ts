@@ -560,8 +560,8 @@ export class DashboardSettingTab extends PluginSettingTab {
           {
             name: L("这台设备的名字", "This device's name"),
             desc: L(
-              "每台设备只记在自己的 Obsidian 编辑器里打的字，看板把所有设备相加，所以在手机和电脑上都写也不会重复计数。同步进来的改动、别的程序（比如 AI 助手、脚本）直接写进笔记的内容不算写作。",
-              "Each device only records words typed in its own Obsidian editor, and the dashboard adds all devices together, so writing on both phone and computer is not double counted. Changes that arrive by sync, or that other programs (such as AI assistants or scripts) write into notes, do not count as writing."
+              "连着同一个库的设备会自动合并，不用设置：每台设备只记在自己的 Obsidian 编辑器里打的字，看板把所有设备相加，手机和电脑都写也不会重复计数。同步进来的改动、别的程序（比如 AI 助手、脚本）直接写进笔记的内容不算写作。",
+              "Devices connected to the same vault are merged automatically, with nothing to set up. Each device only records words typed in its own Obsidian editor, and the dashboard adds all devices together, so writing on both phone and computer is not double counted. Changes that arrive by sync, or that other programs (such as AI assistants or scripts) write into notes, do not count as writing."
             ),
             render: (setting) =>
               setting.addText((t) =>

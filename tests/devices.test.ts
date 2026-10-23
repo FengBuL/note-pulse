@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { App, TFile } from "obsidian";
 import { DEFAULT_SETTINGS } from "../src/settings";
 import { ContentInfo, PersistentData, dayKey, mergedWordLog, syncContent } from "../src/stats";
-import { isDeviceId, newDeviceId, normalizeDeviceLog, sumLogs } from "../src/devices";
+import { isDeviceId, mergeDeviceLog, newDeviceId, normalizeDeviceLog, sumLogs } from "../src/devices";
 
 (globalThis as unknown as { window: unknown }).window = { setTimeout };
 
@@ -120,4 +120,15 @@ test("设备记录文件：坏数据被过滤，名字缺省用 ID；设备 ID �
   assert.ok(isDeviceId(id));
   assert.ok(!isDeviceId("../x"));
   assert.ok(!isDeviceId(""));
+});
+
+test("同一台设备的两份记录（设备文件 / data.json 副本）按天取较大值，名字取较新的；次序无关、重复合并不变", () => {
+  const file = { name: "iPhone", wordLog: { "2026-10-23": 120, "2026-10-24": 30 }, wordLogBig: {}, updated: 200 };
+  const copy = { name: "旧名字", wordLog: { "2026-10-22": 50, "2026-10-23": 80 }, wordLogBig: { "2026-10-22": 9000 }, updated: 100 };
+  const m = mergeDeviceLog(file, copy);
+  assert.deepEqual(m, { name: "iPhone", wordLog: { "2026-10-22": 50, "2026-10-23": 120, "2026-10-24": 30 }, wordLogBig: { "2026-10-22": 9000 }, updated: 200 });
+  assert.deepEqual(mergeDeviceLog(copy, file), m, "次序无关");
+  assert.deepEqual(mergeDeviceLog(m, m), m, "重复合并不变");
+  assert.deepEqual(mergeDeviceLog(null, file), file);
+  assert.equal(mergeDeviceLog(null, null), null);
 });

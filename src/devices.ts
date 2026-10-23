@@ -53,3 +53,20 @@ export function newDeviceId(random: () => number = Math.random): string {
 export function isDeviceId(id: unknown): id is string {
   return typeof id === "string" && /^[a-z0-9]{6,32}$/.test(id);
 }
+
+/**
+ * 同一台设备的两份记录（设备文件和 data.json 里的副本，或者内存和磁盘）合在一起：
+ * 每台设备的记录只增不减，所以按天取较大值就是最新的；名字取更新时间较新的那份。
+ * 取最大值和次序无关、重复做也不变，哪份先同步到都不会算错。
+ */
+export function mergeDeviceLog(a: DeviceLog | null | undefined, b: DeviceLog | null | undefined): DeviceLog | null {
+  if (!a) return b ?? null;
+  if (!b) return a;
+  const max = (x: Record<string, number>, y: Record<string, number>) => {
+    const out = { ...x };
+    for (const [k, v] of Object.entries(y)) out[k] = Math.max(out[k] || 0, v);
+    return out;
+  };
+  const newer = b.updated > a.updated ? b : a;
+  return { name: newer.name, wordLog: max(a.wordLog, b.wordLog), wordLogBig: max(a.wordLogBig, b.wordLogBig), updated: Math.max(a.updated, b.updated) };
+}

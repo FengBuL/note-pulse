@@ -7,7 +7,7 @@ import { ReportKind } from "./report-logic";
 import { WordPropsService } from "./wordprops";
 import { DedupeService, normalizeDedupeSettings } from "./dedupe/service";
 import { L } from "./i18n";
-import { DeviceLog, emptyDeviceLog, isDeviceId, newDeviceId, normalizeDeviceLog } from "./devices";
+import { DeviceLog, emptyDeviceLog, isDeviceId, mergeDeviceLog, newDeviceId, normalizeDeviceLog } from "./devices";
 
 interface SavedData {
   settings: DashboardSettings;
@@ -16,6 +16,11 @@ interface SavedData {
   wordLogBig?: Record<string, number>;
   /** 有这个字段说明已经换成按设备记录，wordLog 不再增长 */
   devicesSince?: string;
+  /**
+   * 各设备记录的副本（设备 ID -> 记录）。主记录在 devices/ 下各自的文件里；
+   * 有的同步服务不一定同步插件目录里的额外文件，但一定同步 data.json，所以这里也存一份。
+   */
+  devices?: Record<string, unknown>;
   logInitialized: boolean;
   logStartDay?: string;
   /** ≤1.0.0 的遗留字段 */
@@ -176,11 +181,47 @@ export default class NotePulsePlugin extends Plugin {
           if (this.stale && leaf && leaf.view instanceof DashboardView) void this.requestRefresh(false);
         })
       );
+      // 其它设备的记录同步进来后自动更新看板：iCloud 等不会通知插件，每分钟看一眼 devices/ 有没有变
+      this.registerInterval(window.setInterval(() => void this.checkDevices(), 60_000));
       // 启动后在后台补记一次（只会读取上次之后改动过的文件），这样看板没打开时写的字数也不会丢
       window.setTimeout(() => {
         if (this.getViews().length === 0) void this.enqueue(() => this.silentSync());
       }, 4000);
     });
+  }
+
+  /** Obsidian Sync 等同步了 data.json：设备副本可能有新记录 */
+  async onExternalSettingsChange() {
+    const raw = (await this.loadData()) as Partial<SavedData> | null;
+    if (raw?.devices && typeof raw.devices === "object") this.savedDevices = { ...this.savedDevices, ...raw.devices };
+    if (this.getViews().some((v) => v.isVisible())) void this.requestRefresh(false);
+    else this.stale = true;
+  }
+
+  /** devices/ 下各文件的名字和修改时间；变了说明有设备同步来新记录 */
+  private deviceSignature = "";
+  private deviceChecked = false;
+
+  private async checkDevices() {
+    if (this.getViews().length === 0) return;
+    let sig = "";
+    try {
+      const adapter = this.app.vault.adapter;
+      if (await adapter.exists(this.devicesDir)) {
+        const files = (await adapter.list(this.devicesDir)).files.filter((p) => !p.endsWith(`/${this.deviceId}.json`)).sort();
+        for (const p of files) sig += `${p}:${(await adapter.stat(p))?.mtime ?? 0};`;
+      }
+    } catch {
+      return;
+    }
+    if (sig === this.deviceSignature) return;
+    const first = !this.deviceSignature && !this.deviceChecked;
+    this.deviceSignature = sig;
+    this.deviceChecked = true;
+    if (first) return;
+    // 看板被别的标签页盖住时，等切回来再算
+    if (this.getViews().some((v) => v.isVisible())) void this.requestRefresh(false);
+    else this.stale = true;
   }
 
   onunload() {
@@ -449,6 +490,7 @@ export default class NotePulsePlugin extends Plugin {
       legacyFileWords: raw.fileWords && Object.keys(raw.fileWords).length ? raw.fileWords : undefined,
       dirty: !!raw.fileWords || (raw.settings?.settingsVersion ?? 1) < SETTINGS_VERSION || migrated || !raw.devicesSince,
     };
+    this.savedDevices = raw.devices && typeof raw.devices === "object" ? raw.devices : {};
     await this.loadDevices();
 
     // 内容缓存：[mtime, size, words, logged, taskLines]
@@ -471,6 +513,8 @@ export default class NotePulsePlugin extends Plugin {
   }
 
   private devicesSince = "";
+  /** data.json 里最近一次读到 / 写入的设备副本 */
+  private savedDevices: Record<string, unknown> = {};
 
   private get devicesDir(): string {
     return normalizePath(`${this.manifest.dir ?? `${this.app.vault.configDir}/plugins/${this.manifest.id}`}/${DEVICES_DIR}`);
@@ -508,12 +552,19 @@ export default class NotePulsePlugin extends Plugin {
     return L("这台设备", "This device");
   }
 
-  /** 读取本机和其它设备的记录 */
+  /**
+   * 读取所有设备的记录：devices/ 下的文件和 data.json 里的副本，按设备合并。
+   * 只要几台设备连的是同一个库（iCloud、Obsidian Sync、git……），同步过来就自动参与相加，不用设置。
+   */
   async loadDevices() {
     this.deviceId = this.ensureDeviceId();
     const adapter = this.app.vault.adapter;
-    const others = new Map<string, DeviceLog>();
-    let mine: DeviceLog | null = null;
+    const found = new Map<string, DeviceLog>();
+    const add = (id: string, log: DeviceLog | null) => {
+      const merged = mergeDeviceLog(found.get(id), log);
+      if (merged) found.set(id, merged);
+    };
+    for (const [id, raw] of Object.entries(this.savedDevices)) if (isDeviceId(id)) add(id, normalizeDeviceLog(raw, id));
     try {
       if (await adapter.exists(this.devicesDir)) {
         const listed = await adapter.list(this.devicesDir);
@@ -522,10 +573,7 @@ export default class NotePulsePlugin extends Plugin {
           const id = name.replace(/\.json$/, "");
           if (!name.endsWith(".json") || !isDeviceId(id)) continue;
           try {
-            const log = normalizeDeviceLog(JSON.parse(await adapter.read(path)) as unknown, id);
-            if (!log) continue;
-            if (id === this.deviceId) mine = log;
-            else others.set(id, log);
+            add(id, normalizeDeviceLog(JSON.parse(await adapter.read(path)) as unknown, id));
           } catch (e) {
             console.warn("[note-pulse] 读取设备记录失败", path, e);
           }
@@ -534,19 +582,52 @@ export default class NotePulsePlugin extends Plugin {
     } catch (e) {
       console.warn("[note-pulse] 读取设备记录失败", e);
     }
-    // 本机的记录：内存里可能有还没保存的新增（重新读取时），以内存为准，按天取较大值
-    const current = this.device.updated ? { wordLog: this.data.wordLog, wordLogBig: this.data.wordLogBig } : null;
-    this.device = mine ?? emptyDeviceLog(this.defaultDeviceName());
-    if (!mine) this.deviceDirty = true;
-    const pick = (disk: Record<string, number>, mem?: Record<string, number>) => {
-      const out = { ...disk };
-      if (mem) for (const [k, v] of Object.entries(mem)) out[k] = Math.max(out[k] || 0, v);
-      return out;
-    };
-    this.data.wordLog = pick(this.device.wordLog, current?.wordLog);
-    this.data.wordLogBig = pick(this.device.wordLogBig, current?.wordLogBig);
+    // 本机：磁盘上的记录和内存里还没保存的新增合并
+    const disk = found.get(this.deviceId) ?? null;
+    found.delete(this.deviceId);
+    const memory: DeviceLog | null = this.device.name ? { ...this.device, wordLog: this.data.wordLog, wordLogBig: this.data.wordLogBig } : null;
+    if (!disk) this.deviceDirty = true;
+    this.device = mergeDeviceLog(disk, memory) ?? emptyDeviceLog(this.defaultDeviceName());
+    this.data.wordLog = { ...this.device.wordLog };
+    this.data.wordLogBig = { ...this.device.wordLogBig };
+    const others = found;
+    // 别的设备有了 data.json 副本里没有的新记录：下次保存时补齐副本
+    for (const [id, log] of others) {
+      const saved = normalizeDeviceLog(this.savedDevices[id], id);
+      if (!saved || saved.updated < log.updated) this.data.dirty = true;
+    }
     this.otherDevices = others;
     this.data.otherLogs = [...others.values()].map((d) => ({ wordLog: d.wordLog, wordLogBig: d.wordLogBig }));
+  }
+
+  /** 把磁盘上 data.json 里的设备副本合并进内存（只合并其它设备；本机以内存为准） */
+  private async absorbSavedDevices() {
+    try {
+      const raw = (await this.loadData()) as Partial<SavedData> | null;
+      if (!raw?.devices || typeof raw.devices !== "object") return;
+      for (const [id, v] of Object.entries(raw.devices)) {
+        if (!isDeviceId(id) || id === this.deviceId) continue;
+        const log = normalizeDeviceLog(v, id);
+        const merged = mergeDeviceLog(this.otherDevices.get(id), log);
+        if (merged) this.otherDevices.set(id, merged);
+      }
+      this.data.otherLogs = [...this.otherDevices.values()].map((d) => ({ wordLog: d.wordLog, wordLogBig: d.wordLogBig }));
+    } catch {
+      // 读不到就按内存里的写
+    }
+  }
+
+  /** 写进 data.json 的设备副本：已有副本 + 读到的其它设备 + 本机 */
+  private deviceCopies(): Record<string, DeviceLog> {
+    const out: Record<string, DeviceLog> = {};
+    for (const [id, raw] of Object.entries(this.savedDevices)) {
+      const log = isDeviceId(id) ? normalizeDeviceLog(raw, id) : null;
+      if (log) out[id] = log;
+    }
+    for (const [id, log] of this.otherDevices) out[id] = mergeDeviceLog(out[id], log) ?? log;
+    if (this.deviceId) out[this.deviceId] = { name: this.device.name, wordLog: this.data.wordLog, wordLogBig: this.data.wordLogBig, updated: this.device.updated || Date.now() };
+    this.savedDevices = out;
+    return out;
   }
 
   /** 给本机改名（设置页） */
@@ -590,22 +671,9 @@ export default class NotePulsePlugin extends Plugin {
 
   async persist() {
     try {
-      if (this.data.dirty) {
-        const out: SavedData = {
-          settings: this.settings,
-          // 旧记录原样保留（旧版本的设备还会读它），不再增长
-          wordLog: this.data.legacyLog || {},
-          wordLogBig: this.data.legacyLogBig || {},
-          devicesSince: this.devicesSince,
-          logInitialized: this.data.logInitialized,
-          logStartDay: this.data.logStartDay,
-          // 迁移完成前保留旧字段，保证中途退出不丢基线
-          fileWords: this.data.legacyFileWords,
-        };
-        await this.saveData(out);
-        this.data.dirty = false;
-      }
       if (this.deviceDirty || this.data.deviceDirty) {
+        // 本机记录变了，data.json 里的副本也要跟上
+        this.data.dirty = true;
         const adapter = this.app.vault.adapter;
         if (!(await adapter.exists(this.devicesDir))) await adapter.mkdir(this.devicesDir);
         const out: DeviceLog = { name: this.device.name, wordLog: this.data.wordLog, wordLogBig: this.data.wordLogBig, updated: Date.now() };
@@ -613,6 +681,24 @@ export default class NotePulsePlugin extends Plugin {
         this.device = out;
         this.deviceDirty = false;
         this.data.deviceDirty = false;
+      }
+      if (this.data.dirty) {
+        // 写之前再读一次磁盘上的副本：别的设备可能刚同步来更新的记录，合并进来，不要覆盖掉
+        await this.absorbSavedDevices();
+        const out: SavedData = {
+          settings: this.settings,
+          // 旧记录原样保留（旧版本的设备还会读它），不再增长
+          wordLog: this.data.legacyLog || {},
+          wordLogBig: this.data.legacyLogBig || {},
+          devicesSince: this.devicesSince,
+          devices: this.deviceCopies(),
+          logInitialized: this.data.logInitialized,
+          logStartDay: this.data.logStartDay,
+          // 迁移完成前保留旧字段，保证中途退出不丢基线
+          fileWords: this.data.legacyFileWords,
+        };
+        await this.saveData(out);
+        this.data.dirty = false;
       }
       if (this.data.cacheDirty) {
         const files: Record<string, unknown> = {};
