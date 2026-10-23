@@ -159,7 +159,7 @@ Advanced options (what counts as a passage, which copy to keep, link style, prop
 - The cumulative word trend assigns each note's current word count to its creation date. It is not a historical snapshot.
 - "Added words" only counts increases: rewriting a paragraph to the same length adds nothing, and deleting text does not subtract.
 - The "links" figure counts links between notes, not image or file embeds.
-- Ribbon tooltips and command names switch language only after restarting Obsidian. People who used Note Pulse before 1.6.0 stay on Chinese after updating; change it under Settings → Refresh and behavior → Language.
+- Ribbon tooltips and command names switch language only after restarting Obsidian. Everyone, including people updating from an older version, starts on Follow Obsidian; pick a fixed language under Settings → Refresh and behavior → Language.
 - Dates use your local time zone.
 - Clicking a tag needs the core **Search** plugin enabled.
 - The plugin reads your notes locally only. It makes no network requests and collects no data.
@@ -414,7 +414,7 @@ views:
 - 累计字数趋势是把每篇笔记“当前”字数计入其创建日期，并非历史快照。
 - “新增字数”只统计增加：把一段话改写成同样长度不会增加，删除文字也不会扣减。
 - “链接”统计的是笔记之间的链接，不含图片和文件嵌入。
-- 侧边栏图标的提示和命令名称要重启 Obsidian 后才会换语言。1.6.0 之前就在用的用户升级后保持中文，可以在设置 → 刷新与行为 → 界面语言里改。
+- 侧边栏图标的提示和命令名称要重启 Obsidian 后才会换语言。所有用户（包括从旧版本升级的）默认跟随 Obsidian；如果 Obsidian 是英文界面而你想看中文，在设置 → 刷新与行为 → 界面语言里选“中文”。
 - 日期使用本机时区。点击标签需要启用核心插件「搜索」。
 - 插件只在本地读取笔记，不联网，不收集任何数据。
 

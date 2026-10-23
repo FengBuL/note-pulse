@@ -20,25 +20,28 @@ function inEnglish(fn: () => void) {
   }
 }
 
-test("老用户升级后保持中文，新安装跟随 Obsidian，非法值回到跟随", () => {
-  const old = { ...DEFAULT_SETTINGS } as DashboardSettings;
+test("所有用户默认跟随 Obsidian；版本 5 之后用户自己的选择保留，非法值回到跟随", () => {
+  const old = { ...DEFAULT_SETTINGS, language: undefined } as unknown as DashboardSettings;
   migrateLanguage(old, true, 3);
-  assert.equal(old.language, "zh");
+  assert.equal(old.language, "auto", "1.6.0 之前的老用户也跟随 Obsidian");
+  // 测试替身里 Obsidian 是中文
   assert.ok(isZh());
+
+  const devBuild = { ...DEFAULT_SETTINGS, language: "zh" } as DashboardSettings;
+  migrateLanguage(devBuild, true, 4);
+  assert.equal(devBuild.language, "auto", "开发版迁移成的中文改回跟随");
 
   const fresh = { ...DEFAULT_SETTINGS } as DashboardSettings;
   migrateLanguage(fresh, false, 1);
   assert.equal(fresh.language, "auto");
-  // 测试替身里 Obsidian 是中文
-  assert.ok(isZh());
 
   const chose = { ...DEFAULT_SETTINGS, language: "en" } as DashboardSettings;
-  migrateLanguage(chose, true, 4);
-  assert.equal(chose.language, "en", "1.6.0 之后用户自己选的英文不被改回");
+  migrateLanguage(chose, true, 5);
+  assert.equal(chose.language, "en", "之后用户自己选的语言不被改");
   assert.ok(!isZh());
 
   const bad = { ...DEFAULT_SETTINGS, language: "fr" } as unknown as DashboardSettings;
-  migrateLanguage(bad, true, 4);
+  migrateLanguage(bad, true, 5);
   assert.equal(bad.language, "auto");
   setLanguage("zh");
 });

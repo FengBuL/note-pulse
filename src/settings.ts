@@ -9,11 +9,11 @@ export type OutlierMode = "exclude" | "off";
 export type WeekStyle = "dots" | "bars";
 
 /** 设置结构版本：用于一次性迁移旧设置 */
-export const SETTINGS_VERSION = 4;
+export const SETTINGS_VERSION = 5;
 
 export interface DashboardSettings {
   settingsVersion: number;
-  /** 界面语言：auto 跟随 Obsidian；1.6.0 以前的老用户迁移为 zh（之前只有中文界面） */
+  /** 界面语言：auto 跟随 Obsidian（所有用户的默认值） */
   language: LanguagePref;
   excludedFolders: string;
   /** 采集 / 剪藏文件夹：笔记仍计入总数，但不计入字数趋势、热力图和打卡 */
@@ -638,11 +638,11 @@ export function migrateWritingSettings(settings: DashboardSettings): void {
 }
 
 /**
- * 1.6.0 加入英文界面。之前只有中文，老用户已经习惯中文；很多中文用户的 Obsidian 界面却是英文，
- * 直接“跟随 Obsidian”会让他们升级后突然看到英文。所以有旧设置的用户迁移为中文，新安装才默认跟随。
+ * 1.6.0 加入英文界面，所有用户默认跟随 Obsidian 的界面语言。
+ * 开发期间有一版（设置版本 4）把老用户迁移成了“中文”，这里把它改回跟随；版本 5 之后用户自己的选择保留。
  */
-export function migrateLanguage(settings: DashboardSettings, hadSettings: boolean, savedVersion: number): void {
-  if (hadSettings && savedVersion < 4) settings.language = "zh";
+export function migrateLanguage(settings: DashboardSettings, _hadSettings: boolean, savedVersion: number): void {
+  if (savedVersion < 5) settings.language = "auto";
   if (settings.language !== "auto" && settings.language !== "zh" && settings.language !== "en") settings.language = "auto";
   setLanguage(settings.language);
 }
