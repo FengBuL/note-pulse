@@ -3,6 +3,7 @@ import type NotePulsePlugin from "./main";
 import { sanitizeProperty } from "./wordprops-logic";
 import { ClipDedupeSettings, DEFAULT_SETTINGS as DEDUPE_DEFAULTS, dedupeSections } from "./dedupe/settings";
 import { L, LanguagePref, setLanguage } from "./i18n";
+import { WidgetLayout, defaultLayout, normalizeLayout } from "./widgets";
 
 export type HeatmapMode = "auto" | "mtime" | "delta";
 export type OutlierMode = "exclude" | "off";
@@ -41,6 +42,8 @@ export interface DashboardSettings {
   weekStyle: WeekStyle;
   /** 看板动效（系统开了“减弱动态效果”时始终不播放） */
   motion: boolean;
+  /** 2.0：看板上有哪些卡片、什么尺寸、什么顺序。存在 data.json 里，随库同步 */
+  layout: WidgetLayout;
   autoRefresh: boolean;
   refreshDelaySec: number;
   openInNewTab: boolean;
@@ -82,6 +85,7 @@ export const DEFAULT_SETTINGS: DashboardSettings = {
   heatmapMode: "auto",
   weekStyle: "dots",
   motion: true,
+  layout: defaultLayout(),
   autoRefresh: true,
   refreshDelaySec: 3,
   openInNewTab: true,
@@ -681,6 +685,8 @@ export function migrateWritingSettings(settings: DashboardSettings): void {
   settings.reportWeekExpanded = settings.reportWeekExpanded === true || settings.reportMonthExpanded === true;
   delete settings.reportMonthExpanded;
   if (settings.weekStyle !== "dots" && settings.weekStyle !== "bars") settings.weekStyle = DEFAULT_SETTINGS.weekStyle;
+  // 2.0 之前没有布局：生成默认布局（1.8 的看板 + 6 张新卡片）
+  settings.layout = normalizeLayout(settings.layout);
 }
 
 /**

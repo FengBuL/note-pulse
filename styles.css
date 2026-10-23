@@ -266,17 +266,17 @@
   grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: var(--vp-s4);
 }
-.vp-hero,
-.vp-trend-card {
-  grid-column: span 8;
+/* 2.0 小组件档位：S 3 列 · M 4 列 · L 8 列 · XL 整行（M/L 和 1.8 的 4/8 分栏一致） */
+.vp-grid > .vp-w.is-s {
+  grid-column: span 3;
 }
-.vp-tasks-card,
-.vp-tags-card {
+.vp-grid > .vp-w.is-m {
   grid-column: span 4;
 }
-.vp-kpis,
-.vp-heat-card,
-.vp-checkup-card {
+.vp-grid > .vp-w.is-l {
+  grid-column: span 8;
+}
+.vp-grid > .vp-w.is-xl {
   grid-column: 1 / -1;
 }
 
@@ -737,11 +737,6 @@
 
 /* ---------------- 数据卡 ---------------- */
 
-.vp-kpis {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--vp-s4);
-}
 .vp-kpi {
   padding: 18px 20px 14px;
   gap: var(--vp-s3);
@@ -1724,10 +1719,10 @@
 /* ---------------- 响应式（按看板自身宽度） ---------------- */
 
 @container vd (max-width: 1080px) {
-  .vp-hero,
-  .vp-tasks-card,
-  .vp-trend-card,
-  .vp-tags-card {
+  /* 中等宽度：M / L / XL 占满，S 仍然四张一行（和 1.8 一样） */
+  .vp-grid > .vp-w.is-m,
+  .vp-grid > .vp-w.is-l,
+  .vp-grid > .vp-w.is-xl {
     grid-column: 1 / -1;
   }
   .vp-checkup {
@@ -1739,12 +1734,12 @@
   .vp-shell {
     padding: var(--vp-s4) var(--vp-s4) var(--vp-s5);
   }
-  .vp-grid,
-  .vp-kpis {
+  .vp-grid {
     gap: var(--vp-s3);
   }
-  .vp-kpis {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  /* 窄：S 两张一行 */
+  .vp-grid > .vp-w.is-s {
+    grid-column: span 6;
   }
   .vp-card,
   .vp-hero {
@@ -4171,9 +4166,6 @@ body.is-mobile .cd-modal .cd-diff-list {
 }
 .vp-root .vp-weekly-fill {
   width: var(--vp-weekly-progress, 0%);
-}
-.vp-grid .vp-report-card {
-  grid-column: 1 / -1;
 }
 .vp-report-card,
 .modal.vp-report-dialog {

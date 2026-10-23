@@ -20,6 +20,7 @@ import {
   weeklyWords,
 } from "./dashboard-logic";
 import { GroupStat, Hint, TaskInfo, VaultStats, addDays, dayKey, isCheckinDay, pad2, startOfDay } from "./stats";
+import { WidgetId, WidgetSize } from "./widgets";
 import { MOTION, SegRect, animateHeight, countUp, drawLines, markStagger, reducedMotion, segRect, slideSeg } from "./motion";
 import {
   BarItem,
@@ -370,14 +371,46 @@ export class DashboardView extends ItemView {
     this.define("hints", body, (h) => this.renderHints(h, stats));
     this.define("headline", body, (h) => this.renderHeadline(h, stats, ck));
     const grid = body.createDiv({ cls: "vp-grid" });
-    this.define("hero", grid, (h) => this.renderHero(h, stats, ck));
-    this.define("tasks", grid, (h) => this.renderTasks(h, stats));
-    this.define("kpis", grid, (h) => this.renderKpis(h, stats));
-    this.define("heat", grid, (h) => this.renderHeatmap(h, stats, ck));
-    this.define("trend", grid, (h) => this.renderTrend(h, stats));
-    this.define("tags", grid, (h) => this.renderTags(h, stats));
-    this.define("checkup", grid, (h) => this.renderCheckup(h, stats));
-    this.define("reports", grid, (h) => this.renderReports(h));
+    this.gridEl = grid;
+    for (const item of this.plugin.settings.layout.items) {
+      const fn = this.widgetRenderer(item.id, stats, ck);
+      if (fn) this.define(item.id, grid, fn);
+    }
+  }
+
+  /** 看板栅格（编辑模式要在上面挂类） */
+  private gridEl: HTMLElement | null = null;
+
+  /** 每张卡片的渲染函数；尺寸由 mount 挂到卡片根元素上（is-s / is-m / is-l / is-xl） */
+  private widgetRenderer(id: WidgetId, stats: VaultStats, ck: Checkin): ((host: HTMLElement) => void) | null {
+    switch (id) {
+      case "hero":
+        return (h) => this.renderHero(h, stats, ck);
+      case "tasks":
+        return (h) => this.renderTasks(h, stats);
+      case "notes":
+      case "words":
+      case "taskRate":
+      case "month":
+        return (h) => this.renderKpi(h, stats, id);
+      case "heat":
+        return (h) => this.renderHeatmap(h, stats, ck);
+      case "trend":
+        return (h) => this.renderTrend(h, stats);
+      case "tags":
+        return (h) => this.renderTags(h, stats);
+      case "checkup":
+        return (h) => this.renderCheckup(h, stats);
+      case "reports":
+        return (h) => this.renderReports(h);
+      default:
+        return null;
+    }
+  }
+
+  /** 这张卡片当前的尺寸 */
+  private sizeOf(id: string): WidgetSize | null {
+    return this.plugin.settings.layout.items.find((i) => i.id === id)?.size ?? null;
   }
 
   /** 登记并渲染一个区块；每个渲染函数必须恰好生成一个根元素 */
@@ -401,16 +434,18 @@ export class DashboardView extends ItemView {
     const el = parent.lastElementChild as HTMLElement | null;
     if (!el) return;
     this.parts.set(key, el);
+    const size = this.sizeOf(key);
+    if (size) {
+      el.addClass("vp-w", `is-${size}`);
+      el.setAttr("data-widget", key);
+    }
     if (intro) {
       markStagger(el);
       drawLines(el, this.enterDelay);
     }
     if (intro) {
-      const targets = el.hasClass("vp-kpis") ? Array.from(el.children) as HTMLElement[] : [el];
-      for (const t of targets) {
-        t.addClass("vp-enter");
-        t.setCssProps({ "--vp-enter": String(Math.min(0.6, this.enterOrder++ / 14)) });
-      }
+      el.addClass("vp-enter");
+      el.setCssProps({ "--vp-enter": String(Math.min(0.6, this.enterOrder++ / 14)) });
     }
   }
 
@@ -970,8 +1005,9 @@ export class DashboardView extends ItemView {
 
   /* ---------- 3. 数据卡 ---------- */
 
-  private renderKpis(grid: HTMLElement, s: VaultStats) {
-    const wrap = grid.createDiv({ cls: "vp-kpis" });
+  /** 四张数据卡（2.0 起各自是一张卡片，可以分别换尺寸、隐藏、排序） */
+  private renderKpi(grid: HTMLElement, s: VaultStats, which: "notes" | "words" | "taskRate" | "month") {
+    const wrap = grid;
     const now = new Date(s.generatedAt);
     const goal = this.plugin.settings.dailyWordGoal;
     const today = startOfDay(now);
@@ -1016,121 +1052,129 @@ export class DashboardView extends ItemView {
       };
     };
 
-    // 笔记
-    const notes = weeklyNotes(s, 12, now);
-    const a = kpi(
-      "files",
-      L("笔记", "Notes"),
-      L(
-        "统计所有未被排除的 Markdown 笔记。曲线是近 12 周每周结束时的累计数（不含采集文件夹），按创建日期计。",
-        "All Markdown notes that are not excluded. The line is the running total at the end of each of the last 12 weeks (clipping folders left out), by created date."
-      )
-    );
-    const aOn = readout(
-      a,
-      () => {
-        this.tweenNum("kpi:notes", bigNumber(a.num, s.totalNotes, unit("notes", s.totalNotes)), s.totalNotes, unit("notes", s.totalNotes));
-        a.side.createSpan({ cls: "vp-kpi-caption", text: L("近 30 天", "30 days") });
-        a.side.createSpan({ cls: "vp-delta is-up", text: `+${fmtFull(n30)}` });
-      },
-      (i) => ({
-        value: fmtFull(notes[i].value),
-        unit: unit("notes", notes[i].value),
-        date: range(notes[i].start, notes[i].end),
-        note: L(`当周 +${fmtFull(notes[i].extra)}`, `+${fmtFull(notes[i].extra)} that week`),
-        up: true,
-      })
-    );
-    drawSparkline(a.c.createDiv({ cls: "vp-kpi-viz" }), notes.map((p) => p.value), {
-      onPoint: aOn,
-      label: (i) =>
+    if (which === "notes") {
+      // 笔记
+      const notes = weeklyNotes(s, 12, now);
+      const a = kpi(
+        "files",
+        L("笔记", "Notes"),
         L(
-          `${range(notes[i].start, notes[i].end)}，累计 ${notes[i].value} 篇，当周新增 ${notes[i].extra} 篇`,
-          `${range(notes[i].start, notes[i].end)}: ${count(notes[i].value, "notes")} in total, ${notes[i].extra} new that week`
-        ),
-    });
+          "统计所有未被排除的 Markdown 笔记。曲线是近 12 周每周结束时的累计数（不含采集文件夹），按创建日期计。",
+          "All Markdown notes that are not excluded. The line is the running total at the end of each of the last 12 weeks (clipping folders left out), by created date."
+        )
+      );
+      const aOn = readout(
+        a,
+        () => {
+          this.tweenNum("kpi:notes", bigNumber(a.num, s.totalNotes, unit("notes", s.totalNotes)), s.totalNotes, unit("notes", s.totalNotes));
+          a.side.createSpan({ cls: "vp-kpi-caption", text: L("近 30 天", "30 days") });
+          a.side.createSpan({ cls: "vp-delta is-up", text: `+${fmtFull(n30)}` });
+        },
+        (i) => ({
+          value: fmtFull(notes[i].value),
+          unit: unit("notes", notes[i].value),
+          date: range(notes[i].start, notes[i].end),
+          note: L(`当周 +${fmtFull(notes[i].extra)}`, `+${fmtFull(notes[i].extra)} that week`),
+          up: true,
+        })
+      );
+      drawSparkline(a.c.createDiv({ cls: "vp-kpi-viz" }), notes.map((p) => p.value), {
+        onPoint: aOn,
+        label: (i) =>
+          L(
+            `${range(notes[i].start, notes[i].end)}，累计 ${notes[i].value} 篇，当周新增 ${notes[i].extra} 篇`,
+            `${range(notes[i].start, notes[i].end)}: ${count(notes[i].value, "notes")} in total, ${notes[i].extra} new that week`
+          ),
+      });
+    }
 
-    // 字数
-    const words = weeklyWords(s, 12, now);
-    const skipped = s.totalWords - s.writeWordsTotal;
-    const b = kpi(
-      "type",
-      L("总字数", "Words"),
-      L(
-        `所有笔记的字数合计。曲线是近 12 周累计的写作字数（按笔记创建日期、用笔记当前字数计）。${
-          skipped > 0 ? `\n其中 ${fmtNum(skipped)} 字来自采集文件夹或超大笔记，不计入曲线、热力图和“新增字数”。` : ""
-        }`,
-        `Total words in all notes. The line is the running total of writing over the last 12 weeks (by created date, using each note's current length).${
-          skipped > 0 ? `\n${fmtNum(skipped)} of these words are in clipping folders or oversized notes, which are left out of the line, the heatmap and words added.` : ""
-        }`
-      )
-    );
-    const bOn = readout(
-      b,
-      () => {
-        this.tweenNum("kpi:words", bigNumber(b.num, s.totalWords, unit("words")), s.totalWords, unit("words"));
-        b.side.createSpan({ cls: "vp-kpi-caption", text: L("近 30 天", "30 days") });
-        b.side.createSpan({ cls: "vp-delta is-up", text: `+${fmtNum(w30)}` });
-      },
-      (i) => {
-        const p = splitNum(words[i].value, unit("words"));
-        return { value: p.value, unit: p.unit, date: range(words[i].start, words[i].end), note: L(`当周 +${fmtNum(words[i].extra)}`, `+${fmtNum(words[i].extra)} that week`), up: true };
-      }
-    );
-    drawSparkline(b.c.createDiv({ cls: "vp-kpi-viz" }), words.map((p) => p.value), {
-      onPoint: bOn,
-      label: (i) =>
+    if (which === "words") {
+      // 字数
+      const words = weeklyWords(s, 12, now);
+      const skipped = s.totalWords - s.writeWordsTotal;
+      const b = kpi(
+        "type",
+        L("总字数", "Words"),
         L(
-          `${range(words[i].start, words[i].end)}，累计 ${words[i].value} 字，当周新增 ${words[i].extra} 字`,
-          `${range(words[i].start, words[i].end)}: ${count(words[i].value, "words")} in total, ${words[i].extra} added that week`
-        ),
-    });
+          `所有笔记的字数合计。曲线是近 12 周累计的写作字数（按笔记创建日期、用笔记当前字数计）。${
+            skipped > 0 ? `\n其中 ${fmtNum(skipped)} 字来自采集文件夹或超大笔记，不计入曲线、热力图和“新增字数”。` : ""
+          }`,
+          `Total words in all notes. The line is the running total of writing over the last 12 weeks (by created date, using each note's current length).${
+            skipped > 0 ? `\n${fmtNum(skipped)} of these words are in clipping folders or oversized notes, which are left out of the line, the heatmap and words added.` : ""
+          }`
+        )
+      );
+      const bOn = readout(
+        b,
+        () => {
+          this.tweenNum("kpi:words", bigNumber(b.num, s.totalWords, unit("words")), s.totalWords, unit("words"));
+          b.side.createSpan({ cls: "vp-kpi-caption", text: L("近 30 天", "30 days") });
+          b.side.createSpan({ cls: "vp-delta is-up", text: `+${fmtNum(w30)}` });
+        },
+        (i) => {
+          const p = splitNum(words[i].value, unit("words"));
+          return { value: p.value, unit: p.unit, date: range(words[i].start, words[i].end), note: L(`当周 +${fmtNum(words[i].extra)}`, `+${fmtNum(words[i].extra)} that week`), up: true };
+        }
+      );
+      drawSparkline(b.c.createDiv({ cls: "vp-kpi-viz" }), words.map((p) => p.value), {
+        onPoint: bOn,
+        label: (i) =>
+          L(
+            `${range(words[i].start, words[i].end)}，累计 ${words[i].value} 字，当周新增 ${words[i].extra} 字`,
+            `${range(words[i].start, words[i].end)}: ${count(words[i].value, "words")} in total, ${words[i].extra} added that week`
+          ),
+      });
+    }
 
-    // 任务（没有每周历史，不画走势，只画完成进度）
-    const t = s.tasks;
-    const rate = t.total ? Math.round((t.done / t.total) * 100) : 0;
-    const c = kpi(
-      "list-checks",
-      L("任务完成率", "Tasks done"),
-      L("已完成任务占全部任务的比例，已取消的任务不计。", "Share of all tasks that are done. Cancelled tasks are not counted.")
-    );
-    const rateEl = bigNumber(c.num, t.total ? String(rate) : "—", t.total ? "%" : "");
-    if (t.total) this.tweenNum("kpi:rate", rateEl, rate, "%");
-    c.side.createSpan({ cls: "vp-kpi-caption", text: `${fmtFull(t.done)} / ${fmtFull(t.total)}` });
-    this.meter(c.c.createDiv({ cls: "vp-kpi-viz" }), t.total ? t.done / t.total : 0, "");
+    if (which === "taskRate") {
+      // 任务（没有每周历史，不画走势，只画完成进度）
+      const t = s.tasks;
+      const rate = t.total ? Math.round((t.done / t.total) * 100) : 0;
+      const c = kpi(
+        "list-checks",
+        L("任务完成率", "Tasks done"),
+        L("已完成任务占全部任务的比例，已取消的任务不计。", "Share of all tasks that are done. Cancelled tasks are not counted.")
+      );
+      const rateEl = bigNumber(c.num, t.total ? String(rate) : "—", t.total ? "%" : "");
+      if (t.total) this.tweenNum("kpi:rate", rateEl, rate, "%");
+      c.side.createSpan({ cls: "vp-kpi-caption", text: `${fmtFull(t.done)} / ${fmtFull(t.total)}` });
+      this.meter(c.c.createDiv({ cls: "vp-kpi-viz" }), t.total ? t.done / t.total : 0, "");
+    }
 
-    // 本月写作
-    const month = monthWriting(s, goal, now);
-    const weeks = weeklyCheckins(s, goal, 12, now);
-    const d = kpi(
-      "flame",
-      L("本月写作", "This month"),
-      L(
-        "本月打卡的天数，和本月每天平均写的字数。曲线是近 12 周每周打卡的天数。",
-        "Streak days this month and the average words per day this month. The line is the streak days in each of the last 12 weeks."
-      )
-    );
-    const dOn = readout(
-      d,
-      () => {
-        this.tweenNum("kpi:month", bigNumber(d.num, String(month.days), unit("days", month.days)), month.days, unit("days", month.days));
-        d.side.createSpan({ cls: "vp-kpi-caption", text: L(`日均 ${fmtFull(month.average)} 字`, `${fmtFull(month.average)} words a day`) });
-      },
-      (i) => ({
-        value: String(weeks[i].value),
-        unit: unit("days", weeks[i].value),
-        date: i === weeks.length - 1 ? L("本周", "This week") : range(weeks[i].start, weeks[i].end),
-        note: count(fmtFull(weeks[i].extra), "words"),
-      })
-    );
-    drawSparkline(d.c.createDiv({ cls: "vp-kpi-viz" }), weeks.map((p) => p.value), {
-      onPoint: dOn,
-      label: (i) =>
+    if (which === "month") {
+      // 本月写作
+      const month = monthWriting(s, goal, now);
+      const weeks = weeklyCheckins(s, goal, 12, now);
+      const d = kpi(
+        "flame",
+        L("本月写作", "This month"),
         L(
-          `${range(weeks[i].start, weeks[i].end)}，打卡 ${weeks[i].value} 天，写了 ${weeks[i].extra} 字`,
-          `${range(weeks[i].start, weeks[i].end)}: ${count(weeks[i].value, "days")} on streak, ${count(weeks[i].extra, "words")}`
-        ),
-    });
+          "本月打卡的天数，和本月每天平均写的字数。曲线是近 12 周每周打卡的天数。",
+          "Streak days this month and the average words per day this month. The line is the streak days in each of the last 12 weeks."
+        )
+      );
+      const dOn = readout(
+        d,
+        () => {
+          this.tweenNum("kpi:month", bigNumber(d.num, String(month.days), unit("days", month.days)), month.days, unit("days", month.days));
+          d.side.createSpan({ cls: "vp-kpi-caption", text: L(`日均 ${fmtFull(month.average)} 字`, `${fmtFull(month.average)} words a day`) });
+        },
+        (i) => ({
+          value: String(weeks[i].value),
+          unit: unit("days", weeks[i].value),
+          date: i === weeks.length - 1 ? L("本周", "This week") : range(weeks[i].start, weeks[i].end),
+          note: count(fmtFull(weeks[i].extra), "words"),
+        })
+      );
+      drawSparkline(d.c.createDiv({ cls: "vp-kpi-viz" }), weeks.map((p) => p.value), {
+        onPoint: dOn,
+        label: (i) =>
+          L(
+            `${range(weeks[i].start, weeks[i].end)}，打卡 ${weeks[i].value} 天，写了 ${weeks[i].extra} 字`,
+            `${range(weeks[i].start, weeks[i].end)}: ${count(weeks[i].value, "days")} on streak, ${count(weeks[i].extra, "words")}`
+          ),
+      });
+    }
   }
 
   private meter(parent: HTMLElement, ratio: number, cls: string, label?: string) {
