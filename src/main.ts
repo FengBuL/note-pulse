@@ -1,11 +1,12 @@
 import { Notice, Plugin, TAbstractFile, TFile, TFolder, WorkspaceLeaf, debounce, Debouncer, normalizePath } from "obsidian";
-import { DashboardSettings, DEFAULT_SETTINGS, DashboardSettingTab, SETTINGS_VERSION, migrateWritingSettings, normalizeFolder, splitList } from "./settings";
+import { DashboardSettings, DEFAULT_SETTINGS, DashboardSettingTab, SETTINGS_VERSION, migrateLanguage, migrateWritingSettings, normalizeFolder, splitList } from "./settings";
 import { ContentInfo, PersistentData, VaultStats, computeStats, includedFiles, syncContent, dayKey } from "./stats";
 import { DashboardView, VIEW_TYPE_PULSE, noticeError } from "./view";
 import { ReportPreviewModal } from "./reports";
 import { ReportKind } from "./report-logic";
 import { WordPropsService } from "./wordprops";
 import { DedupeService, normalizeDedupeSettings } from "./dedupe/service";
+import { L } from "./i18n";
 
 interface SavedData {
   settings: DashboardSettings;
@@ -67,43 +68,43 @@ export default class NotePulsePlugin extends Plugin {
 
     this.registerView(VIEW_TYPE_PULSE, (leaf) => new DashboardView(leaf, this));
 
-    this.addRibbonIcon("layout-dashboard", "打开看板", () => this.activateView());
+    this.addRibbonIcon("layout-dashboard", L("打开看板", "Open dashboard"), () => this.activateView());
 
     this.addCommand({
       id: "open-dashboard",
-      name: "打开看板",
+      name: L("打开看板", "Open dashboard"),
       callback: () => this.activateView(),
     });
     this.addCommand({
       id: "refresh-dashboard",
-      name: "刷新看板数据",
+      name: L("刷新看板数据", "Refresh dashboard data"),
       callback: () => this.requestRefresh(true),
     });
 
     this.addCommand({
       id: "update-word-property",
-      name: "更新当前笔记字数属性",
+      name: L("更新当前笔记字数属性", "Update word count property of current note"),
       callback: () => void this.wordProps.updateCurrent(),
     });
     this.addCommand({
       id: "update-all-word-properties",
-      name: "批量更新所有笔记字数属性",
+      name: L("批量更新所有笔记字数属性", "Update word count property of all notes"),
       callback: () => void this.wordProps.batchUpdate(),
     });
     this.addCommand({
       id: "remove-word-properties",
-      name: "移除所有字数属性",
+      name: L("移除所有字数属性", "Remove all word count properties"),
       callback: () => void this.wordProps.removeAll(),
     });
 
     this.addCommand({
       id: "generate-writing-weekly-report",
-      name: "生成写作周报",
+      name: L("生成写作周报", "Create weekly writing report"),
       callback: () => void this.openWritingReport("week"),
     });
     this.addCommand({
       id: "generate-writing-monthly-report",
-      name: "生成写作月报",
+      name: L("生成写作月报", "Create monthly writing report"),
       callback: () => void this.openWritingReport("month"),
     });
 
@@ -249,7 +250,7 @@ export default class NotePulsePlugin extends Plugin {
       do {
         this.rerun = false;
         this.stale = false;
-        for (const v of this.getViews()) v.showLoading("正在统计…");
+        for (const v of this.getViews()) v.showLoading(L("正在统计…", "Counting…"));
         const stats = await this.enqueue(() =>
           computeStats(this.app, this.settings, this.contentCache, this.data, (d, t) => {
             for (const v of this.getViews()) v.setProgress(d, t);
@@ -259,7 +260,7 @@ export default class NotePulsePlugin extends Plugin {
         this.schedulePersist();
         for (const v of this.getViews()) v.render(stats);
       } while (this.rerun);
-      if (force) new Notice("Note Pulse：看板已刷新");
+      if (force) new Notice(L("Note Pulse：看板已刷新", "Note Pulse: dashboard refreshed"));
     } catch (e) {
       noticeError(e);
       for (const v of this.getViews()) v.showError();
@@ -293,7 +294,7 @@ export default class NotePulsePlugin extends Plugin {
     if (search && typeof search.openGlobalSearch === "function") {
       search.openGlobalSearch(query);
     } else {
-      new Notice(`请启用核心插件“搜索”。查询：${query}`);
+      new Notice(L(`请启用核心插件“搜索”。查询：${query}`, `Turn on the core Search plugin. Query: ${query}`));
     }
   }
 
@@ -388,6 +389,7 @@ export default class NotePulsePlugin extends Plugin {
       this.settings.dedupe = normalizeDedupeSettings(raw.settings.dedupe);
     }
     migrateWritingSettings(this.settings);
+    migrateLanguage(this.settings, !!raw.settings, raw.settings?.settingsVersion ?? 1);
     this.settings.settingsVersion = SETTINGS_VERSION;
 
     const wordLog = raw.wordLog || {};

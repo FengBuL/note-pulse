@@ -2,8 +2,8 @@
 import type { TFile } from "obsidian";
 import { addDays, dayKey, isCheckinDay, startOfDay } from "./stats";
 import type { FileStat, VaultStats } from "./stats";
+import { weekdayLetter, weekdayName } from "./i18n";
 
-const WEEKDAY = ["日", "一", "二", "三", "四", "五", "六"];
 
 /** 本地日历周的周一 */
 export function weekStart(d: Date): Date {
@@ -42,7 +42,7 @@ export function weekDays(s: VaultStats, goal: number, now: Date): WeekDay[] {
     const words = future ? 0 : s.dayWords[key] || 0;
     const done = !future && isCheckinDay(s, goal, key);
     const pct = !future && !done && goal > 0 && words > 0 ? Math.min(99, Math.floor((words / goal) * 100)) : null;
-    out.push({ key, label: WEEKDAY[d.getDay()], words, done, future, isToday: d.getTime() === today.getTime(), pct });
+    out.push({ key, label: weekdayLetter(d.getDay()), words, done, future, isToday: d.getTime() === today.getTime(), pct });
   }
   return out;
 }
@@ -208,7 +208,7 @@ export function busiestWeekday(s: VaultStats, from: Date, to: Date): string | nu
   for (let d = startOfDay(from); d.getTime() <= to.getTime(); d = addDays(d, 1)) sums[d.getDay()] += s.dayWords[dayKey(d)] || 0;
   let best = -1;
   for (let i = 0; i < 7; i++) if (sums[i] > 0 && (best < 0 || sums[i] > sums[best])) best = i;
-  return best < 0 ? null : `周${WEEKDAY[best]}`;
+  return best < 0 ? null : weekdayName(best);
 }
 
 /* ---------------- 库体检 ---------------- */

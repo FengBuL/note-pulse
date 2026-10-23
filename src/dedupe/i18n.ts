@@ -1,4 +1,4 @@
-import { moment } from "obsidian";
+import { isZh } from "../i18n";
 
 /** Interface strings as [中文, English]. Obsidian's own language decides which one is shown. */
 const S = {
@@ -235,26 +235,17 @@ const S = {
 
 export type StrKey = keyof typeof S;
 
-let lang: 0 | 1 = 1;
-
-/** Chinese when Obsidian runs in a Chinese language, English otherwise. */
+/** Language follows Note Pulse's own setting (src/i18n.ts); kept as a function so existing callers still work. */
 export function initLanguage(): void {
-  // moment follows Obsidian's own language setting and exists in every supported version
-  let l = "en";
-  try {
-    l = moment.locale() || document.documentElement.lang || "en";
-  } catch {
-    l = "en";
-  }
-  lang = l.toLowerCase().startsWith("zh") ? 0 : 1;
+  // nothing to do: setLanguage() in src/i18n.ts already decided
 }
 
 export function isChinese(): boolean {
-  return lang === 0;
+  return isZh();
 }
 
 export function t(key: StrKey, ...args: (string | number)[]): string {
-  let s: string = S[key][lang];
+  let s: string = S[key][isZh() ? 0 : 1];
   args.forEach((a, i) => {
     s = s.split(`{${i}}`).join(String(a));
   });

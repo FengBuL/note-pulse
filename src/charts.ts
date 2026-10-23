@@ -1,4 +1,5 @@
 /* 原生 SVG / HTML 图表：无外部依赖，颜色全部来自 CSS 变量 */
+import { L, isZh } from "./i18n";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 let uid = 0;
@@ -19,13 +20,28 @@ export function svgEl<K extends keyof SVGElementTagNameMap>(
 /** 拆分为数字和单位，便于大号数字 + 小号单位的排版 */
 export function fmtParts(n: number): { num: string; unit: string } {
   const a = Math.abs(n);
-  if (a >= 1e8) return { num: trimZero((n / 1e8).toFixed(2)), unit: "亿" };
-  if (a >= 1e4) return { num: trimZero((n / 1e4).toFixed(a >= 1e6 ? 0 : 1)), unit: "万" };
+  if (isZh()) {
+    if (a >= 1e8) return { num: trimZero((n / 1e8).toFixed(2)), unit: "亿" };
+    if (a >= 1e4) return { num: trimZero((n / 1e4).toFixed(a >= 1e6 ? 0 : 1)), unit: "万" };
+  } else {
+    // 英文：1.2K、34K、1.5M（单位紧贴数字，后面再接 " words" 之类的空格）
+    if (a >= 1e6) return { num: trimZero((n / 1e6).toFixed(a >= 1e8 ? 0 : 1)), unit: "M" };
+    if (a >= 1e4) return { num: trimZero((n / 1e3).toFixed(a >= 1e5 ? 0 : 1)), unit: "K" };
+  }
   return { num: Math.round(n).toLocaleString("en-US"), unit: "" };
 }
 
 function trimZero(s: string): string {
   return s.includes(".") ? s.replace(/\.?0+$/, "") : s;
+}
+
+/**
+ * 大数字排版：中文“200 / 万字”（万和字一起放进单位），英文“200K / words”（K 紧贴数字，单位另起）。
+ * bigNumber 和数字滚动都用它，保证两边拆法一致。
+ */
+export function splitNum(n: number, unit = ""): { value: string; unit: string } {
+  const p = fmtParts(n);
+  return isZh() ? { value: p.num, unit: p.unit + unit } : { value: p.num + p.unit, unit };
 }
 
 export function fmtNum(n: number): string {
@@ -41,10 +57,9 @@ export function fmtFull(n: number): string {
 export function bigNumber(parent: HTMLElement, n: number | string, unit?: string, cls = "vp-num"): HTMLElement {
   const el = parent.createDiv({ cls });
   if (typeof n === "number") {
-    const p = fmtParts(n);
-    el.createSpan({ cls: "vp-num-value", text: p.num });
-    const u = (p.unit || "") + (unit || "");
-    if (u) el.createSpan({ cls: "vp-num-unit", text: u });
+    const p = splitNum(n, unit);
+    el.createSpan({ cls: "vp-num-value", text: p.value });
+    if (p.unit) el.createSpan({ cls: "vp-num-unit", text: p.unit });
   } else {
     el.createSpan({ cls: "vp-num-value", text: n });
     if (unit) el.createSpan({ cls: "vp-num-unit", text: unit });
@@ -375,7 +390,7 @@ export function drawSparkline(container: HTMLElement, values: number[], scrub?: 
   container.setAttr("role", "slider");
   container.setAttr("aria-valuemin", "1");
   container.setAttr("aria-valuemax", String(values.length));
-  srLabel(container, "近 12 周走势。用左右方向键逐周查看。");
+  srLabel(container, L("近 12 周走势。用左右方向键逐周查看。", "Last 12 weeks. Use the left and right arrow keys to step through weeks."));
   container.addEventListener("pointermove", (e: PointerEvent) => {
     if (e.pointerType === "mouse" || e.buttons > 0) show(indexAt(e.clientX));
   });
@@ -478,7 +493,7 @@ export function drawBarList(container: HTMLElement, items: BarItem[], emptyText:
       row.addClass("is-clickable");
       row.setAttribute("role", "button");
       row.setAttribute("tabindex", "0");
-      srLabel(row, `${it.label}，${it.valueText ?? fmtNum(it.value)}`);
+      srLabel(row, `${it.label}${L("，", ", ")}${it.valueText ?? fmtNum(it.value)}`);
       row.addEventListener("click", (e) => cb(e));
       row.addEventListener("keydown", (e) => {
         if (e.key === "Enter" || e.key === " ") {

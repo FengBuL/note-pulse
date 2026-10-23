@@ -1,11 +1,20 @@
 import { App, TFile, TFolder, normalizePath } from "obsidian";
+import { L } from "./i18n";
 
 export class ReportStorageError extends Error {}
+
+/** 报告笔记的 type 属性：中文界面写“写作周报 / 写作月报”，英文界面写 Weekly / Monthly writing report；查找时两种都认 */
+const REPORT_TYPES = ["写作周报", "写作月报", "Weekly writing report", "Monthly writing report"];
+const REPORT_NAME = /^(?:写作[周月]报|(?:Weekly|Monthly) writing report)(?:\s|$)/u;
+
+export function isReportType(type: unknown): boolean {
+  return typeof type === "string" && REPORT_TYPES.includes(type);
+}
 
 export function reportPath(folder: string, title: string): string {
   const cleaned = folder.trim().replace(/\\/g, "/");
   if (cleaned.split("/").some((part) => part === "." || part === "..") || /[:*?"<>|]/.test(cleaned) || Array.from(cleaned).some((char) => char.charCodeAt(0) < 32)) {
-    throw new ReportStorageError("保存位置包含不能用于文件夹名称的字符，请先修改设置。");
+    throw new ReportStorageError(L("保存位置包含不能用于文件夹名称的字符，请先修改设置。", "The report folder contains characters that cannot be used in folder names. Change it in settings first."));
   }
   return normalizePath(`${cleaned ? cleaned + "/" : ""}${title}.md`);
 }
@@ -22,7 +31,7 @@ export function latestWritingReport(app: App, folder: string): TFile | null {
   for (const file of app.vault.getMarkdownFiles()) {
     if (!file.path.startsWith(directory)) continue;
     const type: unknown = app.metadataCache.getFileCache(file)?.frontmatter?.type;
-    if (type !== "写作周报" && type !== "写作月报" && !/^写作[周月]报(?:\s|$)/u.test(file.basename)) continue;
+    if (!isReportType(type) && !REPORT_NAME.test(file.basename)) continue;
     if (!latest || file.stat.mtime > latest.stat.mtime ||
       (file.stat.mtime === latest.stat.mtime && file.path.localeCompare(latest.path) < 0)) latest = file;
   }
@@ -35,7 +44,7 @@ export async function ensureReportFolder(app: App, path: string): Promise<void> 
   for (const part of parts) {
     current = current ? `${current}/${part}` : part;
     const existing = app.vault.getAbstractFileByPath(current);
-    if (existing && !(existing instanceof TFolder)) throw new ReportStorageError("保存位置被同名文件占用，请修改设置。");
+    if (existing && !(existing instanceof TFolder)) throw new ReportStorageError(L("保存位置被同名文件占用，请修改设置。", "A file with the report folder's name already exists. Change the folder in settings."));
     if (!existing) {
       try {
         await app.vault.createFolder(current);
@@ -60,7 +69,7 @@ export async function createReport(app: App, path: string, markdown: string, sep
 
 export async function overwriteReport(app: App, file: TFile, original: string, markdown: string): Promise<TFile> {
   await app.vault.process(file, (current) => {
-    if (current !== original) throw new ReportStorageError("这篇笔记刚刚被修改，请重新预览后再保存。");
+    if (current !== original) throw new ReportStorageError(L("这篇笔记刚刚被修改，请重新预览后再保存。", "This note was just changed. Preview again before saving."));
     return markdown;
   });
   return file;

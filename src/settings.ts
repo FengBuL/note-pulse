@@ -2,16 +2,19 @@ import { App, PluginSettingTab, Setting, SettingDefinitionItem } from "obsidian"
 import type NotePulsePlugin from "./main";
 import { sanitizeProperty } from "./wordprops-logic";
 import { ClipDedupeSettings, DEFAULT_SETTINGS as DEDUPE_DEFAULTS, dedupeSections } from "./dedupe/settings";
+import { L, LanguagePref, setLanguage } from "./i18n";
 
 export type HeatmapMode = "auto" | "mtime" | "delta";
 export type OutlierMode = "exclude" | "off";
 export type WeekStyle = "dots" | "bars";
 
 /** 设置结构版本：用于一次性迁移旧设置 */
-export const SETTINGS_VERSION = 3;
+export const SETTINGS_VERSION = 4;
 
 export interface DashboardSettings {
   settingsVersion: number;
+  /** 界面语言：auto 跟随 Obsidian；1.6.0 以前的老用户迁移为 zh（之前只有中文界面） */
+  language: LanguagePref;
   excludedFolders: string;
   /** 采集 / 剪藏文件夹：笔记仍计入总数，但不计入字数趋势、热力图和打卡 */
   clippingFolders: string;
@@ -60,6 +63,7 @@ export interface DashboardSettings {
 
 export const DEFAULT_SETTINGS: DashboardSettings = {
   settingsVersion: SETTINGS_VERSION,
+  language: "auto",
   excludedFolders: "",
   clippingFolders: "",
   outlierMode: "exclude",
@@ -134,11 +138,11 @@ export class DashboardSettingTab extends PluginSettingTab {
 
     return [
       {
-        heading: "范围",
+        heading: L("范围", "Scope"),
         rows: [
           {
-            name: "排除的文件夹",
-            desc: "这些文件夹（含子文件夹）中的笔记完全不参与统计。每行一个，或用逗号分隔，例如：Templates, Archive/Old",
+            name: L("排除的文件夹", "Excluded folders"),
+            desc: L("这些文件夹（含子文件夹）中的笔记完全不参与统计。每行一个，或用逗号分隔，例如：Templates, Archive/Old", "Notes in these folders (and their subfolders) are left out of every statistic. One per line or comma-separated, for example: Templates, Archive/Old"),
             render: (setting) =>
               setting.addTextArea((t) => {
                 t.setPlaceholder("Templates\nAttachments")
@@ -151,8 +155,8 @@ export class DashboardSettingTab extends PluginSettingTab {
               }),
           },
           {
-            name: "采集 / 剪藏文件夹",
-            desc: "自动抓取、网页剪藏、每日转存之类的文件夹。里面的笔记仍计入笔记总数，但不计入字数趋势、写作热力图、打卡和“新建笔记”曲线。",
+            name: L("采集 / 剪藏文件夹", "Clipping folders"),
+            desc: L("自动抓取、网页剪藏、每日转存之类的文件夹。里面的笔记仍计入笔记总数，但不计入字数趋势、写作热力图、打卡和“新建笔记”曲线。", "Folders filled automatically, such as web clippings, feeds or daily exports. Their notes still count toward the note total but not toward word trends, the writing heatmap, streaks or the new-notes chart."),
             render: (setting) =>
               setting.addTextArea((t) => {
                 t.setPlaceholder("x\nClippings")
@@ -165,8 +169,8 @@ export class DashboardSettingTab extends PluginSettingTab {
               }),
           },
           {
-            name: "排除超大笔记",
-            desc: "字数超过下面阈值的笔记不计入字数趋势、热力图和打卡（笔记数量仍计入）。看板上会注明排除了哪些。",
+            name: L("排除超大笔记", "Exclude oversized notes"),
+            desc: L("字数超过下面阈值的笔记不计入字数趋势、热力图和打卡（笔记数量仍计入）。看板上会注明排除了哪些。", "Notes longer than the threshold below are left out of word trends, the heatmap and streaks (they still count as notes). The dashboard shows which ones were excluded."),
             render: (setting) =>
               setting.addToggle((t) =>
                 t.setValue(st.outlierMode === "exclude").onChange(async (v) => {
@@ -176,8 +180,8 @@ export class DashboardSettingTab extends PluginSettingTab {
               ),
           },
           {
-            name: "超大笔记阈值（字）",
-            desc: "默认 20000。汉字按字、英文按词计。",
+            name: L("超大笔记阈值（字）", "Oversized note threshold (words)"),
+            desc: L("默认 20000。汉字按字、英文按词计。", "Default 20000. Each CJK character counts as one word; other languages count by words."),
             render: (setting) =>
               setting.addText((t) =>
                 t.setPlaceholder("20000").setValue(String(st.outlierWords)).onChange(async (v) => {
@@ -190,15 +194,15 @@ export class DashboardSettingTab extends PluginSettingTab {
         ],
       },
       {
-        heading: "打卡与热力图",
+        heading: L("打卡与热力图", "Streaks and heatmap"),
         rows: [
           {
-            name: "日记文件夹",
-            desc: "文件名为 YYYY-MM-DD 的笔记视为日记，用于“日记打卡”。留空则在整个仓库中识别。内容少于 10 字的空日记不算打卡。",
+            name: L("日记文件夹", "Daily notes folder"),
+            desc: L("文件名为 YYYY-MM-DD 的笔记视为日记，用于“日记打卡”。留空则在整个仓库中识别。内容少于 10 字的空日记不算打卡。", "Notes named YYYY-MM-DD count as daily notes, and a daily note keeps the streak. Leave empty to look across the whole vault. Daily notes with fewer than 10 words do not count."),
             render: (setting) =>
               setting.addText((t) =>
                 t
-                  .setPlaceholder("例如：Daily")
+                  .setPlaceholder(L("例如：Daily", "For example: Daily"))
                   .setValue(st.dailyNoteFolder)
                   .onChange(async (v) => {
                     st.dailyNoteFolder = v;
@@ -207,8 +211,8 @@ export class DashboardSettingTab extends PluginSettingTab {
               ),
           },
           {
-            name: "每日字数目标",
-            desc: "达到该字数的日子记为打卡成功（写了日记也算打卡）。设为 0 表示有任何写作即算打卡。",
+            name: L("每日字数目标", "Daily word goal"),
+            desc: L("达到该字数的日子记为打卡成功（写了日记也算打卡）。设为 0 表示有任何写作即算打卡。", "A day that reaches this many words counts toward the streak (so does a day with a daily note). Set to 0 to count any writing."),
             render: (setting) =>
               setting.addText((t) =>
                 t
@@ -222,8 +226,8 @@ export class DashboardSettingTab extends PluginSettingTab {
               ),
           },
           {
-            name: "每周字数目标",
-            desc: "周一到周日累计，默认 1500 字。设为 0 关闭每周目标。",
+            name: L("每周字数目标", "Weekly word goal"),
+            desc: L("周一到周日累计，默认 1500 字。设为 0 关闭每周目标。", "Counted Monday to Sunday, default 1500 words. Set to 0 to turn the weekly goal off."),
             render: (setting) => setting.addText((t) =>
               t.setPlaceholder("1500").setValue(String(st.weeklyWordGoal)).onChange(async (v) => {
                 const n = Number(v);
@@ -233,8 +237,8 @@ export class DashboardSettingTab extends PluginSettingTab {
             ),
           },
           {
-            name: "写作报告保存位置",
-            desc: "周报和月报保存在这个文件夹，默认 Note Pulse。留空保存在笔记库最外层。",
+            name: L("写作报告保存位置", "Writing report folder"),
+            desc: L("周报和月报保存在这个文件夹，默认 Note Pulse。留空保存在笔记库最外层。", "Weekly and monthly reports are saved here, default Note Pulse. Leave empty to save at the top of the vault."),
             render: (setting) => setting.addText((t) =>
               t.setPlaceholder(DEFAULT_SETTINGS.reportFolder).setValue(st.reportFolder).onChange(async (v) => {
                 st.reportFolder = v.trim();
@@ -243,16 +247,16 @@ export class DashboardSettingTab extends PluginSettingTab {
             ),
           },
           {
-            name: "写作量统计方式",
+            name: L("写作量统计方式", "How writing is counted"),
             desc:
-              "智能（推荐）：启用插件之后的日子按每日实际新增字数记录（看板关着也会记），之前的日子按“最后修改日”估算。" +
-              "按修改日：每篇笔记的全部字数记在它最后修改的那天，较粗略。按每日新增：只用实测记录，从启用之日起累积。",
+              L("智能（推荐）：启用插件之后的日子按每日实际新增字数记录（看板关着也会记），之前的日子按“最后修改日”估算。", "Smart (recommended): from the day the plugin was enabled, the words actually added each day are recorded (even while the dashboard is closed); earlier days are estimated from each note's last-modified date. ") +
+              L("按修改日：每篇笔记的全部字数记在它最后修改的那天，较粗略。按每日新增：只用实测记录，从启用之日起累积。", "By modified date: a note's full word count goes to the day it was last modified, which is rough. By daily additions: only recorded additions, building up from the day you enabled the plugin."),
             render: (setting) =>
               setting.addDropdown((d) =>
                 d
-                  .addOption("auto", "智能：实测 + 估算")
-                  .addOption("mtime", "按修改日（全文字数）")
-                  .addOption("delta", "按每日新增字数（需累积）")
+                  .addOption("auto", L("智能：实测 + 估算", "Smart: recorded + estimated"))
+                  .addOption("mtime", L("按修改日（全文字数）", "By modified date (full word count)"))
+                  .addOption("delta", L("按每日新增字数（需累积）", "By daily additions (builds up over time)"))
                   .setValue(st.heatmapMode)
                   .onChange(async (v) => {
                     st.heatmapMode = v as HeatmapMode;
@@ -261,13 +265,13 @@ export class DashboardSettingTab extends PluginSettingTab {
               ),
           },
           {
-            name: "本周的显示方式",
-            desc: "今日写作卡里本周七天的样子。圆点：达标打勾，没达标显示完成百分比。柱状：柱高是当天字数，虚线是每日目标。也可以直接在看板上切换。",
+            name: L("本周的显示方式", "This week display"),
+            desc: L("今日写作卡里本周七天的样子。圆点：达标打勾，没达标显示完成百分比。柱状：柱高是当天字数，虚线是每日目标。也可以直接在看板上切换。", "How the seven days of this week look on the Today card. Dots: a check for days that met the goal, otherwise the percentage done. Bars: bar height is that day's words, the dashed line is the daily goal. You can also switch on the dashboard."),
             render: (setting) =>
               setting.addDropdown((d) =>
                 d
-                  .addOption("dots", "圆点")
-                  .addOption("bars", "柱状")
+                  .addOption("dots", L("圆点", "Dots"))
+                  .addOption("bars", L("柱状", "Bars"))
                   .setValue(st.weekStyle)
                   .onChange(async (v) => {
                     st.weekStyle = v as WeekStyle;
@@ -277,10 +281,10 @@ export class DashboardSettingTab extends PluginSettingTab {
               ),
           },
           {
-            name: "创建日期字段名",
+            name: L("创建日期字段名", "Created date properties"),
             desc:
-              "如果 frontmatter 中有这些字段且为 YYYY-MM-DD 日期，则用它作为创建日期，否则使用文件创建时间。" +
-              "iCloud、Dropbox、git 等同步后文件创建时间常常被重置，如果趋势图在某一天陡增，请给笔记加上这样的字段。",
+              L("如果 frontmatter 中有这些字段且为 YYYY-MM-DD 日期，则用它作为创建日期，否则使用文件创建时间。", "If a note has one of these properties with a YYYY-MM-DD date, it is used as the created date; otherwise the file's creation time is used. ") +
+              L("iCloud、Dropbox、git 等同步后文件创建时间常常被重置，如果趋势图在某一天陡增，请给笔记加上这样的字段。", "Syncing with iCloud, Dropbox, git and similar often resets file creation times. If the trend chart jumps on a single day, add one of these properties to your notes."),
             render: (setting) =>
               setting.addText((t) =>
                 t.setValue(st.createdFields).onChange(async (v) => {
@@ -292,11 +296,33 @@ export class DashboardSettingTab extends PluginSettingTab {
         ],
       },
       {
-        heading: "刷新与行为",
+        heading: L("刷新与行为", "Refresh and behavior"),
         rows: [
           {
-            name: "自动刷新",
-            desc: "仓库内容变化后自动刷新看板（带防抖，看板不可见时不会计算）。",
+            name: L("界面语言", "Language"),
+            desc: L(
+              "跟随 Obsidian：Obsidian 是中文界面时显示中文，否则显示英文。侧边栏图标的提示和命令名称要重启 Obsidian 后才会换。",
+              "Follow Obsidian shows Chinese when Obsidian's own language is Chinese and English otherwise. Ribbon tooltips and command names change after restarting Obsidian."
+            ),
+            render: (setting) =>
+              setting.addDropdown((d) =>
+                d
+                  .addOption("auto", L("跟随 Obsidian", "Follow Obsidian"))
+                  .addOption("zh", "中文") // i18n-skip
+                  .addOption("en", "English")
+                  .setValue(st.language)
+                  .onChange(async (v) => {
+                    st.language = v as LanguagePref;
+                    setLanguage(st.language);
+                    await this.plugin.saveViewSetting();
+                    this.plugin.refreshViewsOnly();
+                    this.redraw();
+                  })
+              ),
+          },
+          {
+            name: L("自动刷新", "Auto refresh"),
+            desc: L("仓库内容变化后自动刷新看板（带防抖，看板不可见时不会计算）。", "Refresh the dashboard after the vault changes (debounced; nothing is computed while the dashboard is hidden)."),
             render: (setting) =>
               setting.addToggle((t) =>
                 t.setValue(st.autoRefresh).onChange(async (v) => {
@@ -306,7 +332,7 @@ export class DashboardSettingTab extends PluginSettingTab {
               ),
           },
           {
-            name: "自动刷新延迟（秒）",
+            name: L("自动刷新延迟（秒）", "Auto refresh delay (seconds)"),
             render: (setting) =>
               setting.addText((t) =>
                 t.setValue(String(st.refreshDelaySec)).onChange(async (v) => {
@@ -317,8 +343,8 @@ export class DashboardSettingTab extends PluginSettingTab {
               ),
           },
           {
-            name: "动效",
-            desc: "打开看板时卡片依次出现、数字滚动到当前值，切换和展开时平滑过渡；自动刷新只让变化了的数字动。系统开了“减弱动态效果”时始终关闭。",
+            name: L("动效", "Motion"),
+            desc: L("打开看板时卡片依次出现、数字滚动到当前值，切换和展开时平滑过渡；自动刷新只让变化了的数字动。系统开了“减弱动态效果”时始终关闭。", "Cards appear one after another and numbers count up when the dashboard opens; switching and expanding animate smoothly; auto refresh only animates numbers that changed. Always off when your system asks for reduced motion."),
             render: (setting) =>
               setting.addToggle((t) =>
                 t.setValue(st.motion).onChange(async (v) => {
@@ -328,8 +354,8 @@ export class DashboardSettingTab extends PluginSettingTab {
               ),
           },
           {
-            name: "在新标签页打开笔记",
-            desc: "点击看板中的笔记时，在新标签页打开，保留看板。",
+            name: L("在新标签页打开笔记", "Open notes in a new tab"),
+            desc: L("点击看板中的笔记时，在新标签页打开，保留看板。", "Notes clicked on the dashboard open in a new tab so the dashboard stays open."),
             render: (setting) =>
               setting.addToggle((t) =>
                 t.setValue(st.openInNewTab).onChange(async (v) => {
@@ -341,13 +367,13 @@ export class DashboardSettingTab extends PluginSettingTab {
         ],
       },
       {
-        heading: "字数属性",
+        heading: L("字数属性", "Word count property"),
         rows: [
           {
-            name: "把字数写入笔记属性",
+            name: L("把字数写入笔记属性", "Write word count to note properties"),
             desc:
-              "开启后，编辑完一篇笔记并停手几秒，会把它的字数写进 frontmatter（属性是数字类型），这样 Bases 可以直接按字数排序、筛选和做公式。" +
-              "这会修改你的笔记文件，所以默认关闭。写入时 Obsidian 会重新整理该笔记的 YAML 属性区（注释可能丢失）。下面的两个命令在关闭时也能手动使用。",
+              L("开启后，编辑完一篇笔记并停手几秒，会把它的字数写进 frontmatter（属性是数字类型），这样 Bases 可以直接按字数排序、筛选和做公式。", "When on, a few seconds after you stop editing a note its word count is written to the frontmatter as a number, so Bases can sort, filter and calculate with it. ") +
+              L("这会修改你的笔记文件，所以默认关闭。写入时 Obsidian 会重新整理该笔记的 YAML 属性区（注释可能丢失）。下面的两个命令在关闭时也能手动使用。", "This changes your note files, so it is off by default. When writing, Obsidian reformats the note's YAML properties (comments may be lost). The two commands below work even while this is off."),
             render: (setting) =>
               setting.addToggle((t) =>
                 t.setValue(st.wordPropEnabled).onChange(async (v) => {
@@ -357,8 +383,8 @@ export class DashboardSettingTab extends PluginSettingTab {
               ),
           },
           {
-            name: "字数属性名",
-            desc: "默认 words。在 Bases 里就用这个名字，例如 words > 1000。",
+            name: L("字数属性名", "Word count property name"),
+            desc: L("默认 words。在 Bases 里就用这个名字，例如 words > 1000。", "Default words. Use this name in Bases, for example words > 1000."),
             render: (setting) =>
               setting.addText((t) =>
                 t.setPlaceholder(DEFAULT_SETTINGS.wordPropName).setValue(st.wordPropName).onChange(async (v) => {
@@ -368,8 +394,8 @@ export class DashboardSettingTab extends PluginSettingTab {
               ),
           },
           {
-            name: "同时写入阅读时长",
-            desc: "按下面的阅读速度估算，单位是分钟（向上取整，最少 1 分钟）。",
+            name: L("同时写入阅读时长", "Also write reading time"),
+            desc: L("按下面的阅读速度估算，单位是分钟（向上取整，最少 1 分钟）。", "Estimated from the reading speeds below, in minutes (rounded up, at least 1)."),
             render: (setting) =>
               setting.addToggle((t) =>
                 t.setValue(st.wordPropReading).onChange(async (v) => {
@@ -379,8 +405,8 @@ export class DashboardSettingTab extends PluginSettingTab {
               ),
           },
           {
-            name: "阅读时长属性名",
-            desc: "默认 reading_time。",
+            name: L("阅读时长属性名", "Reading time property name"),
+            desc: L("默认 reading_time。", "Default reading_time."),
             render: (setting) =>
               setting.addText((t) =>
                 t.setPlaceholder(DEFAULT_SETTINGS.wordPropReadingName).setValue(st.wordPropReadingName).onChange(async (v) => {
@@ -390,8 +416,8 @@ export class DashboardSettingTab extends PluginSettingTab {
               ),
           },
           {
-            name: "中日文阅读速度（字/分钟）",
-            desc: "默认 400。",
+            name: L("中日文阅读速度（字/分钟）", "CJK reading speed (characters per minute)"),
+            desc: L("默认 400。", "Default 400."),
             render: (setting) =>
               setting.addText((t) =>
                 t.setPlaceholder("400").setValue(String(st.wordPropCjkPerMin)).onChange(async (v) => {
@@ -402,8 +428,8 @@ export class DashboardSettingTab extends PluginSettingTab {
               ),
           },
           {
-            name: "其他文字阅读速度（词/分钟）",
-            desc: "英文等按词计的文字，默认 220。",
+            name: L("其他文字阅读速度（词/分钟）", "Other reading speed (words per minute)"),
+            desc: L("英文等按词计的文字，默认 220。", "For English and other languages counted by words. Default 220."),
             render: (setting) =>
               setting.addText((t) =>
                 t.setPlaceholder("220").setValue(String(st.wordPropLatinPerMin)).onChange(async (v) => {
@@ -414,8 +440,8 @@ export class DashboardSettingTab extends PluginSettingTab {
               ),
           },
           {
-            name: "最小变化字数",
-            desc: "新旧字数相差达到这个数才写入，默认 1（只要有变化就写）。调大可以减少文件改动和同步次数，但属性值会略微滞后。",
+            name: L("最小变化字数", "Minimum change"),
+            desc: L("新旧字数相差达到这个数才写入，默认 1（只要有变化就写）。调大可以减少文件改动和同步次数，但属性值会略微滞后。", "Only write when the count changes by at least this much. Default 1 (write on any change). A larger value means fewer file changes and syncs, but the property lags a little."),
             render: (setting) =>
               setting.addText((t) =>
                 t.setPlaceholder("1").setValue(String(st.wordPropMinChange)).onChange(async (v) => {
@@ -426,8 +452,8 @@ export class DashboardSettingTab extends PluginSettingTab {
               ),
           },
           {
-            name: "停手多久后写入（秒）",
-            desc: "只处理你正在编辑的那篇笔记，停止输入这么久之后才写，默认 5，最小 3。",
+            name: L("停手多久后写入（秒）", "Write after idle (seconds)"),
+            desc: L("只处理你正在编辑的那篇笔记，停止输入这么久之后才写，默认 5，最小 3。", "Only the note you are editing is updated, this long after you stop typing. Default 5, minimum 3."),
             render: (setting) =>
               setting.addText((t) =>
                 t.setPlaceholder("5").setValue(String(st.wordPropIdleSec)).onChange(async (v) => {
@@ -438,8 +464,8 @@ export class DashboardSettingTab extends PluginSettingTab {
               ),
           },
           {
-            name: "不写入超大笔记",
-            desc: "字数超过上面“超大笔记阈值”的笔记不写入（多为自动采集的文件，改写它们既慢又没意义）。",
+            name: L("不写入超大笔记", "Skip oversized notes"),
+            desc: L("字数超过上面“超大笔记阈值”的笔记不写入（多为自动采集的文件，改写它们既慢又没意义）。", "Notes over the oversized note threshold above are not written (they are usually collected files, and rewriting them is slow and pointless)."),
             render: (setting) =>
               setting.addToggle((t) =>
                 t.setValue(st.wordPropSkipOutliers).onChange(async (v) => {
@@ -449,8 +475,8 @@ export class DashboardSettingTab extends PluginSettingTab {
               ),
           },
           {
-            name: "只写入这些文件夹",
-            desc: "留空表示整个仓库。每行一个，或用逗号分隔，含子文件夹。",
+            name: L("只写入这些文件夹", "Only these folders"),
+            desc: L("留空表示整个仓库。每行一个，或用逗号分隔，含子文件夹。", "Leave empty for the whole vault. One per line or comma-separated, subfolders included."),
             render: (setting) =>
               setting.addTextArea((t) => {
                 t.setValue(st.wordPropIncludeFolders)
@@ -462,8 +488,8 @@ export class DashboardSettingTab extends PluginSettingTab {
               }),
           },
           {
-            name: "不写入这些文件夹",
-            desc: "含子文件夹。上面“范围”里设置的排除文件夹也不会写入。只处理 .md 文件。",
+            name: L("不写入这些文件夹", "Skip these folders"),
+            desc: L("含子文件夹。上面“范围”里设置的排除文件夹也不会写入。只处理 .md 文件。", "Subfolders included. Folders excluded under Scope are skipped too. Only .md files are written."),
             render: (setting) =>
               setting.addTextArea((t) => {
                 t.setValue(st.wordPropExcludeFolders)
@@ -475,22 +501,22 @@ export class DashboardSettingTab extends PluginSettingTab {
               }),
           },
           {
-            name: "批量更新所有笔记",
-            desc: "先统计会改动多少篇并让你确认，再分批写入。没有变化的笔记不会被碰。",
+            name: L("批量更新所有笔记", "Update all notes"),
+            desc: L("先统计会改动多少篇并让你确认，再分批写入。没有变化的笔记不会被碰。", "First counts how many notes would change and asks you to confirm, then writes in batches. Notes that are already up to date are not touched."),
             render: (setting) =>
               setting.addButton((b) =>
-                b.setButtonText("批量更新").onClick(() => {
+                b.setButtonText(L("批量更新", "Update all")).onClick(() => {
                   void this.plugin.wordProps.batchUpdate();
                 })
               ),
           },
           {
-            name: "移除所有字数属性",
-            desc: "从所有笔记里删掉上面设置的属性名（字数，以及开启时的阅读时长）。如果你自己也用了同名属性，也会被删掉，确认前会显示数量。",
+            name: L("移除所有字数属性", "Remove all word count properties"),
+            desc: L("从所有笔记里删掉上面设置的属性名（字数，以及开启时的阅读时长）。如果你自己也用了同名属性，也会被删掉，确认前会显示数量。", "Deletes the properties named above (word count, and reading time if on) from every note. A property of yours with the same name is deleted too; you see the count before confirming."),
             render: (setting) =>
               setting.addButton((b) => {
                 b.buttonEl.addClass("mod-warning");
-                b.setButtonText("移除").onClick(() => {
+                b.setButtonText(L("移除", "Remove")).onClick(() => {
                   void this.plugin.wordProps.removeAll();
                 });
               }),
@@ -498,11 +524,11 @@ export class DashboardSettingTab extends PluginSettingTab {
         ],
       },
       {
-        heading: "重复内容清理",
+        heading: L("重复内容清理", "Duplicate cleanup"),
         rows: [
           {
-            name: "启用重复内容清理",
-            desc: "找出在多篇笔记里重复出现的段落（比如反复剪藏的文章、每天自动生成的报告），先预览再处理，随时可撤销。关闭后隐藏侧边栏图标、命令和看板入口。",
+            name: L("启用重复内容清理", "Enable duplicate cleanup"),
+            desc: L("找出在多篇笔记里重复出现的段落（比如反复剪藏的文章、每天自动生成的报告），先预览再处理，随时可撤销。关闭后隐藏侧边栏图标、命令和看板入口。", "Finds passages repeated across several notes (such as an article clipped many times or reports generated every day). You preview before anything changes and can undo any time. Turning it off hides the ribbon icon, commands and the dashboard entry."),
             render: (setting) =>
               setting.addToggle((tg) =>
                 tg.setValue(st.dedupeEnabled).onChange(async (v) => {
@@ -514,8 +540,8 @@ export class DashboardSettingTab extends PluginSettingTab {
               ),
           },
           {
-            name: "在库体检里显示重复内容",
-            desc: "看板“库体检”卡里的“重复内容”一栏。",
+            name: L("在库体检里显示重复内容", "Show duplicates in vault checkup"),
+            desc: L("看板“库体检”卡里的“重复内容”一栏。", "The Duplicates column on the dashboard's Vault checkup card."),
             render: (setting) =>
               setting.addToggle((tg) =>
                 tg.setValue(st.dedupeCard).onChange(async (v) => {
@@ -529,26 +555,26 @@ export class DashboardSettingTab extends PluginSettingTab {
       },
       ...dedupeSections(this.plugin.dedupe),
       {
-        heading: "数据",
+        heading: L("数据", "Data"),
         rows: [
           {
-            name: "重置每日新增字数记录",
-            desc: "清除已累积的每日新增字数，并从今天重新开始记录。",
+            name: L("重置每日新增字数记录", "Reset daily word log"),
+            desc: L("清除已累积的每日新增字数，并从今天重新开始记录。", "Clears the recorded daily additions and starts recording again from today."),
             render: (setting) =>
               setting.addButton((b) => {
                 // 与旧版 setWarning() 效果相同（它只是加上 mod-warning 样式类）；setDestructive 要求 Obsidian 1.13+
                 b.buttonEl.addClass("mod-warning");
-                b.setButtonText("重置").onClick(async () => {
+                b.setButtonText(L("重置", "Reset")).onClick(async () => {
                   await this.plugin.resetLog();
                 });
               }),
           },
           {
-            name: "恢复所有提示",
-            desc: "重新显示看板上被你“忽略”的建议和首次使用说明。",
+            name: L("恢复所有提示", "Restore all tips"),
+            desc: L("重新显示看板上被你“忽略”的建议和首次使用说明。", "Shows the dashboard suggestions you dismissed and the getting-started tip again."),
             render: (setting) =>
               setting.addButton((b) =>
-                b.setButtonText("恢复").onClick(async () => {
+                b.setButtonText(L("恢复", "Restore")).onClick(async () => {
                   st.dismissedHints = [];
                   st.onboarded = false;
                   await save();
@@ -577,6 +603,13 @@ export class DashboardSettingTab extends PluginSettingTab {
     }));
   }
 
+  /** 换语言后重画设置页：1.13+ 先让 Obsidian 重新读取设置定义（也用于设置搜索），再重画 */
+  private redraw() {
+    const tab = this as unknown as { update?: () => void };
+    if (typeof tab.update === "function") tab.update();
+    this.display();
+  }
+
   /** 1.13 以前的 Obsidian 用这个方法渲染；1.13+ 在 getSettingDefinitions 非空时不会调用它 */
   display(): void {
     const { containerEl } = this;
@@ -602,4 +635,14 @@ export function migrateWritingSettings(settings: DashboardSettings): void {
   settings.reportWeekExpanded = settings.reportWeekExpanded === true || settings.reportMonthExpanded === true;
   delete settings.reportMonthExpanded;
   if (settings.weekStyle !== "dots" && settings.weekStyle !== "bars") settings.weekStyle = DEFAULT_SETTINGS.weekStyle;
+}
+
+/**
+ * 1.6.0 加入英文界面。之前只有中文，老用户已经习惯中文；很多中文用户的 Obsidian 界面却是英文，
+ * 直接“跟随 Obsidian”会让他们升级后突然看到英文。所以有旧设置的用户迁移为中文，新安装才默认跟随。
+ */
+export function migrateLanguage(settings: DashboardSettings, hadSettings: boolean, savedVersion: number): void {
+  if (hadSettings && savedVersion < 4) settings.language = "zh";
+  if (settings.language !== "auto" && settings.language !== "zh" && settings.language !== "en") settings.language = "auto";
+  setLanguage(settings.language);
 }

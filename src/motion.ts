@@ -1,5 +1,5 @@
 /* 看板动效：只在首次打开、用户操作和数值真的变化时播放；系统“减弱动态效果”或设置里关掉时全部跳过 */
-import { fmtParts } from "./charts";
+import { splitNum } from "./charts";
 
 /** 与 styles.css 里的 --vp-t-* 令牌保持一致（JS 动画读不到 CSS 变量的毫秒值） */
 export const MOTION = {
@@ -35,13 +35,12 @@ export function countUp(el: HTMLElement, from: number, to: number, unit = "", du
   const win = el.ownerDocument.defaultView;
   if (!win) return;
   const paint = (v: number) => {
-    const p = fmtParts(v);
+    const p = splitNum(v, unit);
     const valueEl = el.querySelector(".vp-num-value");
-    if (valueEl) valueEl.textContent = p.num;
-    const u = (p.unit || "") + unit;
+    if (valueEl) valueEl.textContent = p.value;
     let unitEl = el.querySelector(".vp-num-unit");
-    if (u && !unitEl) unitEl = el.createSpan({ cls: "vp-num-unit" });
-    if (unitEl) unitEl.textContent = u;
+    if (p.unit && !unitEl) unitEl = el.createSpan({ cls: "vp-num-unit" });
+    if (unitEl) unitEl.textContent = p.unit;
   };
   const start = win.performance.now() + delay;
   const frame = (now: number) => {

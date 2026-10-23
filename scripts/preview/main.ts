@@ -3,6 +3,7 @@ import "./obsidian-dom";
 import { TFile } from "obsidian";
 import { DashboardView } from "../../src/view";
 import { DEFAULT_SETTINGS } from "../../src/settings";
+import { setLanguage } from "../../src/i18n";
 import { addDays, dayKey, startOfDay } from "../../src/stats";
 import type { FileStat, TaskInfo, VaultStats } from "../../src/stats";
 
@@ -37,6 +38,7 @@ for (let i = 370; i >= 0; i--) {
   if (rnd() < 0.2 + r * 0.55) dayWords[dayKey(d)] = Math.round(rnd() * 2600 * (0.35 + r));
   if (rnd() < 0.35) dayCreated[dayKey(d)] = 1 + Math.floor(rnd() * 3);
 }
+// ?lang=en：英文界面
 // 本周：一 1320、二 2050、三 380、四 1730、五 1700、六（今天）640
 const wk = [1320, 2050, 380, 1730, 1700, 640];
 wk.forEach((v, i) => (dayWords[dayKey(addDays(today, -5 + i))] = v));
@@ -78,7 +80,9 @@ const stats: VaultStats = {
   folders: [{ folder: "工作", notes: 505, words: 1_200_000 }, { folder: "读书", notes: 252, words: 800_000 }],
 };
 
-const settings = { ...DEFAULT_SETTINGS, dailyWordGoal: 500, weeklyWordGoal: 10000, onboarded: true, weekStyle: (q.get("week") === "bars" ? "bars" : "dots") as "dots" | "bars" };
+const lang = (q.get("lang") === "en" ? "en" : "zh") as "en" | "zh";
+setLanguage(lang);
+const settings = { ...DEFAULT_SETTINGS, language: lang, dailyWordGoal: 500, weeklyWordGoal: 10000, onboarded: true, weekStyle: (q.get("week") === "bars" ? "bars" : "dots") as "dots" | "bars" };
 const dedupe = {
   scanning: false, stale: false, analysis: null as unknown, ignoredSet: () => new Set<string>(),
   openReport: async () => undefined, startCleanup: () => undefined,

@@ -4,7 +4,7 @@
 
 Note Pulse is an [Obsidian](https://obsidian.md) plugin that opens a dashboard of your vault in one view: today's writing and streak, note and word count trends, a writing heatmap, task completion, and tag, folder and link stats.
 
-The UI is in Chinese. It follows your light or dark theme, has no external dependencies (all charts are plain SVG), and works on desktop and mobile.
+The UI is in English and Chinese and follows Obsidian's language (you can pick one in settings). It follows your light or dark theme, has no external dependencies (all charts are plain SVG), and works on desktop and mobile.
 
 ![Note Pulse, dark theme](docs/preview-dark.png)
 
@@ -159,7 +159,7 @@ Advanced options (what counts as a passage, which copy to keep, link style, prop
 - The cumulative word trend assigns each note's current word count to its creation date. It is not a historical snapshot.
 - "Added words" only counts increases: rewriting a paragraph to the same length adds nothing, and deleting text does not subtract.
 - The "links" figure counts links between notes, not image or file embeds.
-- The UI is Chinese only for now.
+- Ribbon tooltips and command names switch language only after restarting Obsidian. People who used Note Pulse before 1.6.0 stay on Chinese after updating; change it under Settings → Refresh and behavior → Language.
 - Dates use your local time zone.
 - Clicking a tag needs the core **Search** plugin enabled.
 - The plugin reads your notes locally only. It makes no network requests and collects no data.
@@ -293,7 +293,7 @@ First release.
 
 Note Pulse（笔记脉搏）是一个 Obsidian 插件，在一个页面里集中展示你仓库的各项数据：今日写作与连续打卡、笔记与字数趋势、写作热力图、任务完成情况，以及标签、文件夹和链接统计。
 
-界面为中文，自动适配明暗主题，没有任何外部依赖（图表均为原生 SVG），桌面端和移动端都能用。
+界面有中文和英文，默认跟随 Obsidian 的界面语言，也可以在设置里指定；自动适配明暗主题，没有任何外部依赖（图表均为原生 SVG），桌面端和移动端都能用。
 
 ### 功能
 
@@ -414,7 +414,7 @@ views:
 - 累计字数趋势是把每篇笔记“当前”字数计入其创建日期，并非历史快照。
 - “新增字数”只统计增加：把一段话改写成同样长度不会增加，删除文字也不会扣减。
 - “链接”统计的是笔记之间的链接，不含图片和文件嵌入。
-- 目前界面只有中文。
+- 侧边栏图标的提示和命令名称要重启 Obsidian 后才会换语言。1.6.0 之前就在用的用户升级后保持中文，可以在设置 → 刷新与行为 → 界面语言里改。
 - 日期使用本机时区。点击标签需要启用核心插件「搜索」。
 - 插件只在本地读取笔记，不联网，不收集任何数据。
 

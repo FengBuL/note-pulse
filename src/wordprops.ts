@@ -1,6 +1,7 @@
 import { App, ButtonComponent, Modal, Notice, Setting, TFile, TAbstractFile, getFrontMatterInfo, parseYaml } from "obsidian";
 import type NotePulsePlugin from "./main";
 import { normalizeFolder, splitList } from "./settings";
+import { L, plural } from "./i18n";
 import {
   Computed,
   RECENT_MS,
@@ -28,10 +29,11 @@ function readFrontmatter(text: string): Frontmatter | null | undefined {
   }
 }
 
-const PREFIX = "Note Pulse：";
+const prefix = () => L("Note Pulse：", "Note Pulse: ");
 function notify(text: string, ms?: number): Notice {
-  return new Notice(PREFIX + text, ms);
+  return new Notice(prefix() + text, ms);
 }
+const n_ = (n: number) => plural(n, "note");
 
 const sleep = (ms: number) => new Promise<void>((r) => window.setTimeout(r, ms));
 
@@ -66,7 +68,7 @@ class ActionModal extends Modal {
             this.onOk();
           });
       })
-      .addButton((b) => b.setButtonText("取消").onClick(() => this.close()));
+      .addButton((b) => b.setButtonText(L("取消", "Cancel")).onClick(() => this.close()));
   }
 
   onClose() {
@@ -257,33 +259,34 @@ export class WordPropsService {
   async updateCurrent() {
     const file = this.app.workspace.getActiveFile();
     if (!file || file.extension !== "md") {
-      notify("请先打开一篇 Markdown 笔记");
+      notify(L("请先打开一篇 Markdown 笔记", "Open a Markdown note first"));
       return;
     }
     const o = this.options();
     const r = await this.updateFile(file, o);
-    const name = `「${o.property}」`;
     switch (r.kind) {
-      case "written":
-        notify(`已写入 ${o.property} = ${r.words}${r.minutes != null ? `，${o.readingProperty} = ${r.minutes}` : ""}`);
+      case "written": {
+        const reading = r.minutes != null ? `${L("，", ", ")}${o.readingProperty} = ${r.minutes}` : "";
+        notify(L(`已写入 ${o.property} = ${r.words}${reading}`, `Wrote ${o.property} = ${r.words}${reading}`));
         break;
+      }
       case "unchanged":
-        notify(`${name}已经是最新（${r.words}），没有改动文件`);
+        notify(L(`「${o.property}」已经是最新（${r.words}），没有改动文件`, `${o.property} is already up to date (${r.words}); the file was not changed`));
         break;
       case "empty":
-        notify("笔记还没有内容，没有写入");
+        notify(L("笔记还没有内容，没有写入", "The note is empty; nothing was written"));
         break;
       case "outlier":
-        notify(`这篇笔记超过超大笔记阈值（${o.outlierWords} 字），按设置不写入`);
+        notify(L(`这篇笔记超过超大笔记阈值（${o.outlierWords} 字），按设置不写入`, `This note is over the oversized note threshold (${o.outlierWords} words), so it is skipped`));
         break;
       case "skipped":
-        notify("这篇笔记在不写入的文件夹里（或不在“只写入”的文件夹里）");
+        notify(L("这篇笔记在不写入的文件夹里（或不在“只写入”的文件夹里）", "This note is in a skipped folder (or outside the \"only these folders\" list)"));
         break;
       case "recent":
-        notify("这篇笔记刚刚被修改过，过几秒再试");
+        notify(L("这篇笔记刚刚被修改过，过几秒再试", "This note was just changed. Try again in a few seconds"));
         break;
       default:
-        notify("写入失败，可能是属性区的 YAML 有错误");
+        notify(L("写入失败，可能是属性区的 YAML 有错误", "Could not write. The note's YAML properties may contain an error"));
     }
   }
 
@@ -327,35 +330,44 @@ export class WordPropsService {
 
   async batchUpdate() {
     if (this.busy) {
-      notify("已有批量任务在进行");
+      notify(L("已有批量任务在进行", "A batch update is already running"));
       return;
     }
     const o = this.options();
     let plan: Plan | null = null;
-    const modal = new ActionModal(this.app, "批量更新字数属性", "开始更新", () => {
+    const modal = new ActionModal(this.app, L("批量更新字数属性", "Update word count property"), L("开始更新", "Update"), () => {
       if (plan) void this.applyPlan(plan, o);
     });
     modal.open();
-    modal.setLines(["正在统计，不会修改任何文件…"]);
-    plan = await this.buildPlan(o, (d, t) => modal.setLines([`正在统计，不会修改任何文件… ${d} / ${t}`]), () => modal.closed);
+    const counting = L("正在统计，不会修改任何文件…", "Counting. No files are changed yet…");
+    modal.setLines([counting]);
+    plan = await this.buildPlan(o, (d, t) => modal.setLines([`${counting} ${d} / ${t}`]), () => modal.closed);
     if (!plan || modal.closed) return;
 
-    const names = o.readingEnabled ? `「${o.property}」和「${o.readingProperty}」` : `「${o.property}」`;
+    const names = o.readingEnabled
+      ? L(`「${o.property}」和「${o.readingProperty}」`, `${o.property} and ${o.readingProperty}`)
+      : L(`「${o.property}」`, o.property);
+    const p = plan;
     const lines = [
-      plan.items.length > 0
-        ? `共检查 ${plan.scanned} 篇笔记，将更新 ${plan.items.length} 篇的${names}属性。`
-        : `共检查 ${plan.scanned} 篇笔记，没有需要更新的。`,
-      `已经是最新、不会被改动：${plan.unchanged} 篇。`,
+      p.items.length > 0
+        ? L(`共检查 ${p.scanned} 篇笔记，将更新 ${p.items.length} 篇的${names}属性。`, `Checked ${p.scanned} ${n_(p.scanned)}. ${names} will be updated in ${p.items.length} ${n_(p.items.length)}.`)
+        : L(`共检查 ${p.scanned} 篇笔记，没有需要更新的。`, `Checked ${p.scanned} ${n_(p.scanned)}. Nothing needs updating.`),
+      L(`已经是最新、不会被改动：${p.unchanged} 篇。`, `Already up to date and left alone: ${p.unchanged}.`),
     ];
     const skipped: string[] = [];
-    if (plan.outOfScope) skipped.push(`不在写入范围内 ${plan.outOfScope} 篇`);
-    if (plan.outlier) skipped.push(`超大笔记 ${plan.outlier} 篇`);
-    if (plan.recent) skipped.push(`刚被修改过 ${plan.recent} 篇`);
-    if (plan.empty) skipped.push(`空笔记 ${plan.empty} 篇`);
-    if (plan.error) skipped.push(`属性区无法解析 ${plan.error} 篇`);
-    if (skipped.length) lines.push(`跳过：${skipped.join("，")}。`);
-    if (plan.items.length > 0) {
-      lines.push("写入时 Obsidian 会重新整理这些笔记的属性区：没有属性区的笔记会新增一个，YAML 里的注释可能丢失。如果你的仓库在 iCloud 等同步盘里，改动的文件会被同步。建议先备份。");
+    if (p.outOfScope) skipped.push(L(`不在写入范围内 ${p.outOfScope} 篇`, `${p.outOfScope} outside the folders to write`));
+    if (p.outlier) skipped.push(L(`超大笔记 ${p.outlier} 篇`, `${p.outlier} oversized`));
+    if (p.recent) skipped.push(L(`刚被修改过 ${p.recent} 篇`, `${p.recent} just changed`));
+    if (p.empty) skipped.push(L(`空笔记 ${p.empty} 篇`, `${p.empty} empty`));
+    if (p.error) skipped.push(L(`属性区无法解析 ${p.error} 篇`, `${p.error} with unreadable properties`));
+    if (skipped.length) lines.push(L(`跳过：${skipped.join("，")}。`, `Skipped: ${skipped.join(", ")}.`));
+    if (p.items.length > 0) {
+      lines.push(
+        L(
+          "写入时 Obsidian 会重新整理这些笔记的属性区：没有属性区的笔记会新增一个，YAML 里的注释可能丢失。如果你的仓库在 iCloud 等同步盘里，改动的文件会被同步。建议先备份。",
+          "Obsidian reformats the properties of these notes when writing: notes without properties get them, and YAML comments may be lost. If your vault is in iCloud or another synced folder, the changed files will sync. Back up first."
+        )
+      );
     }
     modal.setLines(lines);
     modal.setReady(plan.items.length > 0);
@@ -365,7 +377,8 @@ export class WordPropsService {
     if (this.busy) return;
     this.busy = true;
     const total = plan.items.length;
-    const notice = notify(`正在更新字数属性 0 / ${total}`, 0);
+    const progress = (i: number) => L(`正在更新字数属性 ${i} / ${total}`, `Updating word count property ${i} / ${total}`);
+    const notice = notify(progress(0), 0);
     const res = { written: 0, unchanged: 0, recent: 0, error: 0 };
     try {
       for (let i = 0; i < total; i++) {
@@ -378,7 +391,7 @@ export class WordPropsService {
         else if (r.kind === "error") res.error++;
         else res.unchanged++;
         if ((i + 1) % BATCH === 0 || i === total - 1) {
-          notice.setMessage(PREFIX + `正在更新字数属性 ${i + 1} / ${total}`);
+          notice.setMessage(prefix() + progress(i + 1));
           await sleep(50); // 分批写，给同步盘和界面留出喘息
         }
       }
@@ -386,8 +399,18 @@ export class WordPropsService {
       notice.hide();
       this.busy = false;
     }
-    const extra = [res.unchanged ? `${res.unchanged} 篇已是最新` : "", res.recent ? `${res.recent} 篇刚被修改，已跳过` : "", res.error ? `${res.error} 篇失败` : ""].filter(Boolean);
-    notify(`已更新 ${res.written} 篇${extra.length ? "（" + extra.join("，") + "）" : ""}`, 8000);
+    const extra = [
+      res.unchanged ? L(`${res.unchanged} 篇已是最新`, `${res.unchanged} already up to date`) : "",
+      res.recent ? L(`${res.recent} 篇刚被修改，已跳过`, `${res.recent} just changed, skipped`) : "",
+      res.error ? L(`${res.error} 篇失败`, `${res.error} failed`) : "",
+    ].filter(Boolean);
+    notify(
+      L(
+        `已更新 ${res.written} 篇${extra.length ? "（" + extra.join("，") + "）" : ""}`,
+        `Updated ${res.written} ${n_(res.written)}${extra.length ? " (" + extra.join(", ") + ")" : ""}`
+      ),
+      8000
+    );
     void this.plugin.requestRefresh(false);
   }
 
@@ -395,7 +418,7 @@ export class WordPropsService {
 
   async removeAll() {
     if (this.busy) {
-      notify("已有批量任务在进行");
+      notify(L("已有批量任务在进行", "A batch update is already running"));
       return;
     }
     const o = this.options();
@@ -405,11 +428,11 @@ export class WordPropsService {
       const fm = this.app.metadataCache.getFileCache(f)?.frontmatter;
       if (fm && names.some((n) => Object.prototype.hasOwnProperty.call(fm, n))) items.push(f);
     }
-    const label = names.map((n) => `「${n}」`).join("和");
+    const label = L(names.map((n) => `「${n}」`).join("和"), names.join(" and "));
     const modal = new ActionModal(
       this.app,
-      "移除字数属性",
-      "移除",
+      L("移除字数属性", "Remove word count properties"),
+      L("移除", "Remove"),
       () => void this.applyRemove(items, names),
       true
     );
@@ -417,11 +440,14 @@ export class WordPropsService {
     modal.setLines(
       items.length > 0
         ? [
-            `将从 ${items.length} 篇笔记中删除属性 ${label}。`,
-            "按属性名删除：如果你自己也用了同名属性，它也会被删掉。",
-            "写入时 Obsidian 会重新整理这些笔记的属性区，YAML 里的注释可能丢失。此操作无法撤销，建议先备份。",
+            L(`将从 ${items.length} 篇笔记中删除属性 ${label}。`, `${label} will be deleted from ${items.length} ${n_(items.length)}.`),
+            L("按属性名删除：如果你自己也用了同名属性，它也会被删掉。", "Properties are deleted by name: a property of yours with the same name is deleted too."),
+            L(
+              "写入时 Obsidian 会重新整理这些笔记的属性区，YAML 里的注释可能丢失。此操作无法撤销，建议先备份。",
+              "Obsidian reformats the properties of these notes when writing, and YAML comments may be lost. This cannot be undone. Back up first."
+            ),
           ]
-        : [`没有笔记含有属性 ${label}，无需移除。`]
+        : [L(`没有笔记含有属性 ${label}，无需移除。`, `No note has ${label}. Nothing to remove.`)]
     );
     modal.setReady(items.length > 0);
   }
@@ -429,7 +455,8 @@ export class WordPropsService {
   private async applyRemove(files: TFile[], names: string[]) {
     if (this.busy) return;
     this.busy = true;
-    const notice = notify(`正在移除字数属性 0 / ${files.length}`, 0);
+    const progress = (i: number) => L(`正在移除字数属性 ${i} / ${files.length}`, `Removing word count properties ${i} / ${files.length}`);
+    const notice = notify(progress(0), 0);
     let removed = 0;
     let skipped = 0;
     let failed = 0;
@@ -455,7 +482,7 @@ export class WordPropsService {
           window.setTimeout(() => this.inflight.delete(f.path), 1000);
         }
         if ((i + 1) % BATCH === 0 || i === files.length - 1) {
-          notice.setMessage(PREFIX + `正在移除字数属性 ${i + 1} / ${files.length}`);
+          notice.setMessage(prefix() + progress(i + 1));
           await sleep(50);
         }
       }
@@ -464,7 +491,10 @@ export class WordPropsService {
       this.busy = false;
     }
     notify(
-      `已从 ${removed} 篇笔记移除字数属性${skipped ? `，${skipped} 篇刚被修改已跳过` : ""}${failed ? `，${failed} 篇失败` : ""}`,
+      L(
+        `已从 ${removed} 篇笔记移除字数属性${skipped ? `，${skipped} 篇刚被修改已跳过` : ""}${failed ? `，${failed} 篇失败` : ""}`,
+        `Removed word count properties from ${removed} ${n_(removed)}${skipped ? `, ${skipped} just changed and skipped` : ""}${failed ? `, ${failed} failed` : ""}`
+      ),
       8000
     );
   }

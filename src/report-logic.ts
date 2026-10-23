@@ -1,6 +1,7 @@
 import type { DashboardSettings } from "./settings";
 import { addDays, dayKey, isCheckinDay, startOfDay } from "./stats";
 import type { FileStat, VaultStats } from "./stats";
+import { L, weekdayName } from "./i18n";
 
 export type ReportKind = "week" | "month";
 export interface ReportPeriod {
@@ -58,9 +59,9 @@ export function summarizePeriod(stats: VaultStats, settings: DashboardSettings, 
 const number = (value: number) => value.toLocaleString("en-US");
 
 function change(current: number, previous: number): string {
-  if (previous === 0) return "上期无记录";
+  if (previous === 0) return L("上期无记录", "no data last period");
   const delta = current - previous;
-  return delta === 0 ? "持平 0%" : `${delta > 0 ? "↑" : "↓"} ${number(Math.round(Math.abs(delta) / previous * 100))}%`;
+  return delta === 0 ? L("持平 0%", "flat 0%") : `${delta > 0 ? "↑" : "↓"} ${number(Math.round(Math.abs(delta) / previous * 100))}%`;
 }
 
 export interface ReportOverviewMetric {
@@ -83,11 +84,17 @@ export function writingReportOverview(stats: VaultStats, settings: DashboardSett
     trend: prev[id] === 0 || current[id] === prev[id] ? "neutral" : current[id] > prev[id] ? "up" : "down",
   });
   const metrics: ReportOverviewMetric[] = [
-    compared("words", "总字数", "字"),
-    compared("checkins", "打卡", "天"),
-    compared("created", "新建笔记", "篇"),
-    { id: "dailyAverage", label: "日均字数", value: number(current.dailyAverage), unit: "字", detail: `按已过 ${number(current.elapsedDays)} 天计算`, trend: "neutral" },
-    { id: "bestDay", label: "写得最多的一天", value: current.bestDay?.date ?? "暂无记录", unit: "", detail: `${number(current.bestDay?.words ?? 0)} 字`, trend: "neutral" },
+    compared("words", L("总字数", "Words"), L("字", "words")),
+    compared("checkins", L("打卡", "Streak days"), L("天", "days")),
+    compared("created", L("新建笔记", "New notes"), L("篇", "notes")),
+    {
+      id: "dailyAverage", label: L("日均字数", "Daily average"), value: number(current.dailyAverage), unit: L("字", "words"),
+      detail: L(`按已过 ${number(current.elapsedDays)} 天计算`, `over ${number(current.elapsedDays)} days so far`), trend: "neutral",
+    },
+    {
+      id: "bestDay", label: L("写得最多的一天", "Best day"), value: current.bestDay?.date ?? L("暂无记录", "none yet"), unit: "",
+      detail: L(`${number(current.bestDay?.words ?? 0)} 字`, `${number(current.bestDay?.words ?? 0)} words`), trend: "neutral",
+    },
   ];
   return { period, previous, current, metrics };
 }
@@ -125,13 +132,13 @@ function dailyRhythm(stats: VaultStats, settings: DashboardSettings, kind: Repor
   const lastDay = dayKey(stats.generatedAt);
   const checked = (day: Date) => isCheckinDay(stats, settings.dailyWordGoal, dayKey(day));
   const symbol = (day: Date) => dayKey(day) > lastDay ? "·" : checked(day) ? "■" : "□";
-  const label = (day: Date) => `${dayKey(day).slice(5)} 周${"日一二三四五六"[day.getDay()]}`;
-  const lines = ["## 每日节奏", "", "■ 已打卡\u3000□ 未打卡\u3000· 未到日期", ""];
+  const label = (day: Date) => `${dayKey(day).slice(5)} ${weekdayName(day.getDay())}`;
+  const lines = [L("## 每日节奏", "## Daily rhythm"), "", L("■ 已打卡\u3000□ 未打卡\u3000· 未到日期", "■ streak day · □ missed · · not yet"), ""];
   if (kind === "week") {
-    lines.push(`周一 → 周日\u3000${days.map(symbol).join("")}`, "");
+    lines.push(`${L("周一 → 周日\u3000", "Mon → Sun  ")}${days.map(symbol).join("")}`, "");
   }
   // 两种报告都保留逐日字数；月报以紧凑三列表格避免手机横向拥挤。
-  lines.push("| 日期 | 字数 | 打卡 |", "| :--- | ---: | :---: |");
+  lines.push(L("| 日期 | 字数 | 打卡 |", "| Date | Words | Streak |"), "| :--- | ---: | :---: |");
   for (const day of days) {
     const future = dayKey(day) > lastDay;
     lines.push(`| ${label(day)} | ${future ? "—" : number(stats.dayWords[dayKey(day)] || 0)} | ${symbol(day)} |`);
@@ -141,11 +148,11 @@ function dailyRhythm(stats: VaultStats, settings: DashboardSettings, kind: Repor
 
 export function buildWritingReport(stats: VaultStats, settings: DashboardSettings, kind: ReportKind, offset: number, includeNotes: boolean) {
   const { period, previous, current, metrics } = writingReportOverview(stats, settings, kind, offset);
-  const type = kind === "week" ? "写作周报" : "写作月报";
+  const type = kind === "week" ? L("写作周报", "Weekly writing report") : L("写作月报", "Monthly writing report");
   const start = dayKey(period.start);
   const end = dayKey(addDays(period.end, -1));
   // 文件名沿用原格式，保留同名检测与覆盖逻辑。
-  const title = `${type} ${start} 至 ${end}`;
+  const title = L(`${type} ${start} 至 ${end}`, `${type} ${start} to ${end}`);
   const periodLabel = periodKey(kind, period.start);
   const dateRange = `${start} — ${end}`;
   const lines = [
@@ -155,36 +162,57 @@ export function buildWritingReport(stats: VaultStats, settings: DashboardSetting
     `# ${type} · ${periodLabel}`, "", dateRange, "",
   ];
   if (stats.generatedAt < period.end.getTime()) {
-    lines.push(`> 本期尚未结束，统计截至 ${dayKey(stats.generatedAt)}，对比上一完整周期。`, "");
+    lines.push(
+      L(`> 本期尚未结束，统计截至 ${dayKey(stats.generatedAt)}，对比上一完整周期。`, `> This period is not over yet. Counted up to ${dayKey(stats.generatedAt)} and compared with the previous full period.`),
+      ""
+    );
   }
   lines.push(
-    "> [!summary] 概览",
+    L("> [!summary] 概览", "> [!summary] Overview"),
     metrics.map((metric) => `> **${metric.value}${metric.unit ? ` ${metric.unit}` : ""}** · ${metric.label} · ${metric.detail}`).join("\n>\n"),
     "", ...dailyRhythm(stats, settings, kind, period), "",
-    "## 字数最多的笔记", "",
-    "| 排名 | 笔记 | 字数 |", "| ---: | :--- | ---: |",
+    L("## 字数最多的笔记", "## Longest notes"), "",
+    L("| 排名 | 笔记 | 字数 |", "| Rank | Note | Words |"), "| ---: | :--- | ---: |",
     ...current.topNotes.map((file, index) => `| ${index + 1} | ${noteLink(file)} | ${number(file.words)} |`),
-    ...(current.topNotes.length ? [] : ["| — | 暂无笔记 | — |"]),
-    "", "## 常用标签", "", "| 标签 | 篇数 |", "| :--- | ---: |",
+    ...(current.topNotes.length ? [] : [L("| — | 暂无笔记 | — |", "| — | No notes | — |")]),
+    "", L("## 常用标签", "## Top tags"), "", L("| 标签 | 篇数 |", "| Tag | Notes |"), "| :--- | ---: |",
     ...current.topTags.map(([tag, count]) => `| ${tableText(tag)} | ${number(count)} |`),
-    ...(current.topTags.length ? [] : ["| 暂无标签 | — |"]),
+    ...(current.topTags.length ? [] : [L("| 暂无标签 | — |", "| No tags | — |")]),
   );
   if (includeNotes) {
-    lines.push("", `> [!note]- 修改过的笔记（${number(current.modified.length)} 篇）`,
+    lines.push("", L(`> [!note]- 修改过的笔记（${number(current.modified.length)} 篇）`, `> [!note]- Modified notes (${number(current.modified.length)})`),
       ...current.modified.map((file) => `> - ${noteLink(file)}`));
-    if (!current.modified.length) lines.push("> 暂无。");
+    if (!current.modified.length) lines.push(L("> 暂无。", "> None."));
   }
-  lines.push("", "> [!info]- 统计说明",
-    `> 对比上期：${dayKey(previous.start)} — ${dayKey(addDays(previous.end, -1))}。`,
+  const prevRange = `${dayKey(previous.start)} — ${dayKey(addDays(previous.end, -1))}`;
+  const source = settings.heatmapMode === "mtime"
+    ? L("> 字数按最后修改日计入笔记全文；修改旧笔记会改变过去结果。", "> Each note's full word count goes to its last-modified day, so editing an old note changes past results.")
+    : settings.heatmapMode === "delta"
+      ? L("> 字数为启用记录后每天保存的新增字数；空白日期不代表没有写作。", "> Words are the daily additions recorded since logging started; a blank day does not mean nothing was written.")
+      : L(
+        `> 字数优先使用每日新增记录${stats.estimatedBefore ? `，${stats.estimatedBefore} 之前按最后修改日估算` : ""}。`,
+        `> Words come from the recorded daily additions${stats.estimatedBefore ? `; before ${stats.estimatedBefore} they are estimated from last-modified dates` : ""}.`
+      );
+  lines.push("", L("> [!info]- 统计说明", "> [!info]- How this is counted"),
+    L(`> 对比上期：${prevRange}。`, `> Compared with: ${prevRange}.`),
     ">",
-    "> 日均按本期已过的日历天数计算（含统计当天、无写作日）；最佳日只取有字数的日期，并列取较早日期。",
+    L(
+      "> 日均按本期已过的日历天数计算（含统计当天、无写作日）；最佳日只取有字数的日期，并列取较早日期。",
+      "> The daily average is over the calendar days so far in this period, including today and days with no writing. The best day only considers days with words; ties go to the earlier date."
+    ),
     ">",
-    "> 字数、打卡、新建笔记沿用看板设置。排除文件夹不参与；采集文件夹不计写作和新建；超大笔记按设置计入字数，新建数仍保留。",
+    L(
+      "> 字数、打卡、新建笔记沿用看板设置。排除文件夹不参与；采集文件夹不计写作和新建；超大笔记按设置计入字数，新建数仍保留。",
+      "> Words, streak days and new notes follow the dashboard settings. Excluded folders are left out; clipping folders count toward neither writing nor new notes; oversized notes follow the setting for words but still count as new notes."
+    ),
     ">",
-    settings.heatmapMode === "mtime" ? "> 字数按最后修改日计入笔记全文；修改旧笔记会改变过去结果。" : settings.heatmapMode === "delta" ? "> 字数为启用记录后每天保存的新增字数；空白日期不代表没有写作。" : `> 字数优先使用每日新增记录${stats.estimatedBefore ? `，${stats.estimatedBefore} 之前按最后修改日估算` : ""}。`,
-    `> 每日新增从 ${stats.logStartDay || "启用记录之日"} 开始记录，此前没有实测记录。`,
+    source,
+    L(`> 每日新增从 ${stats.logStartDay || "启用记录之日"} 开始记录，此前没有实测记录。`, `> Daily additions are recorded from ${stats.logStartDay || "the day logging started"}; there is no recorded data before that.`),
     ">",
-    "> 达到每日目标或有当天日记即打卡。笔记排行和标签取期间新建或最后修改的笔记，按当前内容统计；修改列表只看最后修改时间，不代表全部编辑历史。这些列表排除采集笔记及设置中排除的超大笔记。",
+    L(
+      "> 达到每日目标或有当天日记即打卡。笔记排行和标签取期间新建或最后修改的笔记，按当前内容统计；修改列表只看最后修改时间，不代表全部编辑历史。这些列表排除采集笔记及设置中排除的超大笔记。",
+      "> A day counts toward the streak when it reaches the daily goal or has a daily note. The note ranking and tags use notes created or last modified in the period, counted by their current content. The modified list only looks at last-modified times, not the full edit history. These lists leave out clipped notes and oversized notes excluded in settings."
+    ),
   );
   return { title, periodLabel, dateRange, markdown: lines.join("\n") + "\n" };
 }

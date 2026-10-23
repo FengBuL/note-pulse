@@ -32,12 +32,24 @@ import {
   drawTrendChart,
   fmtFull,
   fmtNum,
-  fmtParts,
+  splitNum,
   srLabel,
   svgEl,
 } from "./charts";
+import { L, UnitKind, count, fullDate, monthDay, monthShort, plural, unit, weekdayName, weekdayShort } from "./i18n";
 
 let reportDetailsId = 0;
+
+/** 统计里根目录的分组名（stats.ts 生成，作为键使用，不能翻译）；显示时换成当前语言 */
+const ROOT_FOLDER = "(根目录)"; // i18n-skip
+const folderName = (key: string) => (key === ROOT_FOLDER ? L("(根目录)", "(vault root)") : key);
+/** “收起”按钮的文字；moreLink 靠它决定箭头朝上 */
+const COLLAPSE = () => L("收起", "Show less");
+/** "2026-10-24" → 星期几（0 是周日） */
+const dayIndex = (key: string) => {
+  const [y, m, d] = key.split("-").map(Number);
+  return new Date(y, m - 1, d).getDay();
+};
 
 export const VIEW_TYPE_PULSE = "note-pulse-view";
 
@@ -45,7 +57,6 @@ type TaskTab = "due" | "folder";
 type TagTab = "tags" | "folders";
 type LinkTab = "top" | "orphans" | "unresolved";
 
-const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
 
 interface Checkin {
   isActive: (k: string) => boolean;
@@ -125,8 +136,8 @@ export class DashboardView extends ItemView {
 
     const actions = header.createDiv({ cls: "vp-header-actions" });
     this.statusEl = actions.createSpan({ cls: "vp-status" });
-    this.refreshBtn = this.iconButton(actions, "refresh-cw", "刷新数据", () => void this.plugin.requestRefresh(true));
-    this.iconButton(actions, "settings", "看板设置", () => this.plugin.openSettings());
+    this.refreshBtn = this.iconButton(actions, "refresh-cw", L("刷新数据", "Refresh data"), () => void this.plugin.requestRefresh(true));
+    this.iconButton(actions, "settings", L("看板设置", "Dashboard settings"), () => this.plugin.openSettings());
 
     this.bodyEl = shell.createDiv({ cls: "vp-body vp-held-height" });
     // 跨过午夜后，“今天”变了，需要重新统计
@@ -147,7 +158,7 @@ export class DashboardView extends ItemView {
     this.introPlayed = false;
     this.introUntil = 0;
     if (this.plugin.lastStats) this.render(this.plugin.lastStats);
-    else this.showLoading("正在统计…");
+    else this.showLoading(L("正在统计…", "Counting…"));
     void this.plugin.requestRefresh(false);
   }
 
@@ -253,7 +264,7 @@ export class DashboardView extends ItemView {
   private updateSubtitle() {
     const d = new Date();
     const vault = this.app.vault.getName();
-    this.subtitleEl.setText(`${vault} · ${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 星期${WEEKDAYS[d.getDay()]}`);
+    this.subtitleEl.setText(L(`${vault} · ${fullDate(d)} 星期${weekdayShort(d.getDay())}`, `${vault} · ${weekdayShort(d.getDay())}, ${fullDate(d)}`));
   }
 
   private iconButton(parent: HTMLElement, icon: string, label: string, onClick: () => void): HTMLElement {
@@ -275,7 +286,7 @@ export class DashboardView extends ItemView {
   }
 
   setProgress(done: number, total: number) {
-    const msg = `正在读取笔记 ${done}/${total}`;
+    const msg = L(`正在读取笔记 ${done}/${total}`, `Reading notes ${done}/${total}`);
     this.statusEl.setText(msg);
     if (!this.plugin.lastStats) {
       const t = this.bodyEl.querySelector(".vp-loading-text");
@@ -285,12 +296,12 @@ export class DashboardView extends ItemView {
 
   showError() {
     this.refreshBtn?.removeClass("is-spinning");
-    this.statusEl.setText("统计失败");
+    this.statusEl.setText(L("统计失败", "Counting failed"));
     if (this.plugin.lastStats) return;
     this.bodyEl.empty();
     const e = this.bodyEl.createDiv({ cls: "vp-card vp-fullempty", attr: { role: "alert" } });
-    this.empty(e, "alert-triangle", "统计时出错了，详情见开发者控制台");
-    const b = e.createEl("button", { cls: "vp-btn", text: "重试" });
+    this.empty(e, "alert-triangle", L("统计时出错了，详情见开发者控制台", "Something went wrong while counting. See the developer console for details."));
+    const b = e.createEl("button", { cls: "vp-btn", text: L("重试", "Retry") });
     b.addEventListener("click", () => void this.plugin.requestRefresh(true));
   }
 
@@ -336,8 +347,8 @@ export class DashboardView extends ItemView {
     this.refreshBtn?.removeClass("is-spinning");
     const d = new Date(stats.generatedAt);
     this.renderedDay = dayKey(Date.now());
-    this.statusEl.setText(`更新于 ${pad2(d.getHours())}:${pad2(d.getMinutes())}`);
-    this.statusEl.setAttr("aria-label", `统计耗时 ${stats.durationMs} ms`);
+    this.statusEl.setText(L(`更新于 ${pad2(d.getHours())}:${pad2(d.getMinutes())}`, `Updated ${pad2(d.getHours())}:${pad2(d.getMinutes())}`));
+    this.statusEl.setAttr("aria-label", L(`统计耗时 ${stats.durationMs} ms`, `Counted in ${stats.durationMs} ms`));
     this.updateSubtitle();
 
     const body = this.bodyEl;
@@ -345,8 +356,8 @@ export class DashboardView extends ItemView {
 
     if (stats.totalNotes === 0) {
       const e = body.createDiv({ cls: "vp-card vp-fullempty" });
-      this.empty(e, "files", "没有可统计的笔记。先写一篇笔记，或检查设置里的“排除的文件夹”。");
-      const b = e.createEl("button", { cls: "vp-btn", text: "打开设置" });
+      this.empty(e, "files", L("没有可统计的笔记。先写一篇笔记，或检查设置里的“排除的文件夹”。", "No notes to count yet. Write a note, or check Excluded folders in settings."));
+      const b = e.createEl("button", { cls: "vp-btn", text: L("打开设置", "Open settings") });
       b.addEventListener("click", () => this.plugin.openSettings());
       this.renderReports(body);
       return;
@@ -517,7 +528,7 @@ export class DashboardView extends ItemView {
       attr: { type: "button" },
     });
     // 名称放在隐藏文字里，不用 aria-label：否则 Obsidian 会再弹一个自带的提示
-    srLabel(b, "说明");
+    srLabel(b, L("说明", "About this"));
     setIcon(b, "circle-help");
     if (!b.querySelector("svg")) setIcon(b, "help-circle");
     if (!b.querySelector("svg")) b.setText("?");
@@ -684,7 +695,7 @@ export class DashboardView extends ItemView {
     for (let i = 6; i >= 0; i--) {
       const x = addDays(today, -i);
       const k = dayKey(x);
-      last7.push({ key: k, label: WEEKDAYS[x.getDay()], active: isActive(k), isToday: i === 0 });
+      last7.push({ key: k, label: weekdayShort(x.getDay()), active: isActive(k), isToday: i === 0 });
     }
     return { isActive, todayKey, todayWords: s.dayWords[todayKey] || 0, current, longest, activeDays, diaryMonth, last7 };
   }
@@ -724,32 +735,50 @@ export class DashboardView extends ItemView {
         const m = make(
           h,
           "sparkles",
-          `欢迎使用 Note Pulse：每天写 ${goal > 0 ? fmtFull(goal) : "任意"} 字算打卡。`,
-          `超过 ${thr} 字的超大笔记不计入写作统计。自动采集、网页剪藏之类的文件夹，建议在设置里标记为“采集文件夹”。`
+          L(
+            `欢迎使用 Note Pulse：每天写 ${goal > 0 ? fmtFull(goal) : "任意"} 字算打卡。`,
+            goal > 0 ? `Welcome to Note Pulse: writing ${fmtFull(goal)} words a day keeps your streak.` : "Welcome to Note Pulse: any writing in a day keeps your streak."
+          ),
+          L(
+            `超过 ${thr} 字的超大笔记不计入写作统计。自动采集、网页剪藏之类的文件夹，建议在设置里标记为“采集文件夹”。`,
+            `Oversized notes over ${thr} words are left out of writing stats. Mark folders of web clippings or other collected content as clipping folders in settings.`
+          )
         );
-        m.btn("打开设置", "调整每日目标、采集文件夹、超大笔记阈值等", () => this.plugin.openSettings(), true);
-        m.close("知道了，不再显示");
+        m.btn(L("打开设置", "Open settings"), "", () => this.plugin.openSettings(), true);
+        m.close(L("知道了，不再显示", "Got it, don't show again"));
       } else if (h.kind === "folder" && h.target) {
         const f = h.target;
         const m = make(
           h,
           "lightbulb",
-          `“${f}/” 里${h.count === h.total ? `${h.total} 篇笔记都` : ` ${h.total} 篇有 ${h.count} 篇`}超过 ${thr} 字，像是自动采集的内容。`,
-          "这类笔记会让字数趋势和热力图失真。“不计入写作统计”后，笔记仍计入总数；“完全排除”则整个文件夹不参与任何统计。"
+          L(
+            `“${f}/” 里${h.count === h.total ? `${h.total} 篇笔记都` : ` ${h.total} 篇有 ${h.count} 篇`}超过 ${thr} 字，像是自动采集的内容。`,
+            `${h.count === h.total ? `All ${h.total}` : `${h.count} of ${h.total}`} notes in "${f}/" are over ${thr} words. They look like collected content.`
+          ),
+          L(
+            "这类笔记会让字数趋势和热力图失真。“不计入写作统计”后，笔记仍计入总数；“完全排除”则整个文件夹不参与任何统计。",
+            "Notes like these distort word trends and the heatmap. \"Don't count as writing\" keeps them in the note total; \"Exclude\" leaves the whole folder out of every statistic."
+          )
         );
-        m.btn("不计入写作统计", "笔记仍计入总数，但不计入字数趋势、热力图和打卡", () => void this.plugin.setClippingFolder(f), true);
-        m.btn("完全排除", "整个文件夹不参与任何统计", () => void this.plugin.excludeFolder(f));
-        m.close("忽略，不再提示这个文件夹");
+        m.btn(L("不计入写作统计", "Don't count as writing"), "", () => void this.plugin.setClippingFolder(f), true);
+        m.btn(L("完全排除", "Exclude"), "", () => void this.plugin.excludeFolder(f));
+        m.close(L("忽略，不再提示这个文件夹", "Dismiss for this folder"));
       } else if (h.kind === "spike" && h.target) {
         const [, mm, dd] = h.target.split("-").map(Number);
         const m = make(
           h,
           "calendar-clock",
-          `${h.count} 篇笔记的创建日期都是 ${mm} 月 ${dd} 日（占 ${Math.round(((h.count || 0) / Math.max(1, h.total || 1)) * 100)}%），趋势图会在这天陡升。`,
-          "可能是同步或导入重置了文件创建时间。给笔记加上 created 字段，再在设置里指定它作为创建日期，就能修正。"
+          L(
+            `${h.count} 篇笔记的创建日期都是 ${mm} 月 ${dd} 日（占 ${Math.round(((h.count || 0) / Math.max(1, h.total || 1)) * 100)}%），趋势图会在这天陡升。`,
+            `${h.count} notes (${Math.round(((h.count || 0) / Math.max(1, h.total || 1)) * 100)}%) were all created on ${monthDay(new Date(2000, mm - 1, dd))}, so the trend chart jumps on that day.`
+          ),
+          L(
+            "可能是同步或导入重置了文件创建时间。给笔记加上 created 字段，再在设置里指定它作为创建日期，就能修正。",
+            "Syncing or importing probably reset the file creation times. Add a created property to your notes and choose it as the created date in settings."
+          )
         );
-        m.btn("设置创建日期字段", "在设置里指定用哪个 frontmatter 字段作为创建日期", () => this.plugin.openSettings(), true);
-        m.close("忽略，不再提示这一天");
+        m.btn(L("设置创建日期字段", "Set created date property"), "", () => this.plugin.openSettings(), true);
+        m.close(L("忽略，不再提示这一天", "Dismiss for this day"));
       }
     }
   }
@@ -761,17 +790,26 @@ export class DashboardView extends ItemView {
     const h = headline(s, goal, new Date(s.generatedAt));
     const el = parent.createDiv({ cls: "vp-headline" });
     const lead = el.createDiv({ cls: "vp-headline-lead" });
-    lead.createSpan({ text: "本周已写 " });
+    lead.createSpan({ text: L("本周已写 ", "") });
     lead.createSpan({ cls: "vp-grad-text", text: fmtFull(h.weekWords) });
-    lead.createSpan({ text: " 字" });
-    if (h.changePct !== null && h.changePct !== 0) lead.createSpan({ text: `，比上周同期${h.changePct > 0 ? "多" : "少"} ${Math.abs(h.changePct)}%` });
-    else if (h.changePct === 0) lead.createSpan({ text: "，和上周同期持平" });
-    lead.createSpan({ text: "。" });
+    lead.createSpan({ text: L(" 字", ` ${unit("words", h.weekWords)} this week`) });
+    if (h.changePct !== null && h.changePct !== 0) {
+      const pct = Math.abs(h.changePct);
+      lead.createSpan({ text: L(`，比上周同期${h.changePct > 0 ? "多" : "少"} ${pct}%`, `, ${pct}% ${h.changePct > 0 ? "more" : "less"} than this point last week`) });
+    } else if (h.changePct === 0) lead.createSpan({ text: L("，和上周同期持平", ", the same as this point last week") });
+    lead.createSpan({ text: L("。", ".") });
     const bits: string[] = [];
-    if (ck.current > 0) bits.push(`连续写作第 ${ck.current} 天`);
-    bits.push(h.todayDone ? "今天已达成目标" : goal > 0 ? `今天还差 ${fmtFull(Math.max(0, goal - h.todayWords))} 字` : "今天还没动笔");
-    if (h.dueToday > 0) bits.push(`${h.dueToday} 项任务今天到期`);
-    if (h.overdue > 0) bits.push(`${h.overdue} 项已逾期`);
+    if (ck.current > 0) bits.push(L(`连续写作第 ${ck.current} 天`, `Day ${ck.current} of your streak`));
+    const left = Math.max(0, goal - h.todayWords);
+    bits.push(
+      h.todayDone
+        ? L("今天已达成目标", "Today's goal reached")
+        : goal > 0
+          ? L(`今天还差 ${fmtFull(left)} 字`, `${fmtFull(left)} ${unit("words", left)} to go today`)
+          : L("今天还没动笔", "Nothing written yet today")
+    );
+    if (h.dueToday > 0) bits.push(L(`${h.dueToday} 项任务今天到期`, `${count(h.dueToday, "tasks")} due today`));
+    if (h.overdue > 0) bits.push(L(`${h.overdue} 项已逾期`, `${h.overdue} overdue`));
     el.createDiv({ cls: "vp-headline-sub", text: bits.join(" · ") });
   }
 
@@ -787,14 +825,17 @@ export class DashboardView extends ItemView {
     const head = hero.createDiv({ cls: "vp-card-head" });
     const ht = head.createDiv({ cls: "vp-card-title" });
     setIcon(ht.createSpan({ cls: "vp-card-icon", attr: { "aria-hidden": "true" } }), "pencil");
-    ht.createSpan({ text: "今日写作" });
+    ht.createSpan({ text: L("今日写作", "Today") });
     this.help(
       ht,
-      `${goal > 0 ? `当天新增字数达到每日目标（${fmtFull(goal)} 字，可在设置里改）` : "当天写了任何字"}就算打卡，写了当天的日记也算。\n连续打卡从今天往前数；今天还没写不会中断，到明天才断。`
+      L(
+        `${goal > 0 ? `当天新增字数达到每日目标（${fmtFull(goal)} 字，可在设置里改）` : "当天写了任何字"}就算打卡，写了当天的日记也算。\n连续打卡从今天往前数；今天还没写不会中断，到明天才断。`,
+        `${goal > 0 ? `A day counts toward your streak when the words added reach the daily goal (${fmtFull(goal)}, changeable in settings)` : "A day counts toward your streak when you write anything"}; a daily note also counts.\nThe streak counts back from today. Not having written yet today doesn't break it; it breaks tomorrow.`
+      )
     );
     const pill = head.createDiv({ cls: "vp-pill " + (todayDone ? "is-success" : "is-muted") });
     setIcon(pill.createSpan({ cls: "vp-pill-icon" }), todayDone ? "check" : "clock");
-    pill.createSpan({ text: todayDone ? "已打卡" : "还没打卡" });
+    pill.createSpan({ text: todayDone ? L("已打卡", "Done") : L("还没打卡", "Not yet") });
 
     const main = hero.createDiv({ cls: "vp-hero-main" });
 
@@ -804,18 +845,23 @@ export class DashboardView extends ItemView {
     const ringWrap = center.parentElement as HTMLElement;
     this.tweenRing("hero:ring", ringWrap, ratio);
     ringWrap.setAttr("role", "img");
-    srLabel(ringWrap, goal > 0 ? `今日 ${fmtFull(ck.todayWords)} 字，目标 ${fmtFull(goal)} 字` : `今日 ${fmtFull(ck.todayWords)} 字`);
+    srLabel(
+      ringWrap,
+      goal > 0
+        ? L(`今日 ${fmtFull(ck.todayWords)} 字，目标 ${fmtFull(goal)} 字`, `${count(fmtFull(ck.todayWords), "words")} today, goal ${fmtFull(goal)}`)
+        : L(`今日 ${fmtFull(ck.todayWords)} 字`, `${count(fmtFull(ck.todayWords), "words")} today`)
+    );
     this.tweenNum("hero:today", bigNumber(center, ck.todayWords, undefined, "vp-num vp-ring-num"), ck.todayWords);
-    center.createDiv({ cls: "vp-ring-caption", text: goal > 0 ? `目标 ${fmtNum(goal)} 字` : "今日字数" });
+    center.createDiv({ cls: "vp-ring-caption", text: goal > 0 ? L(`目标 ${fmtNum(goal)} 字`, `of ${fmtNum(goal)}`) : L("今日字数", "words today") });
 
     // 连续打卡
     const streak = main.createDiv({ cls: "vp-hero-streak" });
-    streak.createDiv({ cls: "vp-label", text: "连续打卡" });
-    this.tweenNum("hero:streak", bigNumber(streak, String(ck.current), "天", "vp-num vp-num-hero"), ck.current, "天");
-    streak.createDiv({ cls: "vp-hero-note", text: `最长 ${ck.longest} 天 · 近一年 ${ck.activeDays} 天` });
-    const diary = streak.createDiv({ cls: "vp-hero-note", text: `本月日记 ${ck.diaryMonth} 篇` });
+    streak.createDiv({ cls: "vp-label", text: L("连续打卡", "Streak") });
+    this.tweenNum("hero:streak", bigNumber(streak, String(ck.current), unit("days", ck.current), "vp-num vp-num-hero"), ck.current, unit("days", ck.current));
+    streak.createDiv({ cls: "vp-hero-note", text: L(`最长 ${ck.longest} 天 · 近一年 ${ck.activeDays} 天`, `Longest ${ck.longest} · ${ck.activeDays} in the past year`) });
+    const diary = streak.createDiv({ cls: "vp-hero-note", text: L(`本月日记 ${ck.diaryMonth} 篇`, `${ck.diaryMonth} daily ${plural(ck.diaryMonth, "note")} this month`) });
     const todayDiary = s.dailyNotes[ck.todayKey];
-    if (todayDiary) this.clickable(diary, "打开今天的日记", (e) => void this.plugin.openFile(todayDiary, undefined, e));
+    if (todayDiary) this.clickable(diary, L("打开今天的日记", "Open today's daily note"), (e) => void this.plugin.openFile(todayDiary, undefined, e));
 
     // 本周
     main.appendChild(this.renderWeek(s, goal, now));
@@ -829,15 +875,15 @@ export class DashboardView extends ItemView {
       x.createDiv({ cls: "vp-label", text: label });
       this.tweenNum(key, bigNumber(x, String(value), unit, "vp-num vp-num-sm"), value, unit);
     };
-    stat("hero:created", "今日新建", todayCreated, "篇");
-    stat("hero:modified", "今日改动", todayFiles.length, "篇");
+    stat("hero:created", L("今日新建", "Created"), todayCreated, unit("notes", todayCreated));
+    stat("hero:modified", L("今日改动", "Edited"), todayFiles.length, unit("notes", todayFiles.length));
     const recent = foot.createDiv({ cls: "vp-hero-recent" });
-    recent.createDiv({ cls: "vp-label", text: "今天写过" });
+    recent.createDiv({ cls: "vp-label", text: L("今天写过", "Worked on today") });
     const chips = recent.createDiv({ cls: "vp-chips" });
-    if (todayFiles.length === 0) chips.createSpan({ cls: "vp-chip-empty", text: "今天还没有改动的笔记" });
+    if (todayFiles.length === 0) chips.createSpan({ cls: "vp-chip-empty", text: L("今天还没有改动的笔记", "No notes edited today yet") });
     for (const f of [...todayFiles].sort((a, b) => b.stat.mtime - a.stat.mtime).slice(0, 3)) {
       const c = chips.createSpan({ cls: "vp-chip", text: f.basename, attr: { title: f.path } });
-      this.clickable(c, `打开 ${f.basename}`, (e) => void this.plugin.openFile(f, undefined, e));
+      this.clickable(c, L(`打开 ${f.basename}`, `Open ${f.basename}`), (e) => void this.plugin.openFile(f, undefined, e));
     }
   }
 
@@ -850,36 +896,44 @@ export class DashboardView extends ItemView {
     const box = createDiv({ cls: `vp-week-box is-${style}` });
     const top = box.createDiv({ cls: "vp-week-top" });
     const sum = top.createDiv({ cls: "vp-week-sum" });
-    sum.createSpan({ cls: "vp-label", text: "本周 " });
+    sum.createSpan({ cls: "vp-label", text: L("本周 ", "This week ") });
     sum.createSpan({ cls: "vp-week-total", text: fmtFull(weekWords) });
     if (settings.weeklyWordGoal > 0) sum.createSpan({ cls: "vp-week-goal", text: ` / ${fmtFull(settings.weeklyWordGoal)}` });
     this.segmented<"dots" | "bars">(
       top,
-      [["dots", "圆点"], ["bars", "柱状"]],
+      [["dots", L("圆点", "Dots")], ["bars", L("柱状", "Bars")]],
       style,
       (v) => {
         settings.weekStyle = v;
         void this.plugin.saveViewSetting();
         this.rerender("hero");
       },
-      "本周显示方式"
+      L("本周显示方式", "This week display")
     );
 
     const row = box.createDiv({ cls: "vp-week" });
     const max = Math.max(goal, ...days.map((d) => d.words), 1);
     for (const d of days) {
       const c = row.createDiv({ cls: "vp-week-day" + (d.done ? " is-active" : "") + (d.isToday ? " is-today" : "") + (d.future ? " is-future" : "") });
-      const desc = d.future ? "还没到" : d.done ? `已打卡，${fmtFull(d.words)} 字` : d.words > 0 ? `${fmtFull(d.words)} 字，未达标` : "没有写";
+      const w = count(fmtFull(d.words), "words");
+      const desc = d.future
+        ? L("还没到", "not yet")
+        : d.done
+          ? L(`已打卡，${fmtFull(d.words)} 字`, `goal met, ${w}`)
+          : d.words > 0
+            ? L(`${fmtFull(d.words)} 字，未达标`, `${w}, below goal`)
+            : L("没有写", "nothing written");
+      const dayName = weekdayName(dayIndex(d.key));
       if (style === "dots") {
-        const dot = c.createDiv({ cls: "vp-week-dot", attr: { role: "img", "aria-label": `周${d.label} ${desc}` } });
+        const dot = c.createDiv({ cls: "vp-week-dot", attr: { role: "img", "aria-label": `${dayName} ${desc}` } });
         if (d.done) setIcon(dot, "check");
         else if (d.pct !== null) dot.createSpan({ cls: "vp-week-pct", text: `${d.pct}%` });
       } else {
-        const lane = c.createDiv({ cls: "vp-week-lane", attr: { role: "img", "aria-label": `周${d.label} ${desc}` } });
+        const lane = c.createDiv({ cls: "vp-week-lane", attr: { role: "img", "aria-label": `${dayName} ${desc}` } });
         const bar = lane.createDiv({ cls: "vp-week-bar" });
         bar.setCssProps({ "--vp-week-h": `${d.future ? 0 : Math.max(4, (d.words / max) * 100)}%` });
       }
-      c.createDiv({ cls: "vp-week-label", text: d.isToday ? "今" : d.label });
+      c.createDiv({ cls: "vp-week-label", text: d.isToday ? L("今", "Today") : d.label });
     }
     if (style === "bars" && goal > 0) {
       row.addClass("has-goal");
@@ -892,18 +946,23 @@ export class DashboardView extends ItemView {
         cls: "vp-meter vp-week-meter",
         attr: {
           role: "progressbar",
-          "aria-label": "每周字数目标",
+          "aria-label": L("每周字数目标", "Weekly word goal"),
           "aria-valuemin": "0",
           "aria-valuemax": String(settings.weeklyWordGoal),
           "aria-valuenow": String(Math.min(weekWords, settings.weeklyWordGoal)),
-          "aria-valuetext": `已写 ${weekWords} 字，目标 ${settings.weeklyWordGoal} 字`,
+          "aria-valuetext": L(`已写 ${weekWords} 字，目标 ${settings.weeklyWordGoal} 字`, `${weekWords} of ${settings.weeklyWordGoal} words`),
         },
       });
       meter.createDiv({ cls: "vp-meter-fill" }).setCssProps({ "--vp-meter-width": `${pct}%` });
     }
     const legend = box.createDiv({ cls: "vp-week-legend" });
-    if (style === "dots") legend.setText("✓ 达标 · 百分比为未达标的进度 · 虚线为还没到的日子");
-    else legend.setText(goal > 0 ? `实色为达标 · 虚线为每日目标 ${fmtFull(goal)} 字` : "柱高为当天字数");
+    if (style === "dots") legend.setText(L("✓ 达标 · 百分比为未达标的进度 · 虚线为还没到的日子", "✓ goal met · % progress · dashed: still to come"));
+    else
+      legend.setText(
+        goal > 0
+          ? L(`实色为达标 · 虚线为每日目标 ${fmtFull(goal)} 字`, `Solid: goal met · dashed line: daily goal of ${fmtFull(goal)}`)
+          : L("柱高为当天字数", "Bar height is that day's words")
+      );
     return box;
   }
 
@@ -957,19 +1016,36 @@ export class DashboardView extends ItemView {
 
     // 笔记
     const notes = weeklyNotes(s, 12, now);
-    const a = kpi("files", "笔记", "统计所有未被排除的 Markdown 笔记。曲线是近 12 周每周结束时的累计数（不含采集文件夹），按创建日期计。");
+    const a = kpi(
+      "files",
+      L("笔记", "Notes"),
+      L(
+        "统计所有未被排除的 Markdown 笔记。曲线是近 12 周每周结束时的累计数（不含采集文件夹），按创建日期计。",
+        "All Markdown notes that are not excluded. The line is the running total at the end of each of the last 12 weeks (clipping folders left out), by created date."
+      )
+    );
     const aOn = readout(
       a,
       () => {
-        this.tweenNum("kpi:notes", bigNumber(a.num, s.totalNotes, "篇"), s.totalNotes, "篇");
-        a.side.createSpan({ cls: "vp-kpi-caption", text: "近 30 天" });
+        this.tweenNum("kpi:notes", bigNumber(a.num, s.totalNotes, unit("notes", s.totalNotes)), s.totalNotes, unit("notes", s.totalNotes));
+        a.side.createSpan({ cls: "vp-kpi-caption", text: L("近 30 天", "30 days") });
         a.side.createSpan({ cls: "vp-delta is-up", text: `+${fmtFull(n30)}` });
       },
-      (i) => ({ value: fmtFull(notes[i].value), unit: "篇", date: range(notes[i].start, notes[i].end), note: `当周 +${fmtFull(notes[i].extra)}`, up: true })
+      (i) => ({
+        value: fmtFull(notes[i].value),
+        unit: unit("notes", notes[i].value),
+        date: range(notes[i].start, notes[i].end),
+        note: L(`当周 +${fmtFull(notes[i].extra)}`, `+${fmtFull(notes[i].extra)} that week`),
+        up: true,
+      })
     );
     drawSparkline(a.c.createDiv({ cls: "vp-kpi-viz" }), notes.map((p) => p.value), {
       onPoint: aOn,
-      label: (i) => `${range(notes[i].start, notes[i].end)}，累计 ${notes[i].value} 篇，当周新增 ${notes[i].extra} 篇`,
+      label: (i) =>
+        L(
+          `${range(notes[i].start, notes[i].end)}，累计 ${notes[i].value} 篇，当周新增 ${notes[i].extra} 篇`,
+          `${range(notes[i].start, notes[i].end)}: ${count(notes[i].value, "notes")} in total, ${notes[i].extra} new that week`
+        ),
     });
 
     // 字数
@@ -977,32 +1053,45 @@ export class DashboardView extends ItemView {
     const skipped = s.totalWords - s.writeWordsTotal;
     const b = kpi(
       "type",
-      "总字数",
-      `所有笔记的字数合计。曲线是近 12 周累计的写作字数（按笔记创建日期、用笔记当前字数计）。${
-        skipped > 0 ? `\n其中 ${fmtNum(skipped)} 字来自采集文件夹或超大笔记，不计入曲线、热力图和“新增字数”。` : ""
-      }`
+      L("总字数", "Words"),
+      L(
+        `所有笔记的字数合计。曲线是近 12 周累计的写作字数（按笔记创建日期、用笔记当前字数计）。${
+          skipped > 0 ? `\n其中 ${fmtNum(skipped)} 字来自采集文件夹或超大笔记，不计入曲线、热力图和“新增字数”。` : ""
+        }`,
+        `Total words in all notes. The line is the running total of writing over the last 12 weeks (by created date, using each note's current length).${
+          skipped > 0 ? `\n${fmtNum(skipped)} of these words are in clipping folders or oversized notes, which are left out of the line, the heatmap and words added.` : ""
+        }`
+      )
     );
     const bOn = readout(
       b,
       () => {
-        this.tweenNum("kpi:words", bigNumber(b.num, s.totalWords, "字"), s.totalWords, "字");
-        b.side.createSpan({ cls: "vp-kpi-caption", text: "近 30 天" });
+        this.tweenNum("kpi:words", bigNumber(b.num, s.totalWords, unit("words")), s.totalWords, unit("words"));
+        b.side.createSpan({ cls: "vp-kpi-caption", text: L("近 30 天", "30 days") });
         b.side.createSpan({ cls: "vp-delta is-up", text: `+${fmtNum(w30)}` });
       },
       (i) => {
-        const p = fmtParts(words[i].value);
-        return { value: p.num, unit: `${p.unit}字`, date: range(words[i].start, words[i].end), note: `当周 +${fmtNum(words[i].extra)}`, up: true };
+        const p = splitNum(words[i].value, unit("words"));
+        return { value: p.value, unit: p.unit, date: range(words[i].start, words[i].end), note: L(`当周 +${fmtNum(words[i].extra)}`, `+${fmtNum(words[i].extra)} that week`), up: true };
       }
     );
     drawSparkline(b.c.createDiv({ cls: "vp-kpi-viz" }), words.map((p) => p.value), {
       onPoint: bOn,
-      label: (i) => `${range(words[i].start, words[i].end)}，累计 ${words[i].value} 字，当周新增 ${words[i].extra} 字`,
+      label: (i) =>
+        L(
+          `${range(words[i].start, words[i].end)}，累计 ${words[i].value} 字，当周新增 ${words[i].extra} 字`,
+          `${range(words[i].start, words[i].end)}: ${count(words[i].value, "words")} in total, ${words[i].extra} added that week`
+        ),
     });
 
     // 任务（没有每周历史，不画走势，只画完成进度）
     const t = s.tasks;
     const rate = t.total ? Math.round((t.done / t.total) * 100) : 0;
-    const c = kpi("list-checks", "任务完成率", "已完成任务占全部任务的比例，已取消的任务不计。");
+    const c = kpi(
+      "list-checks",
+      L("任务完成率", "Tasks done"),
+      L("已完成任务占全部任务的比例，已取消的任务不计。", "Share of all tasks that are done. Cancelled tasks are not counted.")
+    );
     const rateEl = bigNumber(c.num, t.total ? String(rate) : "—", t.total ? "%" : "");
     if (t.total) this.tweenNum("kpi:rate", rateEl, rate, "%");
     c.side.createSpan({ cls: "vp-kpi-caption", text: `${fmtFull(t.done)} / ${fmtFull(t.total)}` });
@@ -1011,18 +1100,34 @@ export class DashboardView extends ItemView {
     // 本月写作
     const month = monthWriting(s, goal, now);
     const weeks = weeklyCheckins(s, goal, 12, now);
-    const d = kpi("flame", "本月写作", `本月打卡的天数，和本月每天平均写的字数。曲线是近 12 周每周打卡的天数。`);
+    const d = kpi(
+      "flame",
+      L("本月写作", "This month"),
+      L(
+        "本月打卡的天数，和本月每天平均写的字数。曲线是近 12 周每周打卡的天数。",
+        "Streak days this month and the average words per day this month. The line is the streak days in each of the last 12 weeks."
+      )
+    );
     const dOn = readout(
       d,
       () => {
-        this.tweenNum("kpi:month", bigNumber(d.num, String(month.days), "天"), month.days, "天");
-        d.side.createSpan({ cls: "vp-kpi-caption", text: `日均 ${fmtFull(month.average)} 字` });
+        this.tweenNum("kpi:month", bigNumber(d.num, String(month.days), unit("days", month.days)), month.days, unit("days", month.days));
+        d.side.createSpan({ cls: "vp-kpi-caption", text: L(`日均 ${fmtFull(month.average)} 字`, `${fmtFull(month.average)} words a day`) });
       },
-      (i) => ({ value: String(weeks[i].value), unit: "天", date: i === weeks.length - 1 ? "本周" : range(weeks[i].start, weeks[i].end), note: `${fmtFull(weeks[i].extra)} 字` })
+      (i) => ({
+        value: String(weeks[i].value),
+        unit: unit("days", weeks[i].value),
+        date: i === weeks.length - 1 ? L("本周", "This week") : range(weeks[i].start, weeks[i].end),
+        note: count(fmtFull(weeks[i].extra), "words"),
+      })
     );
     drawSparkline(d.c.createDiv({ cls: "vp-kpi-viz" }), weeks.map((p) => p.value), {
       onPoint: dOn,
-      label: (i) => `${range(weeks[i].start, weeks[i].end)}，打卡 ${weeks[i].value} 天，写了 ${weeks[i].extra} 字`,
+      label: (i) =>
+        L(
+          `${range(weeks[i].start, weeks[i].end)}，打卡 ${weeks[i].value} 天，写了 ${weeks[i].extra} 字`,
+          `${range(weeks[i].start, weeks[i].end)}: ${count(weeks[i].value, "days")} on streak, ${count(weeks[i].extra, "words")}`
+        ),
     });
   }
 
@@ -1040,22 +1145,31 @@ export class DashboardView extends ItemView {
     const hm = this.plugin.settings.heatmapMode;
     let modeTip: string;
     if (hm === "auto") {
-      const st = s.logStartDay ? s.logStartDay.slice(5).replace("-", "/") : "今天";
-      modeTip = `${st} 起是实测值：从启用插件那天起，按每天实际新增的字数记录（看板关着也会记）。更早的日子按笔记最后修改日估算，悬停格子会标注“估算”。`;
+      const st = s.logStartDay ? s.logStartDay.slice(5).replace("-", "/") : L("今天", "today");
+      modeTip = L(
+        `${st} 起是实测值：从启用插件那天起，按每天实际新增的字数记录（看板关着也会记）。更早的日子按笔记最后修改日估算，悬停格子会标注“估算”。`,
+        `From ${st} on, values are recorded: the words actually added each day since the plugin was enabled (even with the dashboard closed). Earlier days are estimated from last-modified dates, and their tooltips say "estimated".`
+      );
     } else if (hm === "delta") {
-      modeTip = "按每日新增字数：从启用插件那天开始累积。";
+      modeTip = L("按每日新增字数：从启用插件那天开始累积。", "By daily additions: builds up from the day the plugin was enabled.");
     } else {
-      modeTip = "按笔记修改日：笔记全文字数计入其最后修改日，较粗略，可在设置中切换为“智能”或“每日新增字数”。";
+      modeTip = L(
+        "按笔记修改日：笔记全文字数计入其最后修改日，较粗略，可在设置中切换为“智能”或“每日新增字数”。",
+        "By modified date: a note's full word count goes to its last-modified day. This is rough; switch to Smart or daily additions in settings."
+      );
     }
     const skippedN = s.outliers.count;
     const heatHelp = [
       modeTip,
-      `颜色越深写得越多${goal > 0 ? `，目标 ${fmtNum(goal)} 字/天` : ""}。写了日记的日子也算打卡。`,
-      skippedN > 0 ? `已排除 ${skippedN} 篇超大或采集笔记。` : "",
+      L(
+        `颜色越深写得越多${goal > 0 ? `，目标 ${fmtNum(goal)} 字/天` : ""}。写了日记的日子也算打卡。`,
+        `Darker means more writing${goal > 0 ? `; the goal is ${fmtNum(goal)} words a day` : ""}. Days with a daily note also count toward the streak.`
+      ),
+      skippedN > 0 ? L(`已排除 ${skippedN} 篇超大或采集笔记。`, `${count(skippedN, "notes")} excluded as oversized or clipped.`) : "",
     ]
       .filter(Boolean)
       .join("\n");
-    const { el, head, body } = this.card(grid, "vp-heat-card", "写作热力图", "calendar-days", heatHelp);
+    const { el, head, body } = this.card(grid, "vp-heat-card", L("写作热力图", "Writing heatmap"), "calendar-days", heatHelp);
     const summary = head.createDiv({ cls: "vp-heat-summary" });
     const wrap = body.createDiv({ cls: "vp-heatmap-wrap" });
     const tip = new Tooltip(wrap);
@@ -1075,43 +1189,43 @@ export class DashboardView extends ItemView {
         days++;
       }
       summary.empty();
-      const item = (label: string, value: string, unit = "") => {
+      const item = (label: string, value: string, suffix = "") => {
         const x = summary.createSpan({ cls: "vp-heat-sum" });
         x.createSpan({ text: label + " " });
         x.createEl("b", { text: value });
-        if (unit) x.createSpan({ text: " " + unit });
+        if (suffix) x.createSpan({ text: " " + suffix });
       };
-      const p = fmtParts(total);
-      item(weeks >= 52 ? "近一年" : `近 ${weeks} 周`, p.num, `${p.unit}字`);
-      item("打卡", String(active), "天");
-      item("日均", fmtFull(Math.round(total / Math.max(1, days))), "字");
+      const tp = splitNum(total, unit("words"));
+      item(weeks >= 52 ? L("近一年", "Past year") : L(`近 ${weeks} 周`, `Past ${weeks} weeks`), tp.value, tp.unit);
+      item(L("打卡", "Streak days"), String(active), L("天", ""));
+      item(L("日均", "Daily avg"), fmtFull(Math.round(total / Math.max(1, days))), unit("words"));
       const busy = busiestWeekday(s, from, today);
-      if (busy) item("最活跃", busy);
+      if (busy) item(L("最活跃", "Busiest"), busy);
     });
 
     const foot = body.createDiv({ cls: "vp-heat-foot" });
     const note: string[] = [];
     if (s.estimatedBefore) {
       const [, em, ed] = s.estimatedBefore.split("-").map(Number);
-      note.push(`${em}月${ed}日之前为估算`);
+      note.push(L(`${em}月${ed}日之前为估算`, `Estimated before ${monthDay(new Date(2000, em - 1, ed))}`));
     }
-    note.push("点击某天查看当天改动的笔记");
+    note.push(L("点击某天查看当天改动的笔记", "Click a day to see the notes edited that day"));
     foot.createSpan({ text: note.join(" · ") });
     const legend = foot.createDiv({ cls: "vp-heat-legend" });
-    legend.createSpan({ text: "少" });
+    legend.createSpan({ text: L("少", "Less") });
     for (let i = 0; i <= 4; i++) legend.createSpan({ cls: `vp-heat-swatch vp-l${i}` });
-    legend.createSpan({ text: "多" });
+    legend.createSpan({ text: L("多", "More") });
     if (this.selectedDay) {
       const k = this.selectedDay;
       const det = el.createDiv({ cls: "vp-day-detail" });
       const dh = det.createDiv({ cls: "vp-day-detail-head" });
       const [y, m, d] = k.split("-").map(Number);
-      dh.createSpan({ cls: "vp-day-detail-title", text: `${m}月${d}日` });
+      dh.createSpan({ cls: "vp-day-detail-title", text: monthDay(new Date(y, m - 1, d)) });
       dh.createSpan({
         cls: "vp-day-detail-meta",
-        text: `${fmtFull(s.dayWords[k] || 0)} 字${s.dailyNotes[k] ? " · 有日记" : ""}${y !== new Date().getFullYear() ? ` · ${y}` : ""}`,
+        text: `${count(fmtFull(s.dayWords[k] || 0), "words")}${s.dailyNotes[k] ? L(" · 有日记", " · daily note") : ""}${y !== new Date().getFullYear() ? ` · ${y}` : ""}`,
       });
-      const close = dh.createEl("button", { cls: "vp-icon-btn is-small", attr: { "aria-label": "关闭" } });
+      const close = dh.createEl("button", { cls: "vp-icon-btn is-small", attr: { "aria-label": L("关闭", "Close") } });
       setIcon(close, "x");
       close.addEventListener("click", () => {
         this.selectedDay = null;
@@ -1119,18 +1233,18 @@ export class DashboardView extends ItemView {
         this.rerender("heat", "resize");
       });
       const list = det.createDiv({ cls: "vp-rows" });
-      if (s.dailyNotes[k]) this.noteRow(list, s.dailyNotes[k], "日记");
+      if (s.dailyNotes[k]) this.noteRow(list, s.dailyNotes[k], L("日记", "Daily note"));
       const mods = (s.dayModified[k] || []).filter((f) => f !== s.dailyNotes[k]);
       const shown = this.dayExpanded ? mods : mods.slice(0, 8);
-      const area = this.dayExpanded && mods.length > 8 ? list.createDiv({ cls: "vp-rows vp-scroll", attr: { tabindex: "0", role: "region", "aria-label": "当天修改的笔记" } }) : list;
-      for (const f of shown) this.noteRow(area, f, "当天修改");
+      const area = this.dayExpanded && mods.length > 8 ? list.createDiv({ cls: "vp-rows vp-scroll", attr: { tabindex: "0", role: "region", "aria-label": L("当天修改的笔记", "Notes edited that day") } }) : list;
+      for (const f of shown) this.noteRow(area, f, L("当天修改", "Edited"));
       if (mods.length > 8) {
-        this.moreLink(det.createDiv({ cls: "vp-card-foot" }), this.dayExpanded ? "收起" : `展开另外 ${mods.length - 8} 篇`, () => {
+        this.moreLink(det.createDiv({ cls: "vp-card-foot" }), this.dayExpanded ? COLLAPSE() : L(`展开另外 ${mods.length - 8} 篇`, `Show ${mods.length - 8} more`), () => {
           this.dayExpanded = !this.dayExpanded;
           this.rerender("heat", "resize");
         });
       }
-      if (mods.length === 0 && !s.dailyNotes[k]) this.empty(list, "coffee", "这一天没有留下笔记，休息也很重要");
+      if (mods.length === 0 && !s.dailyNotes[k]) this.empty(list, "coffee", L("这一天没有留下笔记，休息也很重要", "No notes that day. Rest matters too."));
     }
   }
 
@@ -1170,22 +1284,24 @@ export class DashboardView extends ItemView {
       if (!c) return;
       const words = s.dayWords[k] || 0;
       const rows = [
-        { label: "写作", value: `${fmtFull(words)} 字` },
-        { label: "修改笔记", value: `${s.dayModified[k]?.length || 0} 篇` },
-        { label: "新建笔记", value: `${s.dayCreated[k] || 0} 篇` },
+        { label: L("写作", "Written"), value: count(fmtFull(words), "words") },
+        { label: L("修改笔记", "Edited"), value: count(s.dayModified[k]?.length || 0, "notes") },
+        { label: L("新建笔记", "Created"), value: count(s.dayCreated[k] || 0, "notes") },
       ];
-      if (s.dailyNotes[k]) rows.push({ label: "日记", value: "有" });
-      if (s.estimatedBefore && k < s.estimatedBefore) rows.push({ label: "来源", value: "按修改日估算" });
-      else if (s.estimatedBefore) rows.push({ label: "来源", value: "实测" });
+      if (s.dailyNotes[k]) rows.push({ label: L("日记", "Daily note"), value: L("有", "Yes") });
+      if (s.estimatedBefore && k < s.estimatedBefore) rows.push({ label: L("来源", "Source"), value: L("按修改日估算", "Estimated") });
+      else if (s.estimatedBefore) rows.push({ label: L("来源", "Source"), value: L("实测", "Recorded") });
       const [yy, mm, dd] = k.split("-").map(Number);
       const rr = c.rect.getBoundingClientRect();
-      tip.showAtClient(rr.left + rr.width / 2, rr.top, `${yy}年${mm}月${dd}日 周${WEEKDAYS[c.day.getDay()]}${ck.isActive(k) ? " · 已打卡" : ""}`, rows);
+      const date = new Date(yy, mm - 1, dd);
+      const title = L(`${fullDate(date)} ${weekdayName(c.day.getDay())}`, `${weekdayShort(c.day.getDay())}, ${fullDate(date)}`);
+      tip.showAtClient(rr.left + rr.width / 2, rr.top, `${title}${ck.isActive(k) ? L(" · 已打卡", " · streak day") : ""}`, rows);
     };
 
     [
-      ["一", 0],
-      ["三", 2],
-      ["五", 4],
+      [weekdayShort(1), 0],
+      [weekdayShort(3), 2],
+      [weekdayShort(5), 4],
     ].forEach(([t, r]) => {
       const tx = svgEl("text", { x: 0, y: top + (r as number) * (cell + gap) + cell / 2 + 4, class: "vp-heat-label" }, svg);
       tx.textContent = t as string;
@@ -1202,7 +1318,7 @@ export class DashboardView extends ItemView {
         const x = left + w * (cell + gap);
         if (x - lastLabelX > 30 && x < W - 16) {
           const mt = svgEl("text", { x, y: 11, class: "vp-heat-label" }, svg);
-          mt.textContent = `${m + 1}月`;
+          mt.textContent = monthShort(m);
           lastLabelX = x;
         }
       }
@@ -1241,7 +1357,11 @@ export class DashboardView extends ItemView {
     svg.setAttribute("tabindex", "0");
     svg.setAttribute("role", "application");
     svg.setAttribute("data-fid", "heat:grid");
-    srLabel(svg, "写作热力图。用左右方向键切换周，上下方向键切换日，回车查看当天的笔记。", host);
+    srLabel(
+      svg,
+      L("写作热力图。用左右方向键切换周，上下方向键切换日，回车查看当天的笔记。", "Writing heatmap. Left and right arrows move by week, up and down by day, Enter shows that day's notes."),
+      host
+    );
     const live = host.createDiv({ cls: "vp-sr-only", attr: { "aria-live": "polite" } });
     let cursor: string | null = null;
     const move = (k: string | null) => {
@@ -1253,7 +1373,12 @@ export class DashboardView extends ItemView {
       c.rect.addClass("is-cursor");
       showTip(k);
       const [yy, mm, dd] = k.split("-").map(Number);
-      live.setText(`${yy}年${mm}月${dd}日，${fmtFull(s.dayWords[k] || 0)} 字${ck.isActive(k) ? "，已打卡" : ""}`);
+      live.setText(
+        L(
+          `${yy}年${mm}月${dd}日，${fmtFull(s.dayWords[k] || 0)} 字${ck.isActive(k) ? "，已打卡" : ""}`,
+          `${fullDate(new Date(yy, mm - 1, dd))}, ${count(fmtFull(s.dayWords[k] || 0), "words")}${ck.isActive(k) ? ", streak day" : ""}`
+        )
+      );
     };
     svg.addEventListener("focus", () => move(this.selectedDay && cells.has(this.selectedDay) ? this.selectedDay : ck.todayKey));
     svg.addEventListener("blur", () => {
@@ -1286,60 +1411,72 @@ export class DashboardView extends ItemView {
     const goal = this.plugin.settings.dailyWordGoal;
     const isWords = this.metric === "words";
     const m = trendModel(s, this.range, this.metric, goal, new Date(s.generatedAt));
-    const per = m.gran === "day" ? "天" : "周";
+    const daily = m.gran === "day";
+    const per = daily ? "天" : "周";
     const trendHelp = isWords
-      ? `每${per}写作的字数，与热力图同一来源（排除超大和采集笔记）。最右边一根是本${per === "天" ? "日" : "周"}，用实色标出。`
-      : `每${per}新建的笔记数（不含采集文件夹）。`;
-    const { head, body } = this.card(grid, "vp-trend-card", isWords ? `每${per}写作` : `每${per}新建笔记`, "trending-up", trendHelp);
+      ? L(
+        `每${per}写作的字数，与热力图同一来源（排除超大和采集笔记）。最右边一根是本${daily ? "日" : "周"}，用实色标出。`,
+        `Words written per ${daily ? "day" : "week"}, from the same source as the heatmap (oversized and clipped notes left out). The rightmost bar, in solid color, is ${daily ? "today" : "this week"}.`
+      )
+      : L(`每${per}新建的笔记数（不含采集文件夹）。`, `Notes created per ${daily ? "day" : "week"} (clipping folders left out).`);
+    const title = isWords ? L(`每${per}写作`, daily ? "Daily writing" : "Weekly writing") : L(`每${per}新建笔记`, daily ? "New notes per day" : "New notes per week");
+    const { head, body } = this.card(grid, "vp-trend-card", title, "trending-up", trendHelp);
     const ctrls = head.createDiv({ cls: "vp-ctrls" });
     this.segmented<TrendMetric>(
       ctrls,
-      [["words", "字数"], ["notes", "新建笔记"]],
+      [["words", L("字数", "Words")], ["notes", L("新建笔记", "New notes")]],
       this.metric,
       (v) => {
         this.metric = v;
         this.rerender("trend");
       },
-      "指标"
+      L("指标", "Metric")
     );
     this.segmented<TrendRange>(
       ctrls,
-      [[30, "30 天"], [182, "半年"], [365, "一年"]],
+      [[30, L("30 天", "30 days")], [182, L("半年", "6 months")], [365, L("一年", "1 year")]],
       this.range,
       (v) => {
         this.range = v;
         this.rerender("trend");
       },
-      "时间范围"
+      L("时间范围", "Period")
     );
 
-    const unit = isWords ? "字" : "篇";
-    const rangeName = this.range === 30 ? "30 天" : this.range === 182 ? "半年" : "一年";
+    const u = isWords ? unit("words") : unit("notes");
+    const rangeName = this.range === 30 ? L("30 天", "30 days") : this.range === 182 ? L("半年", "6 months") : L("一年", "1 year");
     const summary = body.createDiv({ cls: "vp-trend-summary" });
     const stat = (key: string, label: string, value: number) => {
       const x = summary.createDiv({ cls: "vp-trend-side" });
-      this.tweenNum(`trend:${this.metric}:${key}`, bigNumber(x, value, unit, "vp-num vp-num-sm"), value, unit);
+      this.tweenNum(`trend:${this.metric}:${key}`, bigNumber(x, value, u, "vp-num vp-num-sm"), value, u);
       x.createDiv({ cls: "vp-label", text: label });
     };
-    stat("total", `${rangeName}合计`, m.total);
-    stat("avg", `${per}均`, m.average);
-    if (m.best) stat("best", `最高一${per}`, m.best.value);
+    stat("total", L(`${rangeName}合计`, `Total, ${rangeName}`), m.total);
+    stat("avg", L(`${per}均`, daily ? "Per day" : "Per week"), m.average);
+    if (m.best) stat("best", L(`最高一${per}`, daily ? "Best day" : "Best week"), m.best.value);
 
     const fmtDay = (d: Date) => `${d.getMonth() + 1}/${d.getDate()}`;
     const points: SeriesPoint[] = m.buckets.map((bk) => {
-      const title = m.gran === "day" ? `${bk.start.getMonth() + 1}月${bk.start.getDate()}日` : `${fmtDay(bk.start)} – ${fmtDay(bk.end)}`;
-      const rows = [{ label: isWords ? "写作" : "新建笔记", value: `${fmtFull(bk.value)} ${unit}`, dot: "is-accent" }];
-      if (m.gran === "week") rows.push({ label: "打卡", value: `${bk.checkins} 天`, dot: "" });
+      const title = m.gran === "day" ? monthDay(bk.start) : `${fmtDay(bk.start)} – ${fmtDay(bk.end)}`;
+      const rows = [{ label: isWords ? L("写作", "Written") : L("新建笔记", "New notes"), value: count(fmtFull(bk.value), isWords ? "words" : "notes"), dot: "is-accent" }];
+      if (m.gran === "week") rows.push({ label: L("打卡", "Streak days"), value: count(bk.checkins, "days"), dot: "" });
       return { label: fmtDay(bk.start), value: bk.value, tipTitle: title, tipRows: rows };
     });
     if (points.every((p) => p.value === 0)) {
-      this.empty(body.createDiv({ cls: "vp-chart-empty" }), "line-chart", isWords ? "这段时间还没有写作记录" : "这段时间还没有新建笔记");
+      this.empty(body.createDiv({ cls: "vp-chart-empty" }), "line-chart", isWords ? L("这段时间还没有写作记录", "No writing recorded in this period") : L("这段时间还没有新建笔记", "No notes created in this period"));
     } else {
       const chartWrap = body.createDiv({ cls: "vp-chart-wrap" });
       const tip = new Tooltip(chartWrap);
       const host = chartWrap.createDiv({ cls: "vp-chart-host" });
       host.setAttr("role", "img");
-      srLabel(host, `${rangeName}${isWords ? "写作字数" : "新建笔记"}柱状图，合计 ${fmtFull(m.total)} ${unit}`, chartWrap);
+      srLabel(
+        host,
+        L(
+          `${rangeName}${isWords ? "写作字数" : "新建笔记"}柱状图，合计 ${fmtFull(m.total)} ${u}`,
+          `Bar chart of ${isWords ? "words written" : "new notes"}, ${rangeName}, ${fmtFull(m.total)} ${u} in total`
+        ),
+        chartWrap
+      );
       this.responsive(chartWrap, (w) => {
         host.empty();
         drawTrendChart(host, points, { width: w, height: 220, kind: "bar", tooltip: tip, highlightLast: true });
@@ -1360,17 +1497,28 @@ export class DashboardView extends ItemView {
       attr: { role: "switch", "aria-checked": String(on), "data-fid": "trend:outlier" },
     });
     sw.createSpan({ cls: "vp-switch-track" }).createSpan({ cls: "vp-switch-thumb" });
-    sw.createSpan({ cls: "vp-switch-label", text: `排除超大笔记（> ${fmtNum(s.outliers.threshold)} 字）` });
+    sw.createSpan({ cls: "vp-switch-label", text: L(`排除超大笔记（> ${fmtNum(s.outliers.threshold)} 字）`, `Exclude oversized notes (> ${fmtNum(s.outliers.threshold)} words)`) });
     sw.addEventListener("click", () => void this.plugin.setOutlierExclusion(!on));
 
     const w = big.reduce((a, f) => a + f.words, 0);
     const top = [...big, ...collected].sort((a, b) => b.words - a.words).slice(0, 3);
     const lines = [
-      `字数超过 ${fmtNum(s.outliers.threshold)} 字的笔记（多为自动采集或整段粘贴）会让趋势和热力图失真。`,
-      on ? `已排除 ${big.length} 篇 · ${fmtNum(w)} 字。` : `目前含 ${big.length} 篇超大笔记 · ${fmtNum(w)} 字。`,
+      L(
+        `字数超过 ${fmtNum(s.outliers.threshold)} 字的笔记（多为自动采集或整段粘贴）会让趋势和热力图失真。`,
+        `Notes over ${fmtNum(s.outliers.threshold)} words (usually collected or pasted in bulk) distort the trends and the heatmap.`
+      ),
+      on
+        ? L(`已排除 ${big.length} 篇 · ${fmtNum(w)} 字。`, `${count(big.length, "notes")} · ${fmtNum(w)} words excluded.`)
+        : L(`目前含 ${big.length} 篇超大笔记 · ${fmtNum(w)} 字。`, `Currently includes ${big.length} oversized ${plural(big.length, "note")} · ${fmtNum(w)} words.`),
     ];
-    if (collected.length > 0) lines.push(`另有 ${collected.length} 篇在采集文件夹里，始终不计入。`);
-    lines.push(`字数最多：\n${top.map((f) => `${f.file.path}（${fmtNum(f.words)} 字）`).join("\n")}`);
+    if (collected.length > 0)
+      lines.push(L(`另有 ${collected.length} 篇在采集文件夹里，始终不计入。`, `Another ${count(collected.length, "notes")} in clipping folders are never counted.`));
+    lines.push(
+      L(
+        `字数最多：\n${top.map((f) => `${f.file.path}（${fmtNum(f.words)} 字）`).join("\n")}`,
+        `Longest:\n${top.map((f) => `${f.file.path} (${fmtNum(f.words)} words)`).join("\n")}`
+      )
+    );
     this.help(row, lines.join("\n"));
   }
 
@@ -1382,18 +1530,21 @@ export class DashboardView extends ItemView {
     const { el, head, body } = this.card(
       grid,
       "vp-tasks-card",
-      "接下来",
+      L("接下来", "Next up"),
       "list-todo",
-      "笔记里带截止日期（📅 或 [due::]）的待办：已逾期的单独列出，下面是今天起 7 天内到期的。点任务直接跳到那一行。"
+      L(
+        "笔记里带截止日期（📅 或 [due::]）的待办：已逾期的单独列出，下面是今天起 7 天内到期的。点任务直接跳到那一行。",
+        "Open tasks in your notes with a due date (📅 or [due::]). Overdue ones are listed first, then those due in the next 7 days. Click a task to jump to its line."
+      )
     );
     const t = s.tasks;
-    this.segmented<TaskTab>(head, [["due", "到期"], ["folder", "按文件夹"]], this.taskTab, (v) => {
+    this.segmented<TaskTab>(head, [["due", L("到期", "Due")], ["folder", L("按文件夹", "By folder")]], this.taskTab, (v) => {
       this.taskTab = v;
       this.taskExpanded = false;
       this.rerender("tasks");
     });
     if (t.total === 0) {
-      this.empty(body, "list-checks", "还没有任务。在笔记里写 - [ ] 就会出现在这里");
+      this.empty(body, "list-checks", L("还没有任务。在笔记里写 - [ ] 就会出现在这里", "No tasks yet. Write - [ ] in a note and it shows up here."));
       return;
     }
     const todayKey = dayKey(Date.now());
@@ -1403,39 +1554,39 @@ export class DashboardView extends ItemView {
       const area = this.listArea(el, body, this.taskExpanded);
       if (t.overdue.length) {
         const od = area.createDiv({ cls: "vp-overdue" });
-        od.createDiv({ cls: "vp-overdue-title", text: `已逾期 ${t.overdue.length}` });
+        od.createDiv({ cls: "vp-overdue-title", text: L(`已逾期 ${t.overdue.length}`, `Overdue ${t.overdue.length}`) });
         const list = od.createDiv({ cls: "vp-rows" });
         for (const it of t.overdue.slice(0, this.taskExpanded ? 50 : 2)) this.taskRow(list, it, true);
       }
       const list = area.createDiv({ cls: "vp-rows" });
-      if (t.dueSoon.length === 0 && !t.overdue.length) this.empty(list, "party-popper", "7 天内没有到期的任务");
+      if (t.dueSoon.length === 0 && !t.overdue.length) this.empty(list, "party-popper", L("7 天内没有到期的任务", "Nothing due in the next 7 days"));
       for (const it of t.dueSoon.slice(0, limit)) this.taskRow(list, it, false, it.due === todayKey);
       const hidden = Math.max(0, t.dueSoon.length - limit) + Math.max(0, t.overdue.length - (this.taskExpanded ? 50 : 2));
       const more = body.createDiv({ cls: "vp-card-foot" });
       if (hidden > 0 || this.taskExpanded) {
-        this.moreLink(more, this.taskExpanded ? "收起" : `展开另外 ${hidden} 项`, () => {
+        this.moreLink(more, this.taskExpanded ? COLLAPSE() : L(`展开另外 ${hidden} 项`, `Show ${hidden} more`), () => {
           this.taskExpanded = !this.taskExpanded;
           this.rerender("tasks", "resize");
         });
       }
-      this.moreLink(more, `全部 ${fmtFull(t.pending)} 项待办`, () => this.plugin.openSearch("task-todo:\"\""));
+      this.moreLink(more, L(`全部 ${fmtFull(t.pending)} 项待办`, `All ${count(fmtFull(t.pending), "tasks")}`), () => this.plugin.openSearch("task-todo:\"\""));
     } else {
       const groups: GroupStat[] = t.byFolder.filter((g) => g.pending > 0);
       const list = this.listArea(el, body, this.taskExpanded).createDiv({ cls: "vp-rows" });
       if (groups.length === 0) {
-        this.empty(list, "party-popper", "所有任务都完成了");
+        this.empty(list, "party-popper", L("所有任务都完成了", "All tasks are done"));
         return;
       }
       for (const g of groups.slice(0, this.taskExpanded ? 50 : 6)) {
         const row = list.createDiv({ cls: "vp-row vp-group-row" });
-        row.createSpan({ cls: "vp-row-name", text: g.key });
+        row.createSpan({ cls: "vp-row-name", text: folderName(g.key) });
         const m = row.createDiv({ cls: "vp-meter is-inline" });
         m.createDiv({ cls: "vp-meter-fill" }).setCssProps({ "--vp-meter-width": `${(g.done / Math.max(1, g.total)) * 100}%` });
-        row.createSpan({ cls: "vp-row-meta vp-tabular", text: `待办 ${g.pending}` });
-        if (g.key !== "(根目录)") this.clickable(row, `${g.key}，待办 ${g.pending}`, () => this.plugin.revealFolder(g.key));
+        row.createSpan({ cls: "vp-row-meta vp-tabular", text: L(`待办 ${g.pending}`, `${g.pending} open`) });
+        if (g.key !== ROOT_FOLDER) this.clickable(row, L(`${g.key}，待办 ${g.pending}`, `${g.key}, ${g.pending} open`), () => this.plugin.revealFolder(g.key));
       }
       if (groups.length > 6) {
-        this.moreLink(body.createDiv({ cls: "vp-card-foot" }), this.taskExpanded ? "收起" : `展开另外 ${groups.length - 6} 个文件夹`, () => {
+        this.moreLink(body.createDiv({ cls: "vp-card-foot" }), this.taskExpanded ? COLLAPSE() : L(`展开另外 ${groups.length - 6} 个文件夹`, `Show ${groups.length - 6} more ${plural(groups.length - 6, "folder")}`), () => {
           this.taskExpanded = !this.taskExpanded;
           this.rerender("tasks", "resize");
         });
@@ -1447,11 +1598,11 @@ export class DashboardView extends ItemView {
     const row = list.createDiv({ cls: "vp-row vp-task-row" + (overdue ? " is-overdue" : "") + (today ? " is-today" : "") });
     row.createSpan({ cls: "vp-task-box", attr: { "aria-hidden": "true" } });
     const due = it.due ? it.due.slice(5).replace("-", "/").replace(/^0/, "") : "";
-    row.createSpan({ cls: "vp-due", text: today ? "今天" : due });
+    row.createSpan({ cls: "vp-due", text: today ? L("今天", "Today") : due });
     const text = cleanTaskText(it.text);
-    row.createSpan({ cls: "vp-row-name", text: text || "（空任务）", attr: { title: `${text}\n${it.file.path}` } });
+    row.createSpan({ cls: "vp-row-name", text: text || L("（空任务）", "(empty task)"), attr: { title: `${text}\n${it.file.path}` } });
     row.createSpan({ cls: "vp-row-meta", text: it.file.basename });
-    this.clickable(row, `${text || "空任务"}，${it.file.basename}${overdue ? "，已逾期" : ""}`, (e) => void this.plugin.openFile(it.file, it.line, e));
+    this.clickable(row, `${text || L("空任务", "Empty task")}${L("，", ", ")}${it.file.basename}${overdue ? L("，已逾期", ", overdue") : ""}`, (e) => void this.plugin.openFile(it.file, it.line, e));
   }
 
   /**
@@ -1461,14 +1612,14 @@ export class DashboardView extends ItemView {
   private listArea(card: HTMLElement, body: HTMLElement, expanded: boolean): HTMLElement {
     if (!expanded) return body;
     card.addClass("is-expanded");
-    return body.createDiv({ cls: "vp-scroll", attr: { tabindex: "0", role: "region", "aria-label": "展开的列表" } });
+    return body.createDiv({ cls: "vp-scroll", attr: { tabindex: "0", role: "region", "aria-label": L("展开的列表", "Expanded list") } });
   }
 
   /** 卡片底部的文字链接（展开 / 查看全部） */
   private moreLink(parent: HTMLElement, text: string, onClick: () => void) {
     const b = parent.createEl("button", { cls: "vp-link", attr: { type: "button" } });
     b.createSpan({ text });
-    setIcon(b.createSpan({ cls: "vp-link-icon", attr: { "aria-hidden": "true" } }), text === "收起" ? "chevron-up" : "chevron-right");
+    setIcon(b.createSpan({ cls: "vp-link-icon", attr: { "aria-hidden": "true" } }), text === COLLAPSE() ? "chevron-up" : "chevron-right");
     b.addEventListener("click", onClick);
     return b;
   }
@@ -1482,11 +1633,16 @@ export class DashboardView extends ItemView {
     const { el, head, body } = this.card(
       grid,
       "vp-tags-card",
-      isTags ? "常用标签" : "文件夹",
+      isTags ? L("常用标签", "Top tags") : L("文件夹", "Folders"),
       isTags ? "tag" : "folder",
-      isTags ? "按使用的笔记数排列。“本周 +n”是本周新建的笔记里用到这个标签的篇数。点击标签在搜索里查看。" : "按顶层文件夹统计笔记数和字数，点击可在文件列表里定位。"
+      isTags
+        ? L(
+          "按使用的笔记数排列。“本周 +n”是本周新建的笔记里用到这个标签的篇数。点击标签在搜索里查看。",
+          "Sorted by the number of notes using each tag. \"+n this week\" is how many notes created this week use it. Click a tag to search for it."
+        )
+        : L("按顶层文件夹统计笔记数和字数，点击可在文件列表里定位。", "Notes and words per top-level folder. Click to reveal the folder in the file list.")
     );
-    this.segmented<TagTab>(head, [["tags", "标签"], ["folders", "文件夹"]], this.tagTab, (v) => {
+    this.segmented<TagTab>(head, [["tags", L("标签", "Tags")], ["folders", L("文件夹", "Folders")]], this.tagTab, (v) => {
       this.tagTab = v;
       this.tagsExpanded = false;
       this.rerender("tags");
@@ -1501,26 +1657,26 @@ export class DashboardView extends ItemView {
         label: tag,
         value: n,
         valueText: fmtFull(n),
-        note: fresh.get(tag) ? `本周 +${fresh.get(tag)}` : undefined,
+        note: fresh.get(tag) ? L(`本周 +${fresh.get(tag)}`, `+${fresh.get(tag)} this week`) : undefined,
         onClick: () => this.plugin.openSearch(`tag:${tag}`),
       }));
     } else {
       items = s.folders.slice(0, limit).map((f) => ({
-        label: f.folder,
+        label: folderName(f.folder),
         value: f.notes,
-        valueText: `${fmtFull(f.notes)} 篇 · ${fmtNum(f.words)} 字`,
-        onClick: f.folder === "(根目录)" ? undefined : () => this.plugin.revealFolder(f.folder),
+        valueText: `${count(fmtFull(f.notes), "notes")} · ${fmtNum(f.words)} ${unit("words")}`,
+        onClick: f.folder === ROOT_FOLDER ? undefined : () => this.plugin.revealFolder(f.folder),
       }));
     }
     drawBarList(
       this.listArea(el, body, this.tagsExpanded),
       items,
-      isTags ? "还没有标签。给笔记加上 #标签，这里就会热闹起来" : "仓库里还没有文件夹",
+      isTags ? L("还没有标签。给笔记加上 #标签，这里就会热闹起来", "No tags yet. Add #tags to your notes and they show up here.") : L("仓库里还没有文件夹", "No folders in the vault yet"),
       (el) => setIcon(el.createDiv({ cls: "vp-empty-icon" }), isTags ? "tag" : "folder")
     );
     const total = isTags ? s.tags.length : s.folders.length;
     if (total > 6) {
-      this.moreLink(body.createDiv({ cls: "vp-card-foot" }), this.tagsExpanded ? "收起" : `全部 ${total} 个${isTags ? "标签" : "文件夹"}`, () => {
+      this.moreLink(body.createDiv({ cls: "vp-card-foot" }), this.tagsExpanded ? COLLAPSE() : L(`全部 ${total} 个${isTags ? "标签" : "文件夹"}`, `All ${count(total, isTags ? "tags" : "folders")}`), () => {
         this.tagsExpanded = !this.tagsExpanded;
         this.rerender("tags", "resize");
       });
@@ -1540,16 +1696,20 @@ export class DashboardView extends ItemView {
     const { el: cardEl, head, body } = this.card(
       grid,
       "vp-checkup-card",
-      "库体检",
+      L("库体检", "Vault checkup"),
       "heart-pulse",
-      "随看板一起刷新。断链和孤立笔记来自 Obsidian 的链接索引；重复内容来自最近一次扫描。会改动笔记的操作都先确认，删除的笔记进回收站。"
+      L(
+        "随看板一起刷新。断链和孤立笔记来自 Obsidian 的链接索引；重复内容来自最近一次扫描。会改动笔记的操作都先确认，删除的笔记进回收站。",
+        "Refreshes with the dashboard. Broken links and orphans come from Obsidian's link index; duplicates from the last scan. Anything that changes notes asks first, and deleted notes go to the trash."
+      )
     );
     const live = head.createDiv({ cls: "vp-live" });
     live.createSpan({ cls: "vp-live-dot", attr: { "aria-hidden": "true" } });
     const at = new Date(s.generatedAt);
-    live.createSpan({ text: `实时 · ${pad2(at.getHours())}:${pad2(at.getMinutes())} 更新` });
+    live.createSpan({ text: L(`实时 · ${pad2(at.getHours())}:${pad2(at.getMinutes())} 更新`, `Live · updated ${pad2(at.getHours())}:${pad2(at.getMinutes())}`) });
     const total = c.unresolved.length + c.orphans.length + c.empty.length + c.big.length + (dup ? dup.groups.length : 0);
-    head.createDiv({ cls: "vp-card-aside", text: total ? `共 ${fmtFull(c.unresolvedCount + c.orphans.length + c.empty.length + c.big.length + (dup ? dup.groups.length : 0))} 项可整理` : "一切正常" });
+    const todo = fmtFull(c.unresolvedCount + c.orphans.length + c.empty.length + c.big.length + (dup ? dup.groups.length : 0));
+    head.createDiv({ cls: "vp-card-aside", text: total ? L(`共 ${todo} 项可整理`, `${todo} to tidy up`) : L("一切正常", "All good") });
 
     const cols = body.createDiv({ cls: "vp-checkup" });
     const col = (key: string, title: string, count: number, sev: "warn" | "", empty: string) => {
@@ -1566,7 +1726,7 @@ export class DashboardView extends ItemView {
       if (open) {
         list.setAttr("tabindex", "0");
         list.setAttr("role", "region");
-        list.setAttr("aria-label", `${title}，展开的列表`);
+        list.setAttr("aria-label", L(`${title}，展开的列表`, `${title}, expanded list`));
       }
       if (count === 0) list.createDiv({ cls: "vp-checkup-ok", text: empty });
       return { el, list, limit: open ? 50 : 3, open };
@@ -1574,7 +1734,7 @@ export class DashboardView extends ItemView {
     const item = (list: HTMLElement, name: string, label: string, onOpen: (() => void) | null, actText: string, act: () => void) => {
       const row = list.createDiv({ cls: "vp-row vp-checkup-row" });
       const n = row.createSpan({ cls: "vp-row-name", text: name, attr: { title: name } });
-      if (onOpen) this.clickable(n, `打开 ${label}`, () => onOpen());
+      if (onOpen) this.clickable(n, L(`打开 ${label}`, `Open ${label}`), () => onOpen());
       const b = row.createEl("button", { cls: "vp-act", text: actText, attr: { type: "button" } });
       b.addEventListener("click", (e) => {
         e.stopPropagation();
@@ -1582,95 +1742,110 @@ export class DashboardView extends ItemView {
       });
     };
     /** shown：列表里实际有多少条可以展开（断链只保留出现最多的 10 个名字，比总处数少） */
-    const foot = (k: { el: HTMLElement; open: boolean }, key: string, shown: number, unit: string) => {
+    const foot = (k: { el: HTMLElement; open: boolean }, key: string, shown: number, kind: UnitKind) => {
       if (shown <= 3) return;
-      this.moreLink(k.el.createDiv({ cls: "vp-card-foot" }), k.open ? "收起" : `展开 ${fmtFull(shown)} ${unit}`, () => {
+      this.moreLink(k.el.createDiv({ cls: "vp-card-foot" }), k.open ? COLLAPSE() : L(`展开 ${fmtFull(shown)} ${unit(kind)}`, `Show all ${fmtFull(shown)}`), () => {
         this.checkupOpen = k.open ? null : key;
         this.rerender("checkup", "resize");
       });
     };
 
     // 断链：按出现次数排；新建笔记用 Obsidian 自己的规则（和点断链时一样）
-    const u = col("unresolved", "断链", c.unresolvedCount, "warn", "没有断开的链接");
+    const u = col("unresolved", L("断链", "Broken links"), c.unresolvedCount, "warn", L("没有断开的链接", "No broken links"));
     for (const x of c.unresolved.slice(0, u.limit)) {
-      item(u.list, `[[${x.name}]] · ${x.count} 处`, x.name, () => this.plugin.openSearch(`"[[${x.name}]]"`), "创建笔记", () => {
+      item(u.list, L(`[[${x.name}]] · ${x.count} 处`, `[[${x.name}]] · ${x.count}×`), x.name, () => this.plugin.openSearch(`"[[${x.name}]]"`), L("创建笔记", "Create note"), () => {
         void this.app.workspace.openLinkText(x.name, x.source ?? "", "tab");
       });
     }
-    foot(u, "unresolved", c.unresolved.length, "个");
+    foot(u, "unresolved", c.unresolved.length, "links");
 
     // 孤立笔记
-    const o = col("orphans", "孤立笔记", c.orphans.length, "", "每篇笔记都连上了");
+    const o = col("orphans", L("孤立笔记", "Orphans"), c.orphans.length, "", L("每篇笔记都连上了", "Every note is linked"));
     for (const f of c.orphans.slice(0, o.limit)) {
-      item(o.list, f.basename, f.basename, () => void this.plugin.openFile(f), "打开", () => void this.plugin.openFile(f));
+      item(o.list, f.basename, f.basename, () => void this.plugin.openFile(f), L("打开", "Open"), () => void this.plugin.openFile(f));
     }
-    foot(o, "orphans", c.orphans.length, "篇");
+    foot(o, "orphans", c.orphans.length, "notes");
 
     // 重复内容
     if (dupOn) {
       const n = dup ? dup.groups.length : 0;
-      const d = col("dupes", "重复内容", n, "warn", dd.scanning ? "正在扫描…" : dd.analysis ? "没有重复内容" : "还没扫描过");
+      const d = col(
+        "dupes",
+        L("重复内容", "Duplicates"),
+        n,
+        "warn",
+        dd.scanning ? L("正在扫描…", "Scanning…") : dd.analysis ? L("没有重复内容", "No duplicates") : L("还没扫描过", "Not scanned yet")
+      );
       if (!dd.analysis && !dd.scanning) {
-        item(d.list, "扫描只读，不会改动笔记", "", null, "开始扫描", () => void dd.openReport(true));
+        item(d.list, L("扫描只读，不会改动笔记", "Read-only, changes nothing"), "", null, L("开始扫描", "Scan"), () => void dd.openReport(true));
       }
       if (dup) {
         for (const g of dup.groups.slice(0, d.limit)) {
           const first = g.occs[0];
-          const name = first ? `${first.path.split("/").pop()?.replace(/\.md$/, "")} 等 ${g.occs.length} 篇` : `${g.occs.length} 篇`;
-          item(d.list, name, name, () => void dd.openReport(false), "保留最早", () => dd.startCleanup([groupItem(g, 0)], "mark"));
+          const base = first?.path.split("/").pop()?.replace(/\.md$/, "");
+          const name = base
+            ? L(`${base} 等 ${g.occs.length} 篇`, `${base} and ${g.occs.length - 1} more`)
+            : count(g.occs.length, "notes");
+          item(d.list, name, name, () => void dd.openReport(false), L("保留最早", "Keep oldest"), () => dd.startCleanup([groupItem(g, 0)], "mark"));
         }
       }
-      if (n > 3) this.moreLink(d.el.createDiv({ cls: "vp-card-foot" }), `全部 ${fmtFull(n)} 段`, () => void dd.openReport(false));
-      if (dd.stale && dd.analysis) d.el.createDiv({ cls: "vp-checkup-note", text: "笔记有改动，建议重新扫描" });
+      if (n > 3) this.moreLink(d.el.createDiv({ cls: "vp-card-foot" }), L(`全部 ${fmtFull(n)} 段`, `All ${count(fmtFull(n), "passages")}`), () => void dd.openReport(false));
+      if (dd.stale && dd.analysis) d.el.createDiv({ cls: "vp-checkup-note", text: L("笔记有改动，建议重新扫描", "Notes changed since the scan. Scan again.") });
     }
 
     // 空笔记与超大笔记
     const eb = c.empty.length + c.big.length;
-    const e = col("emptybig", "空笔记与超大笔记", eb, "", "没有空笔记或超大笔记");
+    const e = col("emptybig", L("空笔记与超大笔记", "Empty and oversized"), eb, "", L("没有空笔记或超大笔记", "No empty or oversized notes"));
     let shown = 0;
     for (const f of c.empty) {
       if (shown++ >= e.limit) break;
-      item(e.list, `${f.file.basename} · 0 字`, f.file.basename, () => void this.plugin.openFile(f.file), "删除", () => this.trashNote(f.file));
+      item(e.list, `${f.file.basename} · ${count(0, "words")}`, f.file.basename, () => void this.plugin.openFile(f.file), L("删除", "Delete"), () => this.trashNote(f.file));
     }
     for (const f of c.big) {
       if (shown++ >= e.limit) break;
-      const folder = f.folder === "(根目录)" ? null : f.folder;
+      const folder = f.folder === ROOT_FOLDER ? null : f.folder;
       item(
         e.list,
-        `${f.file.basename} · ${fmtNum(f.words)} 字`,
+        `${f.file.basename} · ${fmtNum(f.words)} ${unit("words")}`,
         f.file.basename,
         () => void this.plugin.openFile(f.file),
-        folder ? "整夹不计入" : "打开",
+        folder ? L("整夹不计入", "Don't count") : L("打开", "Open"),
         () => (folder ? void this.plugin.setClippingFolder(folder) : void this.plugin.openFile(f.file))
       );
     }
-    foot(e, "emptybig", eb, "篇");
+    foot(e, "emptybig", eb, "notes");
   }
 
   /** 删除前确认；进系统 / Obsidian 回收站（按用户的“删除文件”设置），可以找回 */
   private trashNote(file: TFile) {
-    new ConfirmModal(this.app, "删除空笔记", `“${file.basename}” 没有任何内容。删除后会进回收站，可以从回收站找回。`, "删除", async () => {
-      await this.app.fileManager.trashFile(file);
-    }).open();
+    new ConfirmModal(
+      this.app,
+      L("删除空笔记", "Delete empty note"),
+      L(`“${file.basename}” 没有任何内容。删除后会进回收站，可以从回收站找回。`, `"${file.basename}" has no content. It goes to the trash, where you can restore it.`),
+      L("删除", "Delete"),
+      async () => {
+        await this.app.fileManager.trashFile(file);
+      }
+    ).open();
   }
 
   /* ---------- 9. 写作回顾 ---------- */
 
   private renderReports(grid: HTMLElement) {
     if (!this.stats) return;
-    const { head, body } = this.card(grid, "vp-report-card", "写作回顾", "notebook-pen");
+    const { head, body } = this.card(grid, "vp-report-card", L("写作回顾", "Writing review"), "notebook-pen");
     const aside = head.createDiv({ cls: "vp-card-aside vp-report-head-actions" });
-    aside.createSpan({ cls: "vp-report-hint", text: "先预览，再保存为笔记" });
+    aside.createSpan({ cls: "vp-report-hint", text: L("先预览，再保存为笔记", "Preview, then save as a note") });
     const toggle = aside.createEl("button", { cls: "vp-report-toggle", attr: { type: "button" } });
     const chevron = toggle.createSpan({ cls: "vp-report-chevron", attr: { "aria-hidden": "true" } });
     const label = toggle.createSpan();
     const detailPanels: HTMLElement[] = [];
     const rows = body.createDiv({ cls: "vp-report-rows" });
     const settings = this.plugin.settings;
-    const shortDate = (date: Date) => `${date.getMonth() + 1}月${date.getDate()}日`;
+    const shortDate = (date: Date) => monthDay(date);
     for (const kind of ["week", "month"] as const) {
       const weekly = kind === "week";
-      const title = weekly ? "周报" : "月报";
+      const title = weekly ? L("周报", "Weekly report") : L("月报", "Monthly report");
       const { period, current: summary, metrics } = writingReportOverview(this.stats, settings, kind);
       const [total, checkins] = metrics;
       const row = rows.createDiv({ cls: `vp-report-row is-${kind}` });
@@ -1681,8 +1856,8 @@ export class DashboardView extends ItemView {
       heading.createSpan({ cls: "vp-report-range", text: `${shortDate(period.start)}–${shortDate(addDays(period.end, -1))}` });
       const actions = bar.createDiv({ cls: "vp-report-row-actions" });
       const id = `vp-report-details-${++reportDetailsId}`;
-      const generate = actions.createEl("button", { cls: "vp-btn is-compact is-primary vp-report-generate", text: "生成", attr: {
-        type: "button", "aria-label": `生成${title}`,
+      const generate = actions.createEl("button", { cls: "vp-btn is-compact is-primary vp-report-generate", text: L("生成", "Create"), attr: {
+        type: "button", "aria-label": L(`生成${title}`, `Create ${title.toLowerCase()}`),
       } });
       generate.addEventListener("click", () => void this.plugin.openWritingReport(kind));
       const data = row.createDiv({ cls: "vp-report-summary" });
@@ -1691,7 +1866,7 @@ export class DashboardView extends ItemView {
       const totalValue = totalBlock.createDiv({ cls: "vp-report-metric-value" });
       const words = totalValue.createSpan({ cls: "vp-report-words" });
       words.createSpan({ cls: "vp-report-number", text: total.value });
-      words.createSpan({ cls: "vp-report-unit", text: "字" });
+      words.createSpan({ cls: "vp-report-unit", text: total.unit });
       totalValue.createSpan({ cls: `vp-report-change is-${total.trend}`, text: total.detail });
       const checkinBlock = data.createDiv({ cls: "vp-report-checkins" });
       checkinBlock.createDiv({ cls: "vp-report-metric-label", text: checkins.label });
@@ -1702,11 +1877,12 @@ export class DashboardView extends ItemView {
         const goal = settings.weeklyWordGoal;
         const progress = Math.min(100, summary.words / goal * 100);
         const goalBlock = data.createDiv({ cls: "vp-report-goal" });
-        goalBlock.createDiv({ cls: "vp-report-metric-label", text: `目标 ${Math.round(progress)}%` });
+        goalBlock.createDiv({ cls: "vp-report-metric-label", text: L(`目标 ${Math.round(progress)}%`, `Goal ${Math.round(progress)}%`) });
         const goalValue = goalBlock.createDiv({ cls: "vp-report-metric-value" });
         const meter = goalValue.createDiv({ cls: "vp-report-meter", attr: {
-          role: "progressbar", "aria-label": "每周字数目标", "aria-valuemin": "0", "aria-valuemax": String(goal),
-          "aria-valuenow": String(Math.min(summary.words, goal)), "aria-valuetext": `已写 ${fmtFull(summary.words)} 字，目标 ${fmtFull(goal)} 字`,
+          role: "progressbar", "aria-label": L("每周字数目标", "Weekly word goal"), "aria-valuemin": "0", "aria-valuemax": String(goal),
+          "aria-valuenow": String(Math.min(summary.words, goal)),
+          "aria-valuetext": L(`已写 ${fmtFull(summary.words)} 字，目标 ${fmtFull(goal)} 字`, `${fmtFull(summary.words)} of ${fmtFull(goal)} words`),
         } });
         meter.createDiv({ cls: "vp-report-fill" }).setCssProps({ "--vp-report-progress": `${progress}%` });
       }
@@ -1715,14 +1891,14 @@ export class DashboardView extends ItemView {
         const elapsed = summary.elapsedDays;
         const progress = elapsed / days * 100;
         const monthBlock = data.createDiv({ cls: "vp-report-goal vp-report-month-progress" });
-        monthBlock.createDiv({ cls: "vp-report-metric-label", text: `本月进度 ${Math.round(progress)}%` });
+        monthBlock.createDiv({ cls: "vp-report-metric-label", text: L(`本月进度 ${Math.round(progress)}%`, `Month ${Math.round(progress)}%`) });
         const monthValue = monthBlock.createDiv({ cls: "vp-report-metric-value" });
         const meter = monthValue.createDiv({ cls: "vp-report-meter", attr: {
-          role: "progressbar", "aria-label": "本月进度", "aria-valuemin": "0", "aria-valuemax": String(days),
-          "aria-valuenow": String(elapsed), "aria-valuetext": `第 ${elapsed} / ${days} 天`,
+          role: "progressbar", "aria-label": L("本月进度", "Month progress"), "aria-valuemin": "0", "aria-valuemax": String(days),
+          "aria-valuenow": String(elapsed), "aria-valuetext": L(`第 ${elapsed} / ${days} 天`, `Day ${elapsed} of ${days}`),
         } });
         meter.createDiv({ cls: "vp-report-fill" }).setCssProps({ "--vp-report-progress": `${progress}%` });
-        monthBlock.createDiv({ cls: "vp-report-progress-detail", text: `第 ${elapsed} / ${days} 天` });
+        monthBlock.createDiv({ cls: "vp-report-progress-detail", text: L(`第 ${elapsed} / ${days} 天`, `Day ${elapsed} of ${days}`) });
       }
       const details = row.createDiv({ cls: "vp-report-details", attr: { id } });
       detailPanels.push(details);
@@ -1739,7 +1915,7 @@ export class DashboardView extends ItemView {
     const updateExpanded = () => {
       for (const details of detailPanels) details.hidden = !settings.reportWeekExpanded;
       toggle.setAttr("aria-expanded", String(settings.reportWeekExpanded));
-      label.setText(settings.reportWeekExpanded ? "收起" : "展开");
+      label.setText(settings.reportWeekExpanded ? COLLAPSE() : L("展开", "Expand"));
       setIcon(chevron, settings.reportWeekExpanded ? "chevron-up" : "chevron-down");
     };
     updateExpanded();
@@ -1752,7 +1928,7 @@ export class DashboardView extends ItemView {
     if (latest) {
       const recent = body.createDiv({ cls: "vp-report-recent" });
       setIcon(recent.createSpan({ cls: "vp-report-recent-icon", attr: { "aria-hidden": "true" } }), "history");
-      recent.createSpan({ cls: "vp-report-recent-label", text: "上次生成：" });
+      recent.createSpan({ cls: "vp-report-recent-label", text: L("上次生成：", "Last created: ") });
       const link = recent.createEl("a", { cls: "vp-report-recent-link", text: latest.basename, attr: { href: latest.path } });
       link.addEventListener("click", (event) => {
         event.preventDefault();
@@ -1775,7 +1951,7 @@ function cleanTaskText(t: string): string {
 
 export function noticeError(e: unknown) {
   console.error("[note-pulse]", e);
-  new Notice("Note Pulse：统计出错，详情见开发者控制台");
+  new Notice(L("Note Pulse：统计出错，详情见开发者控制台", "Note Pulse: counting failed. See the developer console for details."));
 }
 
 

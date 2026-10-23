@@ -10,6 +10,7 @@ import { ScanControl, ScanProgress, cacheKey, runScan } from "./scanner";
 import { ClipDedupeSettings, DEFAULT_SETTINGS } from "./settings";
 import { BackupStore, ScanCache } from "./store";
 import { ClipDedupeView, VIEW_TYPE_CLIP_DEDUPE } from "./view";
+import { L } from "../i18n";
 
 export interface BackupInfo {
   id: string;
@@ -73,17 +74,17 @@ export class DedupeService {
 
     p.registerView(VIEW_TYPE_CLIP_DEDUPE, (leaf) => new ClipDedupeView(leaf, this));
     // Opening shows the welcome screen first, so nobody starts a scan without knowing what it does
-    this.ribbonEl = p.addRibbonIcon("layers", "重复内容清理", () => void this.openReport(false));
+    this.ribbonEl = p.addRibbonIcon("layers", t("pluginName"), () => void this.openReport(false));
     this.applyEnabled();
     const when = (fn: () => void) => (checking: boolean) => {
       if (!this.enabled) return false;
       if (!checking) fn();
       return true;
     };
-    p.addCommand({ id: "dedupe-open", name: "打开重复内容清理", checkCallback: when(() => void this.openReport(false)) });
-    p.addCommand({ id: "dedupe-scan", name: "扫描重复内容", checkCallback: when(() => void this.openReport(true)) });
-    p.addCommand({ id: "dedupe-undo-last", name: "撤销上一次重复内容清理", checkCallback: when(() => void this.undoLast()) });
-    p.addCommand({ id: "dedupe-help", name: "重复内容清理：使用说明", checkCallback: when(() => this.openHelp()) });
+    p.addCommand({ id: "dedupe-open", name: L("打开重复内容清理", "Open duplicate cleanup"), checkCallback: when(() => void this.openReport(false)) });
+    p.addCommand({ id: "dedupe-scan", name: L("扫描重复内容", "Scan for duplicate content"), checkCallback: when(() => void this.openReport(true)) });
+    p.addCommand({ id: "dedupe-undo-last", name: L("撤销上一次重复内容清理", "Undo the last duplicate cleanup"), checkCallback: when(() => void this.undoLast()) });
+    p.addCommand({ id: "dedupe-help", name: L("重复内容清理：使用说明", "Duplicate cleanup: how it works"), checkCallback: when(() => this.openHelp()) });
 
     p.app.workspace.onLayoutReady(() => {
       const changed = (f: TAbstractFile) => {
@@ -126,7 +127,7 @@ export class DedupeService {
 
   async openReport(scanNow: boolean) {
     if (!this.enabled) {
-      new Notice("重复内容清理已在设置中关闭");
+      new Notice(L("重复内容清理已在设置中关闭", "Duplicate cleanup is turned off in settings"));
       return;
     }
     const { workspace } = this.app;
