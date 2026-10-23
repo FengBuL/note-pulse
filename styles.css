@@ -509,6 +509,10 @@
   gap: 30px;
   flex: 1;
 }
+/* M：没有本周七天，只剩圆环和连续打卡两栏 */
+.vp-w.is-m .vp-hero-main {
+  grid-template-columns: auto minmax(0, 1fr);
+}
 .vp-hero-streak {
   display: flex;
   flex-direction: column;
@@ -1365,6 +1369,10 @@
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: var(--vp-s5) 28px;
+}
+/* L（8 列）放不下三栏操作按钮，改两栏 */
+.vp-w.is-l .vp-checkup {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 .vp-checkup-col {
   display: flex;

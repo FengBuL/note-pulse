@@ -1047,6 +1047,9 @@ export class DashboardView extends ItemView {
     const todayDiary = s.dailyNotes[ck.todayKey];
     if (todayDiary) this.clickable(diary, L("打开今天的日记", "Open today's daily note"), (e) => void this.plugin.openFile(todayDiary, undefined, e));
 
+    // M：只有今日字数和连续打卡；L / XL 再加本周七天和今天写过的笔记
+    if (this.sizeOf("hero") === "m") return;
+
     // 本周
     main.appendChild(this.renderWeek(s, goal, now));
 
@@ -1741,7 +1744,10 @@ export class DashboardView extends ItemView {
       return;
     }
     const todayKey = dayKey(Date.now());
-    const limit = this.taskExpanded ? 50 : 4;
+    // L 比 M 多放几行；展开后都是 50
+    const big = this.sizeOf("tasks") === "l";
+    const limit = this.taskExpanded ? 50 : big ? 8 : 4;
+    const odLimit = this.taskExpanded ? 50 : big ? 4 : 2;
 
     if (this.taskTab === "due") {
       const area = this.listArea(el, body, this.taskExpanded);
@@ -1749,12 +1755,12 @@ export class DashboardView extends ItemView {
         const od = area.createDiv({ cls: "vp-overdue" });
         od.createDiv({ cls: "vp-overdue-title", text: L(`已逾期 ${t.overdue.length}`, `Overdue ${t.overdue.length}`) });
         const list = od.createDiv({ cls: "vp-rows" });
-        for (const it of t.overdue.slice(0, this.taskExpanded ? 50 : 2)) this.taskRow(list, it, true);
+        for (const it of t.overdue.slice(0, odLimit)) this.taskRow(list, it, true);
       }
       const list = area.createDiv({ cls: "vp-rows" });
       if (t.dueSoon.length === 0 && !t.overdue.length) this.empty(list, "party-popper", L("7 天内没有到期的任务", "Nothing due in the next 7 days"));
       for (const it of t.dueSoon.slice(0, limit)) this.taskRow(list, it, false, it.due === todayKey);
-      const hidden = Math.max(0, t.dueSoon.length - limit) + Math.max(0, t.overdue.length - (this.taskExpanded ? 50 : 2));
+      const hidden = Math.max(0, t.dueSoon.length - limit) + Math.max(0, t.overdue.length - odLimit);
       const more = body.createDiv({ cls: "vp-card-foot" });
       if (hidden > 0 || this.taskExpanded) {
         this.moreLink(more, this.taskExpanded ? COLLAPSE() : L(`展开另外 ${hidden} 项`, `Show ${hidden} more`), () => {
@@ -1770,7 +1776,8 @@ export class DashboardView extends ItemView {
         this.empty(list, "party-popper", L("所有任务都完成了", "All tasks are done"));
         return;
       }
-      for (const g of groups.slice(0, this.taskExpanded ? 50 : 6)) {
+      const shownGroups = big ? 12 : 6;
+      for (const g of groups.slice(0, this.taskExpanded ? 50 : shownGroups)) {
         const row = list.createDiv({ cls: "vp-row vp-group-row" });
         row.createSpan({ cls: "vp-row-name", text: folderName(g.key) });
         const m = row.createDiv({ cls: "vp-meter is-inline" });
@@ -1778,8 +1785,9 @@ export class DashboardView extends ItemView {
         row.createSpan({ cls: "vp-row-meta vp-tabular", text: L(`待办 ${g.pending}`, `${g.pending} open`) });
         if (g.key !== ROOT_FOLDER) this.clickable(row, L(`${g.key}，待办 ${g.pending}`, `${g.key}, ${g.pending} open`), () => this.plugin.revealFolder(g.key));
       }
-      if (groups.length > 6) {
-        this.moreLink(body.createDiv({ cls: "vp-card-foot" }), this.taskExpanded ? COLLAPSE() : L(`展开另外 ${groups.length - 6} 个文件夹`, `Show ${groups.length - 6} more ${plural(groups.length - 6, "folder")}`), () => {
+      if (groups.length > shownGroups) {
+        const more = groups.length - shownGroups;
+        this.moreLink(body.createDiv({ cls: "vp-card-foot" }), this.taskExpanded ? COLLAPSE() : L(`展开另外 ${more} 个文件夹`, `Show ${more} more ${plural(more, "folder")}`), () => {
           this.taskExpanded = !this.taskExpanded;
           this.rerender("tasks", "resize");
         });
@@ -1840,7 +1848,7 @@ export class DashboardView extends ItemView {
       this.tagsExpanded = false;
       this.rerender("tags");
     });
-    const limit = this.tagsExpanded ? 30 : 6;
+    const limit = this.tagsExpanded ? 30 : this.sizeOf("tags") === "l" ? 12 : 6;
     let items: BarItem[];
     if (isTags) {
       const since = weekStart(new Date(s.generatedAt)).getTime();
@@ -1868,7 +1876,7 @@ export class DashboardView extends ItemView {
       (el) => setIcon(el.createDiv({ cls: "vp-empty-icon" }), isTags ? "tag" : "folder")
     );
     const total = isTags ? s.tags.length : s.folders.length;
-    if (total > 6) {
+    if (total > (this.sizeOf("tags") === "l" ? 12 : 6)) {
       this.moreLink(body.createDiv({ cls: "vp-card-foot" }), this.tagsExpanded ? COLLAPSE() : L(`全部 ${total} 个${isTags ? "标签" : "文件夹"}`, `All ${count(total, isTags ? "tags" : "folders")}`), () => {
         this.tagsExpanded = !this.tagsExpanded;
         this.rerender("tags", "resize");
