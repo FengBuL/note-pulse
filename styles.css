@@ -267,16 +267,16 @@
   gap: var(--vp-s4);
 }
 /* 2.0 小组件档位：S 3 列 · M 4 列 · L 8 列 · XL 整行（M/L 和 1.8 的 4/8 分栏一致） */
-.vp-grid > .vp-w.is-s {
+.vp-grid .vp-w.is-s {
   grid-column: span 3;
 }
-.vp-grid > .vp-w.is-m {
+.vp-grid .vp-w.is-m {
   grid-column: span 4;
 }
-.vp-grid > .vp-w.is-l {
+.vp-grid .vp-w.is-l {
   grid-column: span 8;
 }
-.vp-grid > .vp-w.is-xl {
+.vp-grid .vp-w.is-xl {
   grid-column: 1 / -1;
 }
 
@@ -1728,9 +1728,9 @@
 
 @container vd (max-width: 1080px) {
   /* 中等宽度：M / L / XL 占满，S 仍然四张一行（和 1.8 一样） */
-  .vp-grid > .vp-w.is-m,
-  .vp-grid > .vp-w.is-l,
-  .vp-grid > .vp-w.is-xl {
+  .vp-grid .vp-w.is-m,
+  .vp-grid .vp-w.is-l,
+  .vp-grid .vp-w.is-xl {
     grid-column: 1 / -1;
   }
   .vp-checkup {
@@ -1746,7 +1746,7 @@
     gap: var(--vp-s3);
   }
   /* 窄：S 两张一行 */
-  .vp-grid > .vp-w.is-s {
+  .vp-grid .vp-w.is-s {
     grid-column: span 6;
   }
   .vp-card,

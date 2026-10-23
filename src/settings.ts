@@ -365,6 +365,21 @@ export class DashboardSettingTab extends PluginSettingTab {
               ),
           },
           {
+            name: L("看板布局", "Dashboard layout"),
+            desc: L(
+              "点看板右上角的铅笔编辑：换卡片尺寸、调整顺序、移除或添加卡片。布局随库同步，几台设备看到的看板一样；窄屏会自动把卡片排成一列或两列。",
+              "Use the pencil at the top right of the dashboard to change card sizes, reorder, remove or add cards. The layout syncs with the vault, so every device shows the same dashboard; narrow screens stack cards automatically."
+            ),
+            render: (setting) =>
+              setting.addButton((b) =>
+                b.setButtonText(L("恢复默认布局", "Restore default layout")).onClick(async () => {
+                  st.layout = defaultLayout();
+                  await this.plugin.saveViewSetting();
+                  this.plugin.refreshViewsOnly();
+                })
+              ),
+          },
+          {
             name: L("动效", "Motion"),
             desc: L("打开看板时卡片依次出现、数字滚动到当前值，切换和展开时平滑过渡；自动刷新只让变化了的数字动。系统开了“减弱动态效果”时始终关闭。", "Cards appear one after another and numbers count up when the dashboard opens; switching and expanding animate smoothly; auto refresh only animates numbers that changed. Always off when your system asks for reduced motion."),
             render: (setting) =>

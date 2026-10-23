@@ -25,7 +25,7 @@ import {
 } from "./dashboard-logic";
 import { GroupStat, Hint, TaskInfo, VaultStats, addDays, dayKey, isCheckinDay, pad2, startOfDay } from "./stats";
 import { WidgetId, WidgetLayout, WidgetSize, addWidget, defaultLayout, hiddenWidgets, moveWidget, placeWidget, removeWidget, sameLayout, setSize, widgetInfo } from "./widgets";
-import { MOTION, SegRect, animateHeight, countUp, drawLines, markStagger, reducedMotion, segRect, slideSeg } from "./motion";
+import { MOTION, SegRect, animateHeight, countUp, drawLines, markStagger, playLayout, reducedMotion, segRect, slideSeg, snapshotRects } from "./motion";
 import {
   BarItem,
   SeriesPoint,
@@ -431,7 +431,10 @@ export class DashboardView extends ItemView {
     if (sameLayout(next, this.plugin.settings.layout)) return;
     this.plugin.settings.layout = next;
     void this.plugin.saveViewSetting();
+    // 卡片从原来的位置滑到新位置（换尺寸、挪动、拖放），新加的淡入
+    const before = this.motionOn() && this.gridEl ? snapshotRects(this.gridEl) : null;
     if (this.stats) this.render(this.stats);
+    if (before && this.gridEl) playLayout(this.gridEl, before);
     if (focusId) this.contentEl.querySelector<HTMLElement>(`[data-fid="${focusId}"]`)?.focus({ preventScroll: true });
   }
 
@@ -446,7 +449,7 @@ export class DashboardView extends ItemView {
     el.addClass("is-editing");
     const bar = el.createDiv({ cls: "vp-w-tools", attr: { role: "toolbar", "aria-label": L(`${name}：编辑`, `Edit ${name}`) } });
     el.prepend(bar);
-    bar.createSpan({ cls: "vp-w-name", text: L(`拖动或用箭头换位置`, "Drag or use the arrows to move") });
+    bar.createSpan({ cls: "vp-w-name", text: Platform.isMobile ? L("用箭头换位置", "Use the arrows to move") : L("拖动或用箭头换位置", "Drag or use the arrows to move") });
     if (info.sizes.length > 1) {
       const seg = bar.createDiv({ cls: "vp-seg", attr: { role: "radiogroup", "aria-label": L("尺寸", "Size") } });
       for (const sz of ["s", "m", "l", "xl"] as WidgetSize[]) {
@@ -468,7 +471,8 @@ export class DashboardView extends ItemView {
     btn("chevron-up", L("往前挪", "Move earlier"), `edit:${id}:up`, idx <= 0, () => this.applyLayout(moveWidget(this.plugin.settings.layout, id, -1), `edit:${id}:up`));
     btn("chevron-down", L("往后挪", "Move later"), `edit:${id}:down`, idx >= layout.items.length - 1, () => this.applyLayout(moveWidget(this.plugin.settings.layout, id, 1), `edit:${id}:down`));
     btn("x", L("从看板上移除", "Remove from dashboard"), `edit:${id}:hide`, false, () => this.applyLayout(removeWidget(this.plugin.settings.layout, id)));
-    // 拖动换位置（鼠标）；键盘用上面的前移 / 后移
+    // 拖动换位置（鼠标）；键盘和触屏用上面的前移 / 后移（触屏没有 HTML5 拖放，加了 draggable 反而会挡住滚动）
+    if (Platform.isMobile) return;
     el.setAttr("draggable", "true");
     el.addEventListener("dragstart", (e) => {
       if ((e.target as HTMLElement).closest?.(".vp-w-tools")) return;
@@ -572,17 +576,20 @@ export class DashboardView extends ItemView {
     const intro = this.motionMode === "intro";
     const enter = intro ? Math.min(0.6, this.enterOrder / 14) : 0;
     this.enterDelay = enter * MOTION.stagger - this.introElapsed;
+    const mountSize = this.sizeOf(key);
+    this.mountingWidget = mountSize ? { id: key, size: mountSize } : null;
     try {
       fn(parent);
     } finally {
       this.currentPart = prev;
+      this.mountingWidget = null;
     }
     const el = parent.lastElementChild as HTMLElement | null;
     if (!el) return;
     this.parts.set(key, el);
-    const size = this.sizeOf(key);
-    if (size) {
-      el.addClass("vp-w", `is-${size}`);
+    if (mountSize) {
+      // cardRoot 已经加过；这里兜底（万一渲染函数没用 cardRoot）
+      el.addClass("vp-w", `is-${mountSize}`);
       el.setAttr("data-widget", key);
       if (this.editing) this.editTools(el, key as WidgetId);
     }
@@ -770,8 +777,24 @@ export class DashboardView extends ItemView {
     this.helpAnchor = null;
   }
 
+  /**
+   * 建卡片根元素。正在挂载小组件时，立刻带上尺寸类（vp-w is-m 等）：
+   * 图表在渲染时就量宽度，晚一步加类的话会先按一列宽（几十像素）画一遍。
+   */
+  private cardRoot(parent: HTMLElement, cls: string, attr?: Record<string, string>): HTMLElement {
+    const el = parent.createDiv({ cls: `vp-card ${cls}`, attr });
+    if (this.mountingWidget) {
+      el.addClass("vp-w", `is-${this.mountingWidget.size}`);
+      el.setAttr("data-widget", this.mountingWidget.id);
+    }
+    return el;
+  }
+
+  /** mount 期间正在渲染的小组件 */
+  private mountingWidget: { id: string; size: WidgetSize } | null = null;
+
   private card(parent: HTMLElement, cls: string, title: string, icon: string, help?: string): { el: HTMLElement; head: HTMLElement; body: HTMLElement } {
-    const el = parent.createDiv({ cls: `vp-card ${cls}` });
+    const el = this.cardRoot(parent, cls);
     const head = el.createDiv({ cls: "vp-card-head" });
     const h = head.createDiv({ cls: "vp-card-title" });
     setIcon(h.createSpan({ cls: "vp-card-icon", attr: { "aria-hidden": "true" } }), icon);
@@ -1003,7 +1026,7 @@ export class DashboardView extends ItemView {
     const settings = this.plugin.settings;
     const goal = settings.dailyWordGoal;
     const now = new Date(s.generatedAt);
-    const hero = grid.createDiv({ cls: "vp-card vp-hero" });
+    const hero = this.cardRoot(grid, "vp-hero");
     const todayDone = ck.isActive(ck.todayKey);
 
     const head = hero.createDiv({ cls: "vp-card-head" });
@@ -1172,7 +1195,7 @@ export class DashboardView extends ItemView {
     const range = (a: Date, b: Date) => (dayKey(a) === dayKey(b) ? `${a.getMonth() + 1}/${a.getDate()}` : `${a.getMonth() + 1}/${a.getDate()} – ${b.getMonth() + 1}/${b.getDate()}`);
 
     const kpi = (icon: string, label: string, help: string) => {
-      const c = wrap.createDiv({ cls: "vp-card vp-kpi", attr: { role: "group" } });
+      const c = this.cardRoot(wrap, "vp-kpi", { role: "group" });
       srLabel(c, label);
       const top = c.createDiv({ cls: "vp-kpi-top" });
       setIcon(top.createSpan({ cls: "vp-card-icon", attr: { "aria-hidden": "true" } }), icon);

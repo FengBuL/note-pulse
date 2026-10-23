@@ -140,3 +140,32 @@ export function drawLines(root: HTMLElement, delay: number) {
     });
   });
 }
+
+/** FLIP：记下每张卡片（按 data-widget）重画前的位置 */
+export function snapshotRects(root: HTMLElement): Map<string, DOMRect> {
+  const out = new Map<string, DOMRect>();
+  root.querySelectorAll<HTMLElement>("[data-widget]").forEach((el) => out.set(el.dataset.widget as string, el.getBoundingClientRect()));
+  return out;
+}
+
+/** FLIP：重画之后，每张卡片从旧位置和大小平滑过渡到新的；新出现的卡片淡入 */
+export function playLayout(root: HTMLElement, before: Map<string, DOMRect>) {
+  root.querySelectorAll<HTMLElement>("[data-widget]").forEach((el) => {
+    if (!el.animate) return;
+    const old = before.get(el.dataset.widget as string);
+    const now = el.getBoundingClientRect();
+    if (!old) {
+      el.animate([{ opacity: 0, transform: "scale(0.97)" }, { opacity: 1, transform: "none" }], { duration: MOTION.base + 120, easing: EASE });
+      return;
+    }
+    const dx = old.left - now.left;
+    const dy = old.top - now.top;
+    const sx = now.width ? old.width / now.width : 1;
+    const sy = now.height ? old.height / now.height : 1;
+    if (Math.abs(dx) < 1 && Math.abs(dy) < 1 && Math.abs(sx - 1) < 0.01 && Math.abs(sy - 1) < 0.01) return;
+    el.animate(
+      [{ transformOrigin: "top left", transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})` }, { transformOrigin: "top left", transform: "none" }],
+      { duration: MOTION.resize, easing: EASE }
+    );
+  });
+}
