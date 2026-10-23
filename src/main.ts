@@ -1,4 +1,4 @@
-import { Notice, Plugin, TAbstractFile, TFile, TFolder, WorkspaceLeaf, debounce, Debouncer, normalizePath } from "obsidian";
+import { Notice, Platform, Plugin, TAbstractFile, TFile, TFolder, WorkspaceLeaf, debounce, Debouncer, normalizePath } from "obsidian";
 import { DashboardSettings, DEFAULT_SETTINGS, DashboardSettingTab, SETTINGS_VERSION, migrateLanguage, migrateWritingSettings, normalizeFolder, splitList } from "./settings";
 import { ContentInfo, PersistentData, VaultStats, computeStats, includedFiles, syncContent, dayKey } from "./stats";
 import { DashboardView, VIEW_TYPE_PULSE, noticeError } from "./view";
@@ -7,11 +7,15 @@ import { ReportKind } from "./report-logic";
 import { WordPropsService } from "./wordprops";
 import { DedupeService, normalizeDedupeSettings } from "./dedupe/service";
 import { L } from "./i18n";
+import { DeviceLog, emptyDeviceLog, isDeviceId, newDeviceId, normalizeDeviceLog } from "./devices";
 
 interface SavedData {
   settings: DashboardSettings;
+  /** 1.7.0 之前的每日新增（所有设备混在一起）；1.7.0 起只读，新增写进 devices/<设备 ID>.json */
   wordLog: Record<string, number>;
   wordLogBig?: Record<string, number>;
+  /** 有这个字段说明已经换成按设备记录，wordLog 不再增长 */
+  devicesSince?: string;
   logInitialized: boolean;
   logStartDay?: string;
   /** ≤1.0.0 的遗留字段 */
@@ -44,6 +48,9 @@ interface CacheFile {
 }
 
 const CACHE_FILE = "cache.json";
+const DEVICES_DIR = "devices";
+/** 设备 ID 存在本机 localStorage：不随库同步，所以每台设备各有一个 */
+const DEVICE_KEY = "note-pulse-device-id";
 const CACHE_VERSION = 1;
 
 export default class NotePulsePlugin extends Plugin {
@@ -53,6 +60,12 @@ export default class NotePulsePlugin extends Plugin {
   wordProps: WordPropsService = new WordPropsService(this);
   dedupe: DedupeService = new DedupeService(this);
   private contentCache = new Map<string, ContentInfo>();
+  deviceId = "";
+  /** 本机设备文件里的名字和更新时间（字数在 this.data.wordLog 里） */
+  device: DeviceLog = emptyDeviceLog("");
+  /** 其它设备，按设备 ID；设置页列出来 */
+  otherDevices = new Map<string, DeviceLog>();
+  private deviceDirty = false;
   private running = false;
   private rerun = false;
   /** 所有写入内容缓存 / 每日记录的任务串行执行，避免并发重复计数 */
@@ -119,6 +132,13 @@ export default class NotePulsePlugin extends Plugin {
       const trigger = () => this.onVaultChanged();
       this.wordProps.register();
       this.registerEvent(this.app.metadataCache.on("changed", trigger));
+      // 本机编辑器里打的字才算本机的写作；同步进来的、外部程序写的只更新基线
+      this.registerEvent(
+        this.app.workspace.on("editor-change", (_editor, info) => {
+          const f = info.file;
+          if (f && f.extension === "md") this.data.localEdits?.set(f.path, Date.now());
+        })
+      );
       this.registerEvent(this.app.vault.on("create", (f: TAbstractFile) => f instanceof TFile && trigger()));
       this.registerEvent(
         this.app.vault.on("modify", (f: TAbstractFile) => {
@@ -141,6 +161,11 @@ export default class NotePulsePlugin extends Plugin {
             this.contentCache.delete(oldPath);
             this.contentCache.set(f.path, c);
             this.data.cacheDirty = true;
+          }
+          const edited = this.data.localEdits?.get(oldPath);
+          if (edited !== undefined && f instanceof TFile) {
+            this.data.localEdits?.delete(oldPath);
+            this.data.localEdits?.set(f.path, edited);
           }
           trigger();
         })
@@ -251,6 +276,8 @@ export default class NotePulsePlugin extends Plugin {
         this.rerun = false;
         this.stale = false;
         for (const v of this.getViews()) v.showLoading(L("正在统计…", "Counting…"));
+        // 先把其它设备同步过来的记录读进来
+        await this.loadDevices();
         const stats = await this.enqueue(() =>
           computeStats(this.app, this.settings, this.contentCache, this.data, (d, t) => {
             for (const v of this.getViews()) v.setProgress(d, t);
@@ -352,6 +379,20 @@ export default class NotePulsePlugin extends Plugin {
   async resetLog() {
     this.data.wordLog = {};
     this.data.wordLogBig = {};
+    this.data.legacyLog = {};
+    this.data.legacyLogBig = {};
+    this.data.otherLogs = [];
+    // 所有设备的记录都清掉，否则别的设备的旧记录还会被加回来
+    try {
+      const adapter = this.app.vault.adapter;
+      if (await adapter.exists(this.devicesDir)) {
+        for (const path of (await adapter.list(this.devicesDir)).files) if (path.endsWith(".json")) await adapter.remove(path);
+      }
+    } catch (e) {
+      console.warn("[note-pulse] 清除设备记录失败", e);
+    }
+    this.otherDevices.clear();
+    this.deviceDirty = true;
     this.data.logInitialized = false;
     this.data.logStartDay = "";
     this.data.legacyFileWords = undefined;
@@ -392,16 +433,23 @@ export default class NotePulsePlugin extends Plugin {
     migrateLanguage(this.settings, !!raw.settings, raw.settings?.settingsVersion ?? 1);
     this.settings.settingsVersion = SETTINGS_VERSION;
 
-    const wordLog = raw.wordLog || {};
-    const logDays = Object.keys(wordLog).sort();
+    // 1.7.0：data.json 里的旧记录冻结为“1.7.0 之前”，本机的新增写自己的设备文件
+    const legacyLog = raw.wordLog || {};
+    const logDays = Object.keys(legacyLog).sort();
+    this.devicesSince = raw.devicesSince || dayKey(Date.now());
     this.data = {
-      wordLog,
-      wordLogBig: raw.wordLogBig || {},
+      wordLog: {},
+      wordLogBig: {},
+      legacyLog,
+      legacyLogBig: raw.wordLogBig || {},
+      otherLogs: [],
+      localEdits: new Map(),
       logInitialized: !!raw.logInitialized,
       logStartDay: raw.logStartDay || (raw.logInitialized ? logDays[0] || dayKey(Date.now()) : ""),
       legacyFileWords: raw.fileWords && Object.keys(raw.fileWords).length ? raw.fileWords : undefined,
-      dirty: !!raw.fileWords || (raw.settings?.settingsVersion ?? 1) < SETTINGS_VERSION || migrated,
+      dirty: !!raw.fileWords || (raw.settings?.settingsVersion ?? 1) < SETTINGS_VERSION || migrated || !raw.devicesSince,
     };
+    await this.loadDevices();
 
     // 内容缓存：[mtime, size, words, logged, taskLines]
     let cacheOk = false;
@@ -420,6 +468,92 @@ export default class NotePulsePlugin extends Plugin {
       console.warn("[note-pulse] 读取缓存失败，将重新统计", e);
     }
     if (!cacheOk && this.data.logInitialized && !this.data.legacyFileWords) this.data.seedOnly = true;
+  }
+
+  private devicesSince = "";
+
+  private get devicesDir(): string {
+    return normalizePath(`${this.manifest.dir ?? `${this.app.vault.configDir}/plugins/${this.manifest.id}`}/${DEVICES_DIR}`);
+  }
+
+  private devicePath(id: string): string {
+    return normalizePath(`${this.devicesDir}/${id}.json`);
+  }
+
+  /** 本机设备 ID：第一次运行时生成，存在 localStorage */
+  private ensureDeviceId(): string {
+    let id: string | null = null;
+    try {
+      id = window.localStorage.getItem(DEVICE_KEY);
+    } catch {
+      id = null;
+    }
+    if (!isDeviceId(id)) {
+      id = newDeviceId();
+      try {
+        window.localStorage.setItem(DEVICE_KEY, id);
+      } catch {
+        // localStorage 不可用时本次会话仍用这个 ID；下次启动会再生成一个新设备，记录不会丢，只是多一个设备
+      }
+    }
+    return id;
+  }
+
+  private defaultDeviceName(): string {
+    if (Platform.isIosApp) return Platform.isTablet ? "iPad" : "iPhone";
+    if (Platform.isAndroidApp) return Platform.isTablet ? L("安卓平板", "Android tablet") : L("安卓手机", "Android phone");
+    if (Platform.isMacOS) return "Mac";
+    if (Platform.isWin) return "Windows";
+    if (Platform.isLinux) return "Linux";
+    return L("这台设备", "This device");
+  }
+
+  /** 读取本机和其它设备的记录 */
+  async loadDevices() {
+    this.deviceId = this.ensureDeviceId();
+    const adapter = this.app.vault.adapter;
+    const others = new Map<string, DeviceLog>();
+    let mine: DeviceLog | null = null;
+    try {
+      if (await adapter.exists(this.devicesDir)) {
+        const listed = await adapter.list(this.devicesDir);
+        for (const path of listed.files) {
+          const name = path.split("/").pop() || "";
+          const id = name.replace(/\.json$/, "");
+          if (!name.endsWith(".json") || !isDeviceId(id)) continue;
+          try {
+            const log = normalizeDeviceLog(JSON.parse(await adapter.read(path)) as unknown, id);
+            if (!log) continue;
+            if (id === this.deviceId) mine = log;
+            else others.set(id, log);
+          } catch (e) {
+            console.warn("[note-pulse] 读取设备记录失败", path, e);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("[note-pulse] 读取设备记录失败", e);
+    }
+    // 本机的记录：内存里可能有还没保存的新增（重新读取时），以内存为准，按天取较大值
+    const current = this.device.updated ? { wordLog: this.data.wordLog, wordLogBig: this.data.wordLogBig } : null;
+    this.device = mine ?? emptyDeviceLog(this.defaultDeviceName());
+    if (!mine) this.deviceDirty = true;
+    const pick = (disk: Record<string, number>, mem?: Record<string, number>) => {
+      const out = { ...disk };
+      if (mem) for (const [k, v] of Object.entries(mem)) out[k] = Math.max(out[k] || 0, v);
+      return out;
+    };
+    this.data.wordLog = pick(this.device.wordLog, current?.wordLog);
+    this.data.wordLogBig = pick(this.device.wordLogBig, current?.wordLogBig);
+    this.otherDevices = others;
+    this.data.otherLogs = [...others.values()].map((d) => ({ wordLog: d.wordLog, wordLogBig: d.wordLogBig }));
+  }
+
+  /** 给本机改名（设置页） */
+  async renameDevice(name: string) {
+    this.device.name = name.trim() || this.defaultDeviceName();
+    this.deviceDirty = true;
+    await this.persist();
   }
 
   /** 读取独立版 Clip Dedupe 的设置（若存在），只读，不改动它的文件 */
@@ -451,7 +585,7 @@ export default class NotePulsePlugin extends Plugin {
   }
 
   schedulePersist() {
-    if (this.data.dirty || this.data.cacheDirty) this.persistDebounced();
+    if (this.data.dirty || this.data.cacheDirty || this.data.deviceDirty || this.deviceDirty) this.persistDebounced();
   }
 
   async persist() {
@@ -459,8 +593,10 @@ export default class NotePulsePlugin extends Plugin {
       if (this.data.dirty) {
         const out: SavedData = {
           settings: this.settings,
-          wordLog: this.data.wordLog,
-          wordLogBig: this.data.wordLogBig,
+          // 旧记录原样保留（旧版本的设备还会读它），不再增长
+          wordLog: this.data.legacyLog || {},
+          wordLogBig: this.data.legacyLogBig || {},
+          devicesSince: this.devicesSince,
           logInitialized: this.data.logInitialized,
           logStartDay: this.data.logStartDay,
           // 迁移完成前保留旧字段，保证中途退出不丢基线
@@ -468,6 +604,15 @@ export default class NotePulsePlugin extends Plugin {
         };
         await this.saveData(out);
         this.data.dirty = false;
+      }
+      if (this.deviceDirty || this.data.deviceDirty) {
+        const adapter = this.app.vault.adapter;
+        if (!(await adapter.exists(this.devicesDir))) await adapter.mkdir(this.devicesDir);
+        const out: DeviceLog = { name: this.device.name, wordLog: this.data.wordLog, wordLogBig: this.data.wordLogBig, updated: Date.now() };
+        await adapter.write(this.devicePath(this.deviceId), JSON.stringify(out));
+        this.device = out;
+        this.deviceDirty = false;
+        this.data.deviceDirty = false;
       }
       if (this.data.cacheDirty) {
         const files: Record<string, unknown> = {};

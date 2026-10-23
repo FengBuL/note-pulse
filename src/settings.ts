@@ -558,8 +558,26 @@ export class DashboardSettingTab extends PluginSettingTab {
         heading: L("数据", "Data"),
         rows: [
           {
+            name: L("这台设备的名字", "This device's name"),
+            desc: L(
+              "每台设备只记在自己的 Obsidian 编辑器里打的字，看板把所有设备相加，所以在手机和电脑上都写也不会重复计数。同步进来的改动、别的程序（比如 AI 助手、脚本）直接写进笔记的内容不算写作。",
+              "Each device only records words typed in its own Obsidian editor, and the dashboard adds all devices together, so writing on both phone and computer is not double counted. Changes that arrive by sync, or that other programs (such as AI assistants or scripts) write into notes, do not count as writing."
+            ),
+            render: (setting) =>
+              setting.addText((t) =>
+                t.setValue(this.plugin.device.name).onChange(async (v) => {
+                  await this.plugin.renameDevice(v);
+                })
+              ),
+          },
+          {
+            name: L("参与合并的设备", "Devices"),
+            desc: this.deviceSummary(),
+            render: () => undefined,
+          },
+          {
             name: L("重置每日新增字数记录", "Reset daily word log"),
-            desc: L("清除已累积的每日新增字数，并从今天重新开始记录。", "Clears the recorded daily additions and starts recording again from today."),
+            desc: L("清除所有设备已累积的每日新增字数，并从今天重新开始记录。", "Clears the recorded daily additions from all devices and starts recording again from today."),
             render: (setting) =>
               setting.addButton((b) => {
                 // 与旧版 setWarning() 效果相同（它只是加上 mod-warning 样式类）；setDestructive 要求 Obsidian 1.13+
@@ -601,6 +619,16 @@ export class DashboardSettingTab extends PluginSettingTab {
         },
       })),
     }));
+  }
+
+  /** 设置页里列出的设备：本机在前，其余按最后更新时间 */
+  private deviceSummary(): string {
+    const p = this.plugin;
+    const fmt = (t: number) => (t ? new Date(t).toLocaleDateString() : L("还没有记录", "nothing recorded yet"));
+    const rows = [`${p.device.name}${L("（本机）", " (this device)")} · ${fmt(p.device.updated)}`];
+    const others = [...p.otherDevices.values()].sort((a, b) => b.updated - a.updated);
+    for (const d of others) rows.push(`${d.name} · ${fmt(d.updated)}`);
+    return rows.join(L("；", "; "));
   }
 
   /** 换语言后重画设置页：1.13+ 先让 Obsidian 重新读取设置定义（也用于设置搜索），再重画 */

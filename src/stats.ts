@@ -151,10 +151,20 @@ export interface VaultStats {
 }
 
 export interface PersistentData {
-  /** 日期 -> 当日新增字数（普通笔记） */
+  /** 日期 -> 当日新增字数（普通笔记）。1.7.0 起只是本机的记录，保存到 devices/<设备 ID>.json */
   wordLog: Record<string, number>;
-  /** 日期 -> 当日新增字数（超大笔记，默认不显示） */
+  /** 日期 -> 当日新增字数（超大笔记，默认不显示），本机 */
   wordLogBig: Record<string, number>;
+  /** 1.7.0 之前 data.json 里的记录（所有设备混在一起）：只读，参与相加 */
+  legacyLog?: Record<string, number>;
+  legacyLogBig?: Record<string, number>;
+  /** 其它设备的记录：只读，参与相加 */
+  otherLogs?: { wordLog: Record<string, number>; wordLogBig: Record<string, number> }[];
+  /**
+   * 本机编辑器里改动过、增量还没记的笔记路径 -> 最后一次按键的时间。设置了它，就只有这些笔记的增量算本机写作，
+   * 其余的变化（同步进来的、外部程序写的）只更新基线。为 undefined 时按旧办法：所有变化都算。
+   */
+  localEdits?: Map<string, number>;
   logInitialized: boolean;
   /** 开始实测记录的日期（YYYY-MM-DD） */
   logStartDay: string;
@@ -166,6 +176,8 @@ export interface PersistentData {
   dirty?: boolean;
   /** 内存标记：cache.json 有待保存的改动 */
   cacheDirty?: boolean;
+  /** 内存标记：本机设备文件有待保存的改动 */
+  deviceDirty?: boolean;
 }
 
 /* ---------------- 工具 ---------------- */
@@ -255,10 +267,24 @@ export function includedFiles(app: App, settings: DashboardSettings): TFile[] {
   return app.vault.getMarkdownFiles().filter((f) => !isExcluded(f.path, excluded));
 }
 
+/** 这次变化是不是在本机编辑器里打出来的（没开多设备记录时一律算） */
+function typedHere(pdata: PersistentData, path: string): boolean {
+  return !pdata.localEdits || pdata.localEdits.has(path);
+}
+
+/** 所有设备的记录相加：1.7.0 之前的旧记录 + 本机 + 其它设备 */
+export function mergedWordLog(pdata: PersistentData, includeBig: boolean): Record<string, number> {
+  const parts = [pdata.legacyLog || {}, pdata.wordLog, ...(pdata.otherLogs || []).map((o) => o.wordLog)];
+  if (includeBig) parts.push(pdata.legacyLogBig || {}, pdata.wordLogBig || {}, ...(pdata.otherLogs || []).map((o) => o.wordLogBig));
+  const out: Record<string, number> = {};
+  for (const log of parts) for (const [k, v] of Object.entries(log)) out[k] = (out[k] || 0) + v;
+  return out;
+}
+
 function addLog(pdata: PersistentData, big: boolean, day: string, n: number) {
   const target = big ? (pdata.wordLogBig = pdata.wordLogBig || {}) : pdata.wordLog;
   target[day] = (target[day] || 0) + n;
-  pdata.dirty = true;
+  pdata.deviceDirty = true;
 }
 
 /**
@@ -274,6 +300,7 @@ export async function syncContent(
   onProgress?: (done: number, total: number) => void
 ): Promise<void> {
   const { clipping } = folderLists(settings);
+  const readStart = Date.now();
   const toRead = files.filter((f) => {
     const c = cache.get(f.path);
     return !c || c.mtime !== f.stat.mtime || c.size !== f.stat.size;
@@ -330,15 +357,23 @@ export async function syncContent(
     if (prev === undefined) {
       // 启用之后才出现的新文件：按创建日计入
       const day = dayKey(Math.min(f.stat.ctime, now));
-      if (!collected && day >= startDay && c.words > 0) addLog(pdata, c.words > settings.outlierWords, day, c.words);
+      if (!collected && day >= startDay && c.words > 0 && typedHere(pdata, f.path)) addLog(pdata, c.words > settings.outlierWords, day, c.words);
     } else if (c.words > prev) {
       const d = dayKey(Math.min(f.stat.mtime, now));
       const day = d < startDay ? startDay : d;
-      if (!collected) addLog(pdata, c.words > settings.outlierWords, day, c.words - prev);
+      if (!collected && typedHere(pdata, f.path)) addLog(pdata, c.words > settings.outlierWords, day, c.words - prev);
     }
     if (c.logged !== c.words) {
       c.logged = c.words;
       pdata.cacheDirty = true;
+    }
+  }
+  // 这一轮读过的文件，本机的编辑都已经记过了；之后再有变化要重新看是不是本机打的字
+  // 读取开始之后又打了字的保留标记，下一轮再算
+  if (pdata.localEdits) {
+    for (const f of toRead) {
+      const t = pdata.localEdits.get(f.path);
+      if (t !== undefined && t < readStart) pdata.localEdits.delete(f.path);
     }
   }
 }
@@ -552,8 +587,7 @@ export async function computeStats(
 
   // 4. 写作量（热力图 / 打卡）
   const logStart = pdata.logStartDay || dayKey(now);
-  const mergedLog: Record<string, number> = { ...pdata.wordLog };
-  if (!excludeBig) for (const [k, v] of Object.entries(pdata.wordLogBig || {})) mergedLog[k] = (mergedLog[k] || 0) + v;
+  const mergedLog = mergedWordLog(pdata, !excludeBig);
   let dayWords: Record<string, number>;
   let estimatedBefore: string | null = null;
   if (settings.heatmapMode === "delta") dayWords = mergedLog;
