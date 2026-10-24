@@ -1,6 +1,7 @@
 import { ItemView, Notice, Platform, TFile, WorkspaceLeaf, setIcon } from "obsidian";
 import type NotePulsePlugin from "./main";
 import { drawAddPreview } from "./add-preview";
+import { CLOUD_FONT_PX, cloudExtent, cloudLayout, cloudLevels, cloudTagSize } from "./cloud";
 import { ConfirmModal } from "./dedupe/modals";
 import { writingReportOverview } from "./report-logic";
 import { latestWritingReport } from "./report-storage";
@@ -31,7 +32,7 @@ import { DayContext, achievementText, achievements, alertText, computeAlerts, gr
 import { COLS, GAP, GridItem, ROW_H, rowsToPx } from "./grid";
 import { GestureHost, GridGesture, setPlace } from "./grid-edit";
 import { Box, HUB_CHROME, HeroDensity, KpiDensity, activityDensity, goalRingSize, overviewDensity, calendarDensity, innerW, bodyH, densityDensity, densityKey, foldersDensity, heatDensity, heroDensity, isTight, kpiDensity, rhythmDensity, trendDensity } from "./density";
-import { WidgetId, WidgetLayout, WidgetLayoutItem, addWidget, defaultLayout, hiddenWidgets, limitsOf, readingOrder, removeWidget, sameLayout, withItems } from "./widgets";
+import { WidgetId, WidgetLayout, WidgetLayoutItem, addWidget, addableWidgets, defaultLayout, limitsOf, readingOrder, removeWidget, sameLayout, withItems } from "./widgets";
 import { MOTION, SegRect, animateHeight, countUp, drawLines, markStagger, playLayout, reducedMotion, segRect, slideSeg, snapshotRects } from "./motion";
 import {
   BarItem,
@@ -97,6 +98,16 @@ const WIDGET_TEXT: Record<WidgetId, [() => string, () => string]> = {
   monthCompare: [() => L("本月对比上月", "This month vs last"), () => L("字数、新建笔记、打卡天数和上月同期对比", "Words, new notes and streak days against last month")],
   lengths: [() => L("笔记长度分布", "Note length"), () => L("你的笔记大多是几百字还是几千字", "Whether your notes run to hundreds or thousands of words")],
 };
+/** 添加面板里的一组选项（一个分段控件或下拉框） */
+interface AddGroup {
+  key: string;
+  label: string;
+  options: [string, string][];
+  current: string;
+  apply: (v: string) => void;
+}
+
+const hubMetricName = (m: HubMetric) => ({ words: L("写作字数", "Words written"), notes: L("新建笔记", "New notes"), totalNotes: L("笔记总数", "Total notes"), totalWords: L("总字数", "Total words"), checkins: L("打卡天数", "Streak days") })[m];
 const trendStyleName = (v: TrendStyle) => ({ bar: L("柱状", "Bar"), line: L("折线", "Line"), curve: L("曲线", "Curve"), area: L("面积", "Area") })[v];
 const widgetName = (id: WidgetId) => WIDGET_TEXT[id][0]();
 const widgetDesc = (id: WidgetId) => WIDGET_TEXT[id][1]();
@@ -550,6 +561,7 @@ export class DashboardView extends ItemView {
     }
     this.editing = !this.editing;
     this.addOpen = false;
+    this.addState.clear();
     this.undoStack = [];
     this.editBtn?.toggleClass("is-active", this.editing);
     this.editBtn?.setAttr("aria-pressed", String(this.editing));
@@ -620,6 +632,11 @@ export class DashboardView extends ItemView {
         const name = widgetName(id as WidgetId);
         this.liveEl?.setText(L(`${name}，第 ${it.x + 1} 列第 ${it.y + 1} 行，${it.w} × ${it.h}`, `${name}, column ${it.x + 1}, row ${it.y + 1}, ${it.w} × ${it.h}`));
       },
+      add: (items, id) => {
+        this.addApply?.();
+        this.addApply = null;
+        this.applyLayout(withItems(items), { reveal: id });
+      },
       remove: (id) => this.applyLayout(removeWidget(this.plugin.settings.layout, id as WidgetId)),
       ended: () => {
         this.live = null;
@@ -676,6 +693,7 @@ export class DashboardView extends ItemView {
     btn("rotate-ccw", L("恢复默认布局", "Restore default"), () => this.applyLayout(defaultLayout()));
     const add = btn("plus", L("添加卡片", "Add a card"), () => {
       this.addOpen = !this.addOpen;
+      if (!this.addOpen) this.addState.clear();
       if (this.stats) this.render(this.stats);
     });
     add.setAttr("aria-expanded", String(this.addOpen));
@@ -685,85 +703,214 @@ export class DashboardView extends ItemView {
 
   /** 添加面板：列出被移除的卡片，点一下加到最后一行第一个放得下的位置 */
   /**
-   * 添加面板里能先选图形样式的卡片：选项、现在用的样式、确认添加时怎么记下来。
-   * 样式本来就是按图的种类记的（写作趋势和每周写作共用一个），所以这里选的就是以后这类图的样式。
+   * 添加面板里每张卡片上能先选的东西：和卡片上的切换一一对应（指标、时间范围、标签页、图的样式）。
+   * 选了哪一项（touched）确认添加时才写进去；没动过的不改。样式是按图的种类记的（写作趋势和每周写作共用一个）。
+   * sel 是现在选中的值：有的选项取决于别的选项（结构卡选了“构成”才有构成的图样式），所以每次选完重新算一遍。
    */
-  private addStyleSpec(id: WidgetId): { options: [string, string][]; current: string; apply: (v: string) => void } | null {
+  private addGroups(id: WidgetId, sel: Record<string, string>): AddGroup[] {
     const set = this.plugin.settings;
-    const chart = <K extends keyof ChartStyles>(key: K, styles: readonly ChartStyles[K][], name: (v: ChartStyles[K]) => string) => ({
+    const style = <K extends keyof ChartStyles>(key: K, styles: readonly ChartStyles[K][], name: (v: ChartStyles[K]) => string, label: string): AddGroup => ({
+      key: "style",
+      label,
       options: styles.map((v): [string, string] => [v, name(v)]),
-      current: set.chartStyles[key] as string,
-      apply: (v: string) => {
+      current: set.chartStyles[key],
+      apply: (v) => {
         set.chartStyles = { ...set.chartStyles, [key]: v };
       },
     });
+    const trendStyle = () => style("trend", TREND_STYLES, trendStyleName, L("图的样式", "Chart style"));
+    const rhythmStyle = () => style("rhythm", RHYTHM_STYLES, (v) => (v === "bar" ? L("柱状", "Bar") : v === "line" ? L("折线", "Line") : L("面积", "Area")), L("图的样式", "Chart style"));
+    const mixStyle = () => style("mix", MIX_STYLES, (v) => (v === "stack" ? L("堆叠条", "Stack") : v === "donut" ? L("环形图", "Donut") : L("列表", "List")), L("图的样式", "Chart style"));
+    const tagStyle = () => style("tags", TAG_STYLES, (v) => (v === "bars" ? L("条形", "Bars") : L("标签云", "Cloud")), L("标签的样子", "Tag style"));
+    const tab = (options: [string, string][], current: string, apply: (v: string) => void): AddGroup => ({ key: "tab", label: L("标签页", "Tab"), options, current, apply });
+    const range = (current: TrendRange, apply: (v: TrendRange) => void): AddGroup => ({
+      key: "range",
+      label: L("时间范围", "Period"),
+      options: [["30", L("30 天", "30 days")], ["182", L("半年", "6 months")], ["365", L("一年", "1 year")]],
+      current: String(current),
+      apply: (v) => apply(Number(v) as TrendRange),
+    });
+    const curTab = sel.tab;
     switch (id) {
-      case "trend":
-      case "trendHub":
-        return chart("trend", TREND_STYLES, trendStyleName);
-      case "rhythm":
-      case "habits":
-        return chart("rhythm", RHYTHM_STYLES, (v) => (v === "bar" ? L("柱状", "Bar") : v === "line" ? L("折线", "Line") : L("面积", "Area")));
-      case "folders":
-        return chart("mix", MIX_STYLES, (v) => (v === "stack" ? L("堆叠条", "Stack") : v === "donut" ? L("环形图", "Donut") : L("列表", "List")));
-      case "tags":
-        return chart("tags", TAG_STYLES, (v) => (v === "bars" ? L("条形", "Bars") : L("标签云", "Cloud")));
-      case "lengths":
-        return chart("lengths", LENGTH_STYLES, (v) => (v === "bar" ? L("柱状", "Bar") : L("面积", "Area")));
       case "hero":
-        return {
-          options: [["dots", L("圆点", "Dots")], ["bars", L("柱状", "Bars")], ["line", L("折线", "Line")]],
-          current: set.weekStyle,
-          apply: (v) => {
-            set.weekStyle = v as WeekStyle;
+        return [
+          {
+            key: "style",
+            label: L("本周显示方式", "This week display"),
+            options: [["dots", L("圆点", "Dots")], ["bars", L("柱状", "Bars")], ["line", L("折线", "Line")]],
+            current: set.weekStyle,
+            apply: (v) => {
+              set.weekStyle = v as WeekStyle;
+            },
           },
-        };
+        ];
+      case "trend":
+        return [
+          {
+            key: "metric",
+            label: L("指标", "Metric"),
+            options: [["words", L("字数", "Words")], ["notes", L("新建笔记", "New notes")]],
+            current: this.metric,
+            apply: (v) => {
+              this.metric = v as TrendMetric;
+            },
+          },
+          range(this.range, (v) => {
+            this.range = v;
+          }),
+          trendStyle(),
+        ];
+      case "trendHub":
+        return [
+          {
+            key: "metric",
+            label: L("指标", "Metric"),
+            options: HUB_METRICS.map((m): [string, string] => [m, hubMetricName(m)]),
+            current: this.hubMetric,
+            apply: (v) => {
+              this.hubMetric = v as HubMetric;
+            },
+          },
+          range(this.hubRange, (v) => {
+            this.hubRange = v;
+          }),
+          trendStyle(),
+        ];
+      case "tasks":
+        return [tab([["due", L("到期", "Due")], ["folder", L("按文件夹", "By folder")]], this.taskTab, (v) => (this.taskTab = v as TaskTab))];
+      case "tags":
+        return [tab([["tags", L("标签", "Tags")], ["folders", L("文件夹", "Folders")]], this.tagTab, (v) => (this.tagTab = v as TagTab)), ...((curTab ?? this.tagTab) === "tags" ? [tagStyle()] : [])];
+      case "rhythm":
+        return [rhythmStyle()];
+      case "folders":
+        return [mixStyle()];
+      case "lengths":
+        return [style("lengths", LENGTH_STYLES, (v) => (v === "bar" ? L("柱状", "Bar") : L("面积", "Area")), L("图的样式", "Chart style"))];
+      case "tasksHub":
+        return [tab([["due", L("到期", "Due")], ["folder", L("按文件夹", "By folder")], ["notes", L("按笔记", "By note")]], this.hubTaskTab, (v) => (this.hubTaskTab = v as typeof this.hubTaskTab))];
+      case "structure": {
+        const t = curTab ?? this.structTab;
+        return [
+          tab(
+            [["tags", L("标签", "Tags")], ["folders", L("文件夹", "Folders")], ["mix", L("构成", "Mix")], ["linked", L("被链接", "Linked")], ["density", L("密度", "Density")]],
+            this.structTab,
+            (v) => (this.structTab = v as typeof this.structTab)
+          ),
+          ...(t === "tags" ? [tagStyle()] : t === "mix" ? [mixStyle()] : []),
+        ];
+      }
+      case "habits": {
+        const t = curTab ?? this.habitTab;
+        return [tab([["rhythm", L("写作节奏", "Rhythm")], ["activity", L("笔记活跃度", "Activity")]], this.habitTab, (v) => (this.habitTab = v as typeof this.habitTab)), ...(t === "rhythm" ? [rhythmStyle()] : [])];
+      }
+      case "checkupHub":
+        return [
+          tab(
+            [["brokenLinks", L("断链", "Broken")], ["orphans", L("孤立", "Orphans")], ["sameName", L("同名", "Same name")], ["emptyBig", L("空与超大", "Empty/big")], ["unusedFiles", L("附件", "Files")], ["dupes", L("重复", "Duplicates")]],
+            this.checkupTab ?? "brokenLinks",
+            (v) => (this.checkupTab = v as NonNullable<typeof this.checkupTab>)
+          ),
+        ];
       default:
-        return null;
+        return [];
     }
   }
 
+  /** 添加面板里每张卡片上选好的样式、标签页等（还没添加）；关掉面板或退出编辑时清掉 */
+  private addState = new Map<string, { sel: Record<string, string>; touched: Set<string> }>();
+
+  /** 添加面板里拖卡片进看板时，确认添加（松手）那一刻要写进去的选择 */
+  private addApply: (() => void) | null = null;
+
   private renderAddPanel(parent: HTMLElement) {
     const panel = parent.createDiv({ cls: "vp-card vp-add-panel" });
-    const hidden = hiddenWidgets(this.plugin.settings.layout);
+    const hidden = addableWidgets(this.plugin.settings.layout);
     if (hidden.length === 0) {
       panel.createDiv({ cls: "vp-kpi-caption", text: L("所有卡片都在看板上了。点卡片右上角的 × 可以移除。", "Every card is on the dashboard. Use × on a card to remove it.") });
       return;
     }
+    panel.createDiv({ cls: "vp-add-hint", text: L("点一张卡片添加到最后，或者把它拖到看板上想放的位置。添加前可以先选好样式。", "Click a card to add it at the end, or drag it onto the dashboard where you want it. Pick its style before adding.") });
     const list = panel.createDiv({ cls: "vp-add-list" });
     for (const w of hidden) {
       const item = list.createDiv({ cls: "vp-add-item" });
-      const spec = this.addStyleSpec(w.id);
-      // 确认添加之前选的样式：预览跟着变，点“添加”才写进设置
-      let style = spec?.current;
+      // 确认添加之前选的：预览跟着变，添加时才写进设置
+      // 添加别的卡片会重画整个面板：选好但还没添加的，记在视图上，不会丢
+      let state = this.addState.get(w.id);
+      if (!state) {
+        state = { sel: {}, touched: new Set<string>() };
+        this.addState.set(w.id, state);
+      }
+      const { sel, touched } = state;
+      const groups = () => {
+        const gs = this.addGroups(w.id, sel);
+        for (const g of gs) if (sel[g.key] === undefined) sel[g.key] = g.current;
+        return gs;
+      };
+      groups();
       const main = item.createEl("button", { cls: "vp-add-main", attr: { type: "button", "data-fid": `add:${w.id}` } });
       const preview = main.createDiv({ cls: "vp-add-preview" });
-      drawAddPreview(preview, w.id, style);
       main.createDiv({ cls: "vp-add-name", text: widgetName(w.id) });
       main.createDiv({ cls: "vp-add-desc", text: `${widgetDesc(w.id)} · ${w.w} × ${w.h}` });
+      const opts = item.createDiv({ cls: "vp-add-opts" });
+      const apply = () => {
+        for (const g of groups()) if (touched.has(g.key)) g.apply(sel[g.key]);
+      };
+      const draw = () => {
+        preview.empty();
+        drawAddPreview(preview, w.id, { ...sel });
+        const doc = opts.ownerDocument;
+        const focused = opts.contains(doc.activeElement) ? (doc.activeElement as HTMLElement).dataset.fid : undefined;
+        opts.empty();
+        for (const g of groups()) {
+          const choose = (v: string) => {
+            sel[g.key] = v;
+            touched.add(g.key);
+            // 换了标签页，依赖标签页的样式要重新选
+            if (g.key === "tab") {
+              delete sel.style;
+              touched.delete("style");
+            }
+            draw();
+          };
+          const label = L(`${widgetName(w.id)}：${g.label}`, `${widgetName(w.id)}: ${g.label}`);
+          if (g.options.length > 4) {
+            const dd = opts.createEl("select", { cls: "dropdown vp-select", attr: { "aria-label": label, "data-fid": `add:${w.id}:${g.key}` } });
+            for (const [v, text] of g.options) {
+              const o = dd.createEl("option", { text, value: v });
+              if (v === sel[g.key]) o.selected = true;
+            }
+            dd.addEventListener("change", () => choose(dd.value));
+            continue;
+          }
+          const seg = opts.createDiv({ cls: "vp-seg vp-add-seg", attr: { role: "tablist", "aria-label": label } });
+          for (const [v, text] of g.options) {
+            const b = seg.createEl("button", {
+              cls: "vp-seg-btn" + (v === sel[g.key] ? " is-active" : ""),
+              text,
+              attr: { type: "button", role: "tab", "aria-selected": String(v === sel[g.key]), "data-fid": `add:${w.id}:${g.key}:${v}` },
+            });
+            b.addEventListener("click", () => {
+              if (v !== sel[g.key]) choose(v);
+            });
+          }
+        }
+        if (focused) opts.querySelector<HTMLElement>(`[data-fid="${focused}"]`)?.focus({ preventScroll: true });
+      };
+      draw();
       main.addEventListener("click", () => {
-        if (spec && style !== undefined && style !== spec.current) spec.apply(style);
+        apply();
         this.applyLayout(addWidget(this.plugin.settings.layout, w.id), { reveal: w.id });
       });
-      if (!spec) continue;
-      const seg = item.createDiv({ cls: "vp-seg vp-add-seg", attr: { role: "tablist", "aria-label": L(`${widgetName(w.id)}的图形样式`, `${widgetName(w.id)} chart style`) } });
-      for (const [v, text] of spec.options) {
-        const b = seg.createEl("button", {
-          cls: "vp-seg-btn" + (v === style ? " is-active" : ""),
-          text,
-          attr: { type: "button", role: "tab", "aria-selected": String(v === style), "data-fid": `add:${w.id}:style:${v}` },
+      // 拖到看板上想放的位置；没怎么动就是点击，由上面的 click 处理
+      main.addEventListener("pointerdown", (e) => {
+        this.addApply = apply;
+        this.gesture?.dragIn(main, { id: w.id, x: 0, y: 0, w: w.w, h: w.h }, e, () => {
+          const ghost = createDiv({ cls: "vp-add-ghost", attr: { "aria-hidden": "true" } });
+          drawAddPreview(ghost.createDiv({ cls: "vp-add-preview" }), w.id, { ...sel });
+          ghost.createDiv({ cls: "vp-add-name", text: widgetName(w.id) });
+          return ghost;
         });
-        b.addEventListener("click", () => {
-          style = v;
-          preview.empty();
-          drawAddPreview(preview, w.id, v);
-          for (const o of Array.from(seg.children)) {
-            const on = o === b;
-            o.toggleClass("is-active", on);
-            o.setAttr("aria-selected", String(on));
-          }
-        });
-      }
+      });
     }
   }
 
@@ -2575,24 +2722,66 @@ export class DashboardView extends ItemView {
     this.barListCard(id, body, items, isTags ? L("还没有标签。给笔记加上 #标签，这里就会热闹起来", "No tags yet. Add #tags to your notes and they show up here.") : L("仓库里还没有文件夹", "No folders in the vault yet"), isTags ? "tag" : "folder");
   }
 
-  /** 标签云：用得越多字越大；放不下的折成“还有 N 个” */
+  /**
+   * 标签云：用得最多的在正中间、字最大，往外越来越小（螺旋排布，cloud.ts）。
+   * 放不下的折成“还有 N 个”，点开后云在卡片里向外铺得更大，可以滚动。卡片大小变了就重新排。
+   */
   private tagCloud(body: HTMLElement, id: string, s: VaultStats) {
     const tags = s.tags.slice(0, 80);
     if (tags.length === 0) {
       this.empty(body, "tag", L("还没有标签。给笔记加上 #标签，这里就会热闹起来", "No tags yet. Add #tags to your notes and they show up here."));
       return;
     }
-    const hi = Math.sqrt(tags[0][1]);
-    const lo = Math.sqrt(tags[tags.length - 1][1]);
     const cloud = body.createDiv({ cls: "vp-cloud", attr: { role: "list" } });
-    const units: HTMLElement[] = [];
-    for (const [tag, n] of tags) {
-      const level = hi === lo ? 3 : Math.min(5, 1 + Math.floor(((Math.sqrt(n) - lo) / (hi - lo)) * 4.999));
-      const chip = cloud.createEl("button", { cls: `vp-cloud-tag is-l${level}`, text: tag, attr: { type: "button", role: "listitem", title: L(`${n} 篇笔记`, `${count(n, "notes")}`) } });
-      chip.addEventListener("click", () => this.plugin.openSearch(`tag:${tag}`));
-      units.push(chip);
-    }
-    this.fitList(id, cloud, body.createDiv({ cls: "vp-card-foot" }), units);
+    if (this.narrow) cloud.setCssProps({ "--vp-cloud-h": `${Math.max(160, bodyH(this.box(id)))}px` });
+    const inner = cloud.createDiv({ cls: "vp-cloud-inner" });
+    const foot = body.createDiv({ cls: "vp-card-foot" });
+    const btn = foot.createEl("button", { cls: "vp-link vp-fit-more", attr: { type: "button", "data-fid": `${id}:more` } });
+    const label = btn.createSpan();
+    const icon = btn.createSpan({ cls: "vp-link-icon", attr: { "aria-hidden": "true" } });
+    btn.hidden = true;
+    const counts = tags.map(([, n]) => n);
+    const run = () => {
+      const open = this.expanded.has(id);
+      inner.empty();
+      cloud.toggleClass("vp-scroll", open);
+      inner.setCssProps({ "--vp-cloud-inner-h": "" });
+      // 底部的链接先占着位置再量云的大小
+      foot.removeClass("vp-hide");
+      btn.hidden = false;
+      label.setText(open ? COLLAPSE() : L("还有 0 个", "0 more"));
+      setIcon(icon, open ? "chevron-up" : "chevron-right");
+      const W = cloud.clientWidth || 300;
+      const H = cloud.clientHeight || 160;
+      const levels = cloudLevels(counts, W >= 260 && H >= 200 ? CLOUD_FONT_PX.length : CLOUD_FONT_PX.length - 1);
+      const sizes = tags.map(([tag], i) => cloudTagSize(tag, CLOUD_FONT_PX[levels[i] - 1]));
+      const spots = cloudLayout(sizes, { width: W, height: H, bounded: !open });
+      let shown = 0;
+      tags.forEach(([tag, n], i) => {
+        const p = spots[i];
+        if (!p) return;
+        shown++;
+        const chip = inner.createEl("button", { cls: `vp-cloud-tag is-l${levels[i]}`, text: tag, attr: { type: "button", role: "listitem", title: L(`${n} 篇笔记`, `${count(n, "notes")}`) } });
+        chip.setCssProps({ "--vp-cx": `${p.x}px`, "--vp-cy": `${p.y}px` });
+        chip.addEventListener("click", () => this.plugin.openSearch(`tag:${tag}`));
+      });
+      const more = tags.length - shown;
+      if (open) {
+        const ext = cloudExtent(sizes, spots);
+        inner.setCssProps({ "--vp-cloud-inner-h": `${Math.max(H, Math.ceil(2 * Math.max(-ext.top, ext.bottom)) + 8)}px` });
+        return;
+      }
+      label.setText(L(`还有 ${fmtFull(more)} 个`, `${fmtFull(more)} more`));
+      btn.hidden = more <= 0;
+      foot.toggleClass("vp-hide", more <= 0);
+    };
+    btn.addEventListener("click", () => {
+      if (this.expanded.has(id)) this.expanded.delete(id);
+      else this.expanded.add(id);
+      run();
+    });
+    this.fitters.set(id, run);
+    run();
   }
 
   /** 条形排行列表卡片：画出所有条，按卡片高度截断 */

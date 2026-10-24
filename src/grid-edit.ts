@@ -12,7 +12,7 @@
  * - 调大小时，移动途中只有卡片自己和虚线框在变，别的卡一动不动（它们的重排和动画是最费力的部分），
  *   指针停住 120ms 后才让位；内容每 200ms 重画一次。
  */
-import { COLS, GAP, GridItem, LimitsOf, ROW_H, bestMove, displacedCount, growItem, nudgeItem, resizeItem } from "./grid";
+import { COLS, GAP, GridItem, LimitsOf, ROW_H, bestMove, bestPlace, displacedCount, growItem, nudgeItem, resizeItem } from "./grid";
 import { MOTION, playLayout, snapshotRects } from "./motion";
 
 export interface GestureHost {
@@ -30,6 +30,8 @@ export interface GestureHost {
   freeze(id: string | null): void;
   /** 键盘操作的读屏播报 */
   announce(id: string, item: GridItem): void;
+  /** 从“添加卡片”面板拖进来的新卡落下：items 是加入后的整套布局，id 是新卡 */
+  add(items: GridItem[], id: string): void;
   /** 键盘按 Delete：移除这张卡 */
   remove(id: string): void;
   /** 手势全部结束（含取消）：该补的重画可以补了 */
@@ -298,6 +300,178 @@ export class GridGesture {
     card.addEventListener("pointerup", onUp);
     card.addEventListener("pointercancel", onCancel);
     card.addEventListener("lostpointercapture", onCancel);
+    doc.addEventListener("keydown", onEsc, true);
+  }
+
+  /* ---------- 从“添加卡片”面板把一张卡拖到看板上 ---------- */
+
+  /**
+   * 在 src（面板里的卡片项）上按下指针之后调用：移动不到几像素当作点击，什么也不做（点击由调用方处理）；
+   * 拖动起来之后，一个缩略图跟着指针走，指针进了看板就出现虚线占位框，别的卡实时让位（规则和看板里拖动一样），
+   * 松手在看板里就把这张卡放在虚线框的位置，松手在别处或按 Esc 就取消。
+   * item 是这张卡添加时的默认大小（id、w、h）。
+   */
+  dragIn(src: HTMLElement, item: GridItem, down: PointerEvent, makeGhost: () => HTMLElement) {
+    if (this.active || down.button !== 0) return;
+    const h = this.host;
+    const grid = h.grid;
+    const doc = grid.ownerDocument;
+    const win = doc.defaultView as Window;
+    const scroller = h.scroller();
+    const base = h.items().map((i) => ({ ...i }));
+    const unitX = () => (grid.clientWidth + GAP) / COLS;
+    const unitY = ROW_H + GAP;
+    this.active = true;
+
+    let last = { x: down.clientX, y: down.clientY };
+    let dirty = false;
+    let dragging = false;
+    let ghost: HTMLElement | null = null;
+    let placeholder: HTMLElement | null = null;
+    let shown = base;
+    let want = base;
+    let raf = 0;
+    let dwell = 0;
+
+    try {
+      src.setPointerCapture(down.pointerId);
+    } catch {
+      /* 合成事件没有真正的指针，忽略 */
+    }
+
+    const cancelDwell = () => {
+      if (dwell) win.clearTimeout(dwell);
+      dwell = 0;
+    };
+    const showNow = (next: GridItem[]) => {
+      shown = next;
+      const before = h.motion() ? snapshotRects(grid) : null;
+      h.show(next);
+      const me = next.find((i) => i.id === item.id);
+      if (me) {
+        if (!placeholder) placeholder = grid.createDiv({ cls: "vp-ph", attr: { "data-widget": "__ph", "aria-hidden": "true" } });
+        setPlace(placeholder, me);
+      } else {
+        placeholder?.remove();
+        placeholder = null;
+      }
+      if (before) playLayout(grid, before, { ms: SHIFT_MS, skip: item.id });
+    };
+    const follow = (next: GridItem[]) => {
+      want = next;
+      if (same(next, shown)) {
+        cancelDwell();
+        return;
+      }
+      const dn = displacedCount(base, next, item.id);
+      cancelDwell();
+      if (dn <= CALM || dn <= displacedCount(base, shown, item.id)) {
+        showNow(next);
+        return;
+      }
+      dwell = win.setTimeout(() => {
+        dwell = 0;
+        if (dragging && !same(want, shown)) showNow(want);
+      }, DWELL_MS);
+    };
+
+    const update = () => {
+      if (!dragging) {
+        if (Math.hypot(last.x - down.clientX, last.y - down.clientY) < DRAG_THRESHOLD) return;
+        dragging = true;
+        grid.addClass("is-gesture");
+        ghost = makeGhost();
+        (grid.closest<HTMLElement>(".vp-root") ?? doc.body).appendChild(ghost);
+      }
+      if (ghost) ghost.setCssProps({ "--vp-gx": `${last.x}px`, "--vp-gy": `${last.y}px` });
+      const r = grid.getBoundingClientRect();
+      // 指针在看板左右范围里、上下离看板不远：落在看板里；否则回到没有这张卡的样子
+      const over = last.x >= r.left - 8 && last.x <= r.right + 8 && last.y >= r.top - 24 && last.y <= r.bottom + 120;
+      if (!over) {
+        follow(base);
+        return;
+      }
+      const gx = Math.round((last.x - r.left) / unitX() - item.w / 2);
+      const gy = Math.round((last.y - r.top) / unitY - item.h / 2);
+      follow(bestPlace(base, item, gx, gy));
+    };
+
+    const frame = () => {
+      if (dragging) {
+        const r = scroller === doc.scrollingElement ? { top: 0, bottom: win.innerHeight } : scroller.getBoundingClientRect();
+        let v = 0;
+        if (last.y < r.top + EDGE) v = -((r.top + EDGE - last.y) / EDGE) * MAX_SCROLL;
+        else if (last.y > r.bottom - EDGE) v = ((last.y - (r.bottom - EDGE)) / EDGE) * MAX_SCROLL;
+        if (v) {
+          scroller.scrollTop += v;
+          dirty = true;
+        }
+      }
+      if (dirty) {
+        dirty = false;
+        update();
+      }
+      raf = win.requestAnimationFrame(frame);
+    };
+    raf = win.requestAnimationFrame(frame);
+
+    const finish = (commit: boolean) => {
+      win.cancelAnimationFrame(raf);
+      cancelDwell();
+      src.removeEventListener("pointermove", onMove);
+      src.removeEventListener("pointerup", onUp);
+      src.removeEventListener("pointercancel", onCancel);
+      src.removeEventListener("lostpointercapture", onCancel);
+      doc.removeEventListener("keydown", onEsc, true);
+      try {
+        src.releasePointerCapture(down.pointerId);
+      } catch {
+        /* 已经释放 */
+      }
+      if (!dragging) {
+        this.active = false;
+        h.ended();
+        return;
+      }
+      // 拖过之后松手会再触发一次 click，不能让它把卡片又加一遍
+      const swallow = (e: Event) => {
+        e.stopImmediatePropagation();
+        e.preventDefault();
+      };
+      src.addEventListener("click", swallow, { capture: true, once: true });
+      win.setTimeout(() => src.removeEventListener("click", swallow, true), 0);
+      ghost?.remove();
+      placeholder?.remove();
+      grid.removeClass("is-gesture");
+      this.active = false;
+      const landed = commit && want.some((i) => i.id === item.id);
+      if (landed) h.add(want, item.id);
+      else h.show(base);
+      h.ended();
+    };
+
+    const onMove = (e: PointerEvent) => {
+      last = { x: e.clientX, y: e.clientY };
+      dirty = true;
+    };
+    const onUp = (e: PointerEvent) => {
+      last = { x: e.clientX, y: e.clientY };
+      if (dirty || !dragging) update();
+      dirty = false;
+      // 松手时指针不在看板上：取消
+      finish(dragging);
+    };
+    const onCancel = () => finish(false);
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      finish(false);
+    };
+    src.addEventListener("pointermove", onMove);
+    src.addEventListener("pointerup", onUp);
+    src.addEventListener("pointercancel", onCancel);
+    src.addEventListener("lostpointercapture", onCancel);
     doc.addEventListener("keydown", onEsc, true);
   }
 

@@ -3,6 +3,7 @@
  * 不读数据、不挂事件，只用 CSS 类上色，跟随主题。画在 160 × 90 的画布里。
  */
 import { svgEl } from "./charts";
+import { cloudLayout } from "./cloud";
 import type { WidgetId } from "./widgets";
 
 export const PREVIEW_W = 160;
@@ -131,19 +132,30 @@ function heat(p: Pen, a: Area, cols: number, rowsN: number): void {
 }
 
 /** 标签条（一排小胶囊） */
-function tabs(p: Pen, x: number, y: number, n: number): void {
+function tabs(p: Pen, x: number, y: number, n: number, active = 0): void {
+  const w = Math.min(23, (PREVIEW_W - 20 - 3 * (n - 1)) / n);
   for (let i = 0; i < n; i++) {
-    p.rect(x + i * 26, y, 23, 7, i === 0 ? "acc" : "dim", 3.5, i === 0 ? 0.85 : 1);
+    p.rect(x + i * (w + 3), y, w, 7, i === active ? "acc" : "dim", 3.5, i === active ? 0.85 : 1);
   }
 }
 
-const TREND = [4, 6, 5, 8, 7, 11, 9, 13];
+/** 预览按这些选择来画：style（图的样式）、tab（标签页）、metric（指标）、range（时间范围，天数） */
+export type PreviewVariant = Record<string, string | undefined>;
+
+/** 趋势图的数据：指标和时间范围决定点数和走势（累计类一路往上，打卡天数是 0–7 的小数） */
+function trendValues(metric?: string, range?: string): number[] {
+  const n = range === "30" ? 14 : range === "365" ? 7 : 9;
+  if (metric === "totalNotes" || metric === "totalWords") return Array.from({ length: n }, (_, i) => 3 + i * 1.6 + (i % 3) * 0.4);
+  if (metric === "checkins") return Array.from({ length: n }, (_, i) => 2 + ((i * 5) % 6));
+  if (metric === "notes") return Array.from({ length: n }, (_, i) => 2 + ((i * 7) % 6) + (i % 2));
+  return Array.from({ length: n }, (_, i) => 4 + ((i * 37) % 9) + i * 0.4);
+}
 
 
 const RHYTHM = [2, 3, 5, 9, 12, 8, 5, 3, 2, 1, 4, 6];
 
 /** 趋势图：柱状 / 折线 / 曲线 / 面积 */
-function trendBody(p: Pen, a: Area, style: string | undefined, values: number[] = TREND): void {
+function trendBody(p: Pen, a: Area, style: string | undefined, values: number[] = trendValues()): void {
   if (style === "line" || style === "curve" || style === "area") {
     lineChart(p, a, values, { smooth: style !== "line", area: style === "area" });
     if (style === "line") for (const [x, y] of points(a, values)) p.dot(x, y, 1.8, "acc");
@@ -168,36 +180,82 @@ function weekBody(p: Pen, a: Area, style: string | undefined): void {
   }
 }
 
-/** 标签云：大小不一的小块 */
+/** 标签云：最大的在正中间，往外越来越小（和看板上的标签云同一个排布算法） */
 function cloud(p: Pen, a: Area): void {
-  const sizes = [[34, 9], [20, 6], [26, 7], [16, 5], [30, 8], [14, 5], [22, 6], [18, 5], [28, 7]];
-  let x = a.x;
-  let y = a.y + 2;
-  sizes.forEach(([w, h], i) => {
-    if (x + w > a.x + a.w) {
-      x = a.x;
-      y += 13;
-    }
-    p.rect(x, y + (9 - h) / 2, w, h, i % 3 === 0 ? "acc" : i % 3 === 1 ? "rose" : "dim", h / 2, i % 3 === 2 ? 1 : 0.8);
-    x += w + 5;
+  const sizes = [[40, 11], [28, 8], [26, 8], [22, 7], [20, 7], [18, 6], [16, 6], [16, 5], [14, 5], [14, 5], [12, 5], [12, 4], [10, 4], [10, 4]].map(([w, h]) => ({ w, h }));
+  const spots = cloudLayout(sizes, { width: a.w, height: a.h, bounded: true, gap: 3 });
+  sizes.forEach((sz, i) => {
+    const sp = spots[i];
+    if (!sp) return;
+    const tone: Tone = i === 0 ? "acc" : i < 4 ? "rose" : "dim";
+    p.rect(a.x + a.w / 2 + sp.x - sz.w / 2, a.y + a.h / 2 + sp.y - sz.h / 2, sz.w, sz.h, tone, sz.h / 2, i === 0 ? 0.9 : i < 4 ? 0.7 : 1);
   });
 }
 
-const DRAW: Record<WidgetId, (p: Pen, style?: string) => void> = {
-  hero: (p, style) => {
-    const a = frame(p, 40);
-    p.rect(a.x, a.y, 44, 16, "acc", 3);
-    p.rect(a.x, a.y + 21, 30, 4, "dim");
-    weekBody(p, { x: a.x + 62, y: a.y, w: 78, h: 38 }, style);
-  },
-  tasks: (p) => {
-    const a = frame(p);
-    for (let i = 0; i < 4; i++) {
-      const y = a.y + i * 13;
+/** 文件夹构成：堆叠条 / 环形图 / 列表 */
+function mixBody(p: Pen, a: Area, style: string | undefined): void {
+  const parts: [number, Tone][] = [[0.4, "acc"], [0.25, "rose"], [0.2, "warn"], [0.15, "ok"]];
+  if (style === "donut") {
+    donut(p, a.x + 34, a.y + 28, 17, parts);
+    rows(p, { x: a.x + 72, y: a.y + 8, w: 68, h: 44 }, 4, "acc");
+  } else if (style === "list") {
+    parts.forEach(([f, tone], i) => {
+      const y = a.y + 2 + i * 13;
+      p.dot(a.x + 3, y + 2, 2.2, tone);
+      p.rect(a.x + 10, y, 40, 4, "dim");
+      p.rect(a.x + 60, y + 0.5, (a.w - 90) * f * 2, 3, tone, 1.5, 0.7);
+      p.rect(a.x + a.w - 18, y, 18, 4, "dim");
+    });
+  } else {
+    let x = a.x;
+    parts.forEach(([f, tone]) => {
+      p.rect(x, a.y + 4, a.w * f - 1.5, 14, tone, 2, 0.85);
+      x += a.w * f;
+    });
+    p.rect(a.x, a.y + 26, a.w * 0.5, 3, "dim");
+  }
+}
+
+/** 任务：按到期（勾选框列表）/ 按文件夹（带进度条的分组） */
+function tasksBody(p: Pen, a: Area, tab: string | undefined): void {
+  for (let i = 0; i < 4; i++) {
+    const y = a.y + i * 13;
+    if (tab === "folder" || tab === "notes") {
+      p.rect(a.x, y, 38 - i * 4, 4, "dim");
+      p.rect(a.x + 52, y + 0.5, a.w - 52, 3.5, "dim", 2, 0.6);
+      p.rect(a.x + 52, y + 0.5, (a.w - 52) * (0.8 - i * 0.18), 3.5, "acc", 2, 0.8);
+    } else {
       p.rect(a.x, y, 7, 7, i < 2 ? "acc" : "dim", 2, i < 2 ? 0.8 : 1);
       p.rect(a.x + 13, y + 1.5, a.w * (0.7 - i * 0.1), 4, "dim");
     }
+  }
+}
+
+/** 链接密度小图 */
+function densityBody(p: Pen, a: Area): void {
+  big(p, a, "acc");
+  p.dot(a.x + 100, a.y + 14, 4, "acc");
+  p.dot(a.x + 124, a.y + 6, 3, "rose");
+  p.dot(a.x + 116, a.y + 26, 3, "rose");
+  p.path(`M${a.x + 100} ${a.y + 14} L${a.x + 124} ${a.y + 6} M${a.x + 100} ${a.y + 14} L${a.x + 116} ${a.y + 26}`, "dim");
+}
+
+/** 笔记活跃度：一排颜色深浅不一的小块 */
+function activityBody(p: Pen, a: Area): void {
+  for (let i = 0; i < 12; i++) p.rect(a.x + i * 11.2, a.y + 6, 9, 22, "acc", 2, 0.15 + ((i * 37) % 10) / 12);
+}
+
+const CHECKUP_TABS = ["brokenLinks", "orphans", "sameName", "emptyBig", "unusedFiles", "dupes"];
+const STRUCT_TABS = ["tags", "folders", "mix", "linked", "density"];
+
+const DRAW: Record<WidgetId, (p: Pen, v: PreviewVariant) => void> = {
+  hero: (p, v) => {
+    const a = frame(p, 40);
+    p.rect(a.x, a.y, 44, 16, "acc", 3);
+    p.rect(a.x, a.y + 21, 30, 4, "dim");
+    weekBody(p, { x: a.x + 62, y: a.y, w: 78, h: 38 }, v.style);
   },
+  tasks: (p, v) => tasksBody(p, frame(p), v.tab),
   notes: (p) => big(p, frame(p)),
   words: (p) => big(p, frame(p), "rose"),
   taskRate: (p) => {
@@ -211,16 +269,16 @@ const DRAW: Record<WidgetId, (p: Pen, style?: string) => void> = {
     lineChart(p, { x: a.x + 76, y: a.y + 4, w: 64, h: 24 }, [3, 5, 4, 7, 6, 9], { smooth: true });
   },
   heat: (p) => heat(p, frame(p), 26, 7),
-  trend: (p, style) => trendBody(p, frame(p), style),
-  trendHub: (p, style) => {
+  trend: (p, v) => trendBody(p, frame(p), v.style, trendValues(v.metric, v.range)),
+  trendHub: (p, v) => {
     const a = frame(p);
     tabs(p, a.x, a.y - 2, 4);
-    trendBody(p, { x: a.x, y: a.y + 12, w: a.w, h: a.h - 14 }, style);
+    trendBody(p, { x: a.x, y: a.y + 12, w: a.w, h: a.h - 14 }, v.style, trendValues(v.metric, v.range));
   },
-  tags: (p, style) => {
+  tags: (p, v) => {
     const a = frame(p);
-    if (style === "cloud") cloud(p, a);
-    else rows(p, a, 5, "rose");
+    if (v.tab !== "folders" && v.style === "cloud") cloud(p, a);
+    else rows(p, a, 5, v.tab === "folders" ? "acc" : "rose");
   },
   reports: (p) => {
     const a = frame(p);
@@ -232,43 +290,11 @@ const DRAW: Record<WidgetId, (p: Pen, style?: string) => void> = {
     }
   },
   topLinked: (p) => rows(p, frame(p), 5, "acc"),
-  rhythm: (p, style) => rhythmBody(p, frame(p), style),
-  activity: (p) => {
-    const a = frame(p);
-    for (let i = 0; i < 12; i++) p.rect(a.x + i * 11.2, a.y + 6, 9, 22, "acc", 2, 0.15 + ((i * 37) % 10) / 12);
-  },
+  rhythm: (p, v) => rhythmBody(p, frame(p), v.style),
+  activity: (p) => activityBody(p, frame(p)),
   taskNotes: (p) => rows(p, frame(p), 4, "warn"),
-  density: (p) => {
-    const a = frame(p);
-    big(p, a, "acc");
-    p.dot(a.x + 100, a.y + 14, 4, "acc");
-    p.dot(a.x + 124, a.y + 6, 3, "rose");
-    p.dot(a.x + 116, a.y + 26, 3, "rose");
-    p.path(`M${a.x + 100} ${a.y + 14} L${a.x + 124} ${a.y + 6} M${a.x + 100} ${a.y + 14} L${a.x + 116} ${a.y + 26}`, "dim");
-  },
-  folders: (p, style) => {
-    const a = frame(p);
-    const parts: [number, Tone][] = [[0.4, "acc"], [0.25, "rose"], [0.2, "warn"], [0.15, "ok"]];
-    if (style === "donut") {
-      donut(p, a.x + 34, a.y + 28, 17, parts);
-      rows(p, { x: a.x + 72, y: a.y + 8, w: 68, h: 44 }, 4, "acc");
-    } else if (style === "list") {
-      parts.forEach(([f, tone], i) => {
-        const y = a.y + 2 + i * 13;
-        p.dot(a.x + 3, y + 2, 2.2, tone);
-        p.rect(a.x + 10, y, 40, 4, "dim");
-        p.rect(a.x + 60, y + 0.5, (a.w - 90) * f * 2, 3, tone, 1.5, 0.7);
-        p.rect(a.x + a.w - 18, y, 18, 4, "dim");
-      });
-    } else {
-      let x = a.x;
-      parts.forEach(([f, tone]) => {
-        p.rect(x, a.y + 4, a.w * f - 1.5, 14, tone, 2, 0.85);
-        x += a.w * f;
-      });
-      p.rect(a.x, a.y + 26, a.w * 0.5, 3, "dim");
-    }
-  },
+  density: (p) => densityBody(p, frame(p)),
+  folders: (p, v) => mixBody(p, frame(p), v.style),
   calendar: (p) => {
     const a = frame(p);
     for (let r = 0; r < 4; r++) {
@@ -286,29 +312,41 @@ const DRAW: Record<WidgetId, (p: Pen, style?: string) => void> = {
       p.rect(a.x + i * 36 + 5, a.y + 20, 16, 7, i % 2 ? "rose" : "acc", 2, 0.85);
     }
   },
-  checkupHub: (p) => {
+  checkupHub: (p, v) => {
+    const i = Math.max(0, CHECKUP_TABS.indexOf(v.tab ?? ""));
     const a = frame(p);
-    tabs(p, a.x, a.y - 2, 5);
-    rows(p, { x: a.x, y: a.y + 12, w: a.w, h: a.h - 12 }, 4, "warn");
+    tabs(p, a.x, a.y - 2, 6, i);
+    const body = { x: a.x, y: a.y + 12, w: a.w, h: a.h - 12 };
+    if (v.tab === "unusedFiles") for (let k = 0; k < 4; k++) p.rect(body.x + k * 34, body.y + 2, 28, 20, "soft", 3, 0.9);
+    else if (v.tab === "emptyBig") {
+      p.rect(body.x, body.y + 2, 40, 22, "dim", 3, 0.6);
+      p.rect(body.x + 54, body.y + 2, 40, 22, "warn", 3, 0.5);
+      p.rect(body.x + 108, body.y + 2, 30, 22, "dng", 3, 0.5);
+    } else rows(p, body, 4, (["dng", "rose", "warn", "warn", "acc", "warn"] as Tone[])[i]);
   },
-  structure: (p) => {
+  structure: (p, v) => {
     const a = frame(p);
-    tabs(p, a.x, a.y - 2, 3);
-    donut(p, a.x + 36, a.y + 38, 17, [[4, "acc"], [3, "rose"], [2, "warn"], [1, "ok"]]);
-    rows(p, { x: a.x + 72, y: a.y + 20, w: 68, h: 40 }, 3, "acc");
+    const i = Math.max(0, STRUCT_TABS.indexOf(v.tab ?? ""));
+    tabs(p, a.x, a.y - 2, 5, i);
+    const body = { x: a.x, y: a.y + 12, w: a.w, h: a.h - 12 };
+    if (v.tab === "mix") mixBody(p, body, v.style);
+    else if (v.tab === "density") densityBody(p, body);
+    else if (v.tab === "folders") rows(p, body, 4, "acc");
+    else if (v.tab === "linked") rows(p, body, 4, "warn");
+    else if (v.style === "cloud") cloud(p, body);
+    else rows(p, body, 4, "rose");
   },
-  habits: (p, style) => {
+  habits: (p, v) => {
     const a = frame(p);
-    tabs(p, a.x, a.y - 2, 3);
-    rhythmBody(p, { x: a.x, y: a.y + 14, w: a.w, h: a.h - 16 }, style);
+    tabs(p, a.x, a.y - 2, 2, v.tab === "activity" ? 1 : 0);
+    const body = { x: a.x, y: a.y + 14, w: a.w, h: a.h - 16 };
+    if (v.tab === "activity") activityBody(p, body);
+    else rhythmBody(p, body, v.style);
   },
-  tasksHub: (p) => {
+  tasksHub: (p, v) => {
     const a = frame(p);
-    tabs(p, a.x, a.y - 2, 3);
-    for (let i = 0; i < 3; i++) {
-      p.rect(a.x, a.y + 16 + i * 13, 7, 7, i === 0 ? "acc" : "dim", 2, 0.85);
-      p.rect(a.x + 13, a.y + 17.5 + i * 13, a.w * (0.7 - i * 0.12), 4, "dim");
-    }
+    tabs(p, a.x, a.y - 2, 3, Math.max(0, ["due", "folder", "notes"].indexOf(v.tab ?? "")));
+    tasksBody(p, { x: a.x, y: a.y + 14, w: a.w, h: a.h - 14 }, v.tab);
   },
   recent: (p) => {
     const a = frame(p);
@@ -335,11 +373,11 @@ const DRAW: Record<WidgetId, (p: Pen, style?: string) => void> = {
       p.rect(a.x, y + 6.5, a.w * cur, 5, "acc", 2, 0.85);
     });
   },
-  lengths: (p, style) => {
+  lengths: (p, v) => {
     const a = frame(p);
-    const v = [3, 8, 14, 11, 6, 3, 1];
-    if (style === "area") lineChart(p, a, v, { smooth: true, area: true, tone: "rose" });
-    else bars(p, a, v, "rose");
+    const vals = [3, 8, 14, 11, 6, 3, 1];
+    if (v.style === "area") lineChart(p, a, vals, { smooth: true, area: true, tone: "rose" });
+    else bars(p, a, vals, "rose");
   },
   brokenLinks: (p) => {
     const a = frame(p);
@@ -390,8 +428,8 @@ const DRAW: Record<WidgetId, (p: Pen, style?: string) => void> = {
   },
 };
 
-/** 往 host 里画 id 对应卡片的预览缩略图；style 是这张卡现在选的图形样式（没有样式的卡片忽略） */
-export function drawAddPreview(host: HTMLElement, id: WidgetId, style?: string): void {
+/** 往 host 里画 id 对应卡片的预览缩略图；variant 是在“添加卡片”里选的样式、标签页、指标、范围（和这张卡无关的项忽略） */
+export function drawAddPreview(host: HTMLElement, id: WidgetId, variant: PreviewVariant = {}): void {
   const svg = svgEl("svg", { viewBox: `0 0 ${PREVIEW_W} ${PREVIEW_H}`, class: "vp-add-svg", "aria-hidden": "true", focusable: "false", preserveAspectRatio: "xMidYMid meet" }, host);
-  DRAW[id](pen(svg), style);
+  DRAW[id](pen(svg), variant);
 }

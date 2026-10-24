@@ -209,6 +209,18 @@ export function hiddenWidgets(layout: WidgetLayout): WidgetInfo[] {
   return WIDGETS.filter((w) => !on.has(w.id));
 }
 
+/**
+ * “添加卡片”里不再单独列出的卡片：功能已经被另一张卡完整包含。
+ * 每周写作是写作趋势的子集（写作趋势多了笔记总数、总字数、打卡天数三个指标），列两张只会让人分不清。
+ * 看板上已有的每周写作照常显示，移除后想加回来，加写作趋势就行（默认指标和范围和它一样）。
+ */
+export const SUPERSEDED: WidgetId[] = ["trend"];
+
+/** “添加卡片”里列出的卡片：隐藏着的，去掉被别的卡完整包含的 */
+export function addableWidgets(layout: WidgetLayout): WidgetInfo[] {
+  return hiddenWidgets(layout).filter((w) => !SUPERSEDED.includes(w.id));
+}
+
 export function withItems(items: GridItem[]): WidgetLayout {
   return { version: 2, items: items as WidgetLayoutItem[] };
 }

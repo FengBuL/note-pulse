@@ -2642,12 +2642,30 @@ body.is-mobile .vp-root :is(button, [role="button"], [role="tab"], .is-clickable
 
 /* 标签云 */
 .vp-cloud {
-  display: flex;
-  flex-wrap: wrap;
-  align-content: flex-start;
-  gap: var(--vp-s2);
+  position: relative;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.vp-cloud.vp-scroll {
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+.vp-cloud-inner {
+  position: relative;
+  width: 100%;
+  height: var(--vp-cloud-inner-h, 100%);
+}
+.vp-grid.is-narrow .vp-cloud {
+  flex: none;
+  height: var(--vp-cloud-h);
 }
 .vp-root .vp-shell .vp-cloud-tag {
+  position: absolute;
+  top: calc(50% + var(--vp-cy, 0px));
+  left: calc(50% + var(--vp-cx, 0px));
+  transform: translate(-50%, -50%);
+  white-space: nowrap;
   height: auto;
   padding: 2px 10px;
   border: 1px solid transparent;
@@ -2679,6 +2697,11 @@ body.is-mobile .vp-root :is(button, [role="button"], [role="tab"], .is-clickable
 .vp-cloud-tag.is-l5 {
   font-size: var(--vp-fs-20);
   font-weight: 600;
+}
+.vp-cloud-tag.is-l6 {
+  font-size: var(--vp-fs-28);
+  font-weight: 700;
+  background: color-mix(in srgb, var(--vp-accent) 12%, transparent);
 }
 
 /* 环形图和列表（文件夹构成） */
@@ -3081,7 +3104,10 @@ body.is-mobile .vp-root :is(button, [role="button"], [role="tab"], .is-clickable
   height: 14px;
 }
 .vp-add-panel {
+  /* 面板别占满屏：看板要留在下面，才能把卡片拖上去 */
+  max-height: min(46vh, 420px);
   margin-bottom: var(--vp-s4);
+  overflow-y: auto;
 }
 .vp-add-list {
   display: grid;
@@ -3102,6 +3128,7 @@ body.is-mobile .vp-root :is(button, [role="button"], [role="tab"], .is-clickable
   border-color: var(--vp-accent);
 }
 .vp-root .vp-shell .vp-add-main {
+  user-select: none;
   display: flex;
   flex-direction: column;
   gap: var(--vp-s1);
@@ -3114,8 +3141,37 @@ body.is-mobile .vp-root :is(button, [role="button"], [role="tab"], .is-clickable
   text-align: left;
   cursor: pointer;
 }
-.vp-add-seg {
-  align-self: flex-start;
+.vp-add-opts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--vp-s1) var(--vp-s2);
+}
+.vp-add-opts:empty {
+  display: none;
+}
+.vp-add-opts .vp-select {
+  max-width: 100%;
+}
+.vp-add-hint {
+  margin-bottom: var(--vp-s3);
+  color: var(--vp-subtle);
+  font-size: var(--vp-fs-12);
+}
+/* 拖拽添加：缩略图跟着指针走 */
+.vp-root .vp-add-ghost {
+  position: fixed;
+  top: var(--vp-gy, 0);
+  left: var(--vp-gx, 0);
+  z-index: 60;
+  width: 180px;
+  padding: var(--vp-s2);
+  border: 1px solid var(--vp-accent);
+  border-radius: var(--vp-r-s);
+  background: var(--vp-surface);
+  box-shadow: var(--vp-shadow-pop);
+  opacity: 0.94;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
 }
 .vp-add-preview {
   aspect-ratio: 16 / 9;

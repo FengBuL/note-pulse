@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { COLS, GAP, GridItem, Limits, ROW_H, addItem, bestMove, displacedCount, compact, findSpot, flowItems, growItem, moveItem, nudgeItem, overlap, removeItem, repairItems, resizeItem, rowsToPx, sizeRange } from "../src/grid";
+import { COLS, GAP, GridItem, Limits, ROW_H, addItem, bestMove, bestPlace, displacedCount, compact, findSpot, flowItems, growItem, moveItem, nudgeItem, overlap, placeItem, removeItem, repairItems, resizeItem, rowsToPx, sizeRange } from "../src/grid";
 
 const LIM: Limits = { minW: 2, maxW: 12, minH: 2, maxH: 10 };
 const limitsOf = (id: string): Limits => (id.startsWith("n") ? { minW: 2, maxW: 4, minH: 2, maxH: 4 } : LIM);
@@ -297,4 +297,54 @@ test("displacedCount：不算被拖的那张，位置或大小变了才算", () 
   assert.equal(displacedCount(base, base, "a"), 0);
   assert.equal(displacedCount(base, [it("a", 8, 0, 4, 3), it("b", 4, 0, 4, 3)], "a"), 0);
   assert.equal(displacedCount(base, [it("a", 8, 0, 4, 3), it("b", 4, 0, 6, 3)], "a"), 1);
+});
+
+test("拖入新卡：放到指定格子，别的卡让位；放在空位不影响别的卡；已有的不重复放", () => {
+  const base = [it("a", 0, 0, 6, 4), it("b", 6, 0, 6, 4), it("c", 0, 4, 12, 3)];
+  const empty = placeItem(base, it("n1", 0, 0, 4, 3), 0, 7);
+  assertValid(empty);
+  assert.equal(pos(empty, "n1"), "0,7 4x3", "放在最下面的空位");
+  assert.equal(displacedCount(base, empty, "n1"), 0);
+  const mid = placeItem(base, it("n1", 0, 0, 4, 3), 4, 0);
+  assertValid(mid);
+  assert.ok(base.every((b) => mid.some((m) => m.id === b.id && m.w === b.w && m.h === b.h)), "老卡一张不少、大小不变");
+  assert.ok(mid.find((m) => m.id === "n1"), "新卡在布局里");
+  assert.equal(placeItem(base, it("a", 0, 0, 2, 2), 3, 3), base, "已经在的原样返回");
+  const clamped = placeItem(base, it("n2", 0, 0, 5, 3), 11, -4);
+  assertValid(clamped);
+  assert.equal(clamped.find((m) => m.id === "n2")!.x, 7, "右边夹进栅格");
+});
+
+test("拖入新卡：落点吸附到干扰最小的格子，挪动别的卡不会比直接落在指针格子上更多", () => {
+  const rand = rng(77);
+  const pick = (n: number) => Math.floor(rand() * n);
+  for (let round = 0; round < 40; round++) {
+    const entries = Array.from({ length: 3 + pick(8) }, (_, i) => ({ id: `w${i}`, w: 2 + pick(8), h: 2 + pick(4) }));
+    const base = repairItems(flowItems(entries), limitsOf, () => true);
+    const item = it("new", 0, 0, 2 + pick(8), 2 + pick(4));
+    const x = pick(12);
+    const y = pick(base.length ? 20 : 1);
+    const direct = placeItem(base, item, x, y);
+    const best = bestPlace(base, item, x, y);
+    assertValid(best, `round ${round}`);
+    assert.ok(displacedCount(base, best, "new") <= displacedCount(base, direct, "new"));
+  }
+});
+
+test("随机拖入 2000 次：每一步之后都不重叠、不越界、没有洞，老卡一张不少", () => {
+  const rand = rng(424242);
+  const pick = (n: number) => Math.floor(rand() * n);
+  for (let round = 0; round < 8; round++) {
+    const entries = Array.from({ length: 3 + pick(8) }, (_, i) => ({ id: `w${i}`, w: 2 + pick(8), h: 2 + pick(4) }));
+    let l = repairItems(flowItems(entries), limitsOf, () => true);
+    for (let step = 0; step < 250; step++) {
+      const id = `x${round}-${step}`;
+      const before = l.map((i) => `${i.id}:${i.w}x${i.h}`);
+      const added = it(id, 0, 0, 2 + pick(8), 2 + pick(4));
+      l = bestPlace(l, added, pick(14) - 1, pick(30) - 2);
+      assertValid(l, `r${round} s${step}`);
+      assert.ok(before.every((b) => l.some((i) => `${i.id}:${i.w}x${i.h}` === b)), "老卡不丢、大小不变");
+      if (l.length > 14) l = removeItem(l, l[pick(l.length)].id);
+    }
+  }
 });

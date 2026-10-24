@@ -130,6 +130,34 @@ export function moveItem<T extends GridItem>(items: T[], id: string, x: number, 
   return settle(items, pin, "move", cur);
 }
 
+/**
+ * 把一张还不在布局里的新卡放进去：左上角在格子 (x, y)，别的卡让位（和拖动同一套规则：能放到上面就放上面，否则往下推）。
+ * 返回整个新布局（已上浮）；item 已经在 items 里就原样返回。
+ */
+export function placeItem<T extends GridItem>(items: T[], item: T, x: number, y: number): T[] {
+  if (items.some((i) => i.id === item.id)) return items;
+  const pin = { ...item, x: clamp(int(x, 0), 0, COLS - item.w), y: Math.max(0, int(y, 0)) };
+  return settle([...items, pin], pin, "move");
+}
+
+/** 新卡的落点：和 bestMove 一样，在指针所在格子和周围一圈里挑挪动别的卡最少的 */
+export function bestPlace<T extends GridItem>(items: T[], item: T, x: number, y: number): T[] {
+  if (items.some((i) => i.id === item.id)) return items;
+  let best: T[] = placeItem(items, item, x, y);
+  let bestScore = Infinity;
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const out = placeItem(items, item, x + dx, y + dy);
+      const score = displacedCount(items, out, item.id) * 2 + Math.abs(dx) + Math.abs(dy);
+      if (score < bestScore) {
+        bestScore = score;
+        best = out;
+      }
+    }
+  }
+  return best;
+}
+
 /** 除了 exceptId，有几张卡的位置或大小和 base 不一样 */
 export function displacedCount(base: GridItem[], next: GridItem[], exceptId: string): number {
   let n = 0;

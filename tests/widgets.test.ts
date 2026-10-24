@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { COLS, overlap } from "../src/grid";
 
 const OPTIONAL = ["trendHub", "overview", "checkupHub", "structure", "habits", "tasksHub", "recent", "goals", "monthCompare", "lengths"];
-import { WIDGETS, WidgetId, addWidget, defaultLayout, hiddenWidgets, limitsOf, normalizeLayout, readingOrder, removeWidget, sameLayout, widgetInfo } from "../src/widgets";
+import { WIDGETS, WidgetId, addWidget, addableWidgets, defaultLayout, hiddenWidgets, limitsOf, normalizeLayout, readingOrder, removeWidget, sameLayout, widgetInfo } from "../src/widgets";
 
 const at = (l: { items: { id: string; x: number; y: number; w: number; h: number }[] }, id: string) => {
   const i = l.items.find((x) => x.id === id);
@@ -142,4 +142,13 @@ test("sameLayout：位置或大小不同就不相同", () => {
   assert.ok(sameLayout(a, b));
   b.items[3].w += 1;
   assert.ok(!sameLayout(a, b));
+});
+
+test("添加卡片：每周写作被写作趋势完整包含，不在列表里；移除后加写作趋势就能得到同样的图", () => {
+  const without = removeWidget(removeWidget(defaultLayout(), "trend"), "trendHub");
+  const ids = addableWidgets(without).map((w) => w.id);
+  assert.ok(ids.includes("trendHub"));
+  assert.ok(!ids.includes("trend"));
+  assert.ok(hiddenWidgets(without).some((w) => w.id === "trend"), "只是不在添加列表里，卡片本身还在目录里");
+  assert.ok(addableWidgets(defaultLayout()).every((w) => OPTIONAL.includes(w.id)));
 });
