@@ -140,7 +140,7 @@ const DEFAULT_ITEMS: [WidgetId, number, number, number, number][] = [
 ];
 
 export function defaultLayout(): WidgetLayout {
-  return { version: 2, items: compact(DEFAULT_ITEMS.map(([id, x, y, w, h]) => ({ id, x, y, w, h }))) as WidgetLayoutItem[] };
+  return { version: 2, items: compact(DEFAULT_ITEMS.map(([id, x, y, w, h]): WidgetLayoutItem => ({ id, x, y, w, h }))) };
 }
 
 /** 2.0 开发中的档位布局（只在开发者本机存在过）：档位 → 占几列 */
