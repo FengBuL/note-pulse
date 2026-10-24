@@ -3063,13 +3063,15 @@ body.is-mobile .vp-root :is(button, [role="button"], [role="tab"], .is-clickable
 }
 .vp-add-list {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  gap: var(--vp-s2);
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: var(--vp-s3);
 }
 .vp-root .vp-shell .vp-add-item {
-  display: block;
+  display: flex;
+  flex-direction: column;
+  gap: var(--vp-s1);
   height: auto;
-  padding: 10px var(--vp-s3);
+  padding: var(--vp-s2);
   border: 1px solid var(--vp-line);
   border-radius: var(--vp-r-s);
   background: var(--vp-surface);
@@ -3079,6 +3081,71 @@ body.is-mobile .vp-root :is(button, [role="button"], [role="tab"], .is-clickable
 }
 .vp-root .vp-shell .vp-add-item:hover {
   border-color: var(--vp-accent);
+}
+.vp-add-preview {
+  aspect-ratio: 16 / 9;
+  margin-bottom: var(--vp-s1);
+  border-radius: var(--vp-r-s);
+  background: var(--vp-surface);
+  overflow: hidden;
+}
+.vp-add-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.vp-add-svg .pv-acc {
+  fill: var(--vp-accent);
+}
+.vp-add-svg .pv-rose {
+  fill: var(--vp-rose);
+}
+.vp-add-svg .pv-ok {
+  fill: var(--vp-success);
+}
+.vp-add-svg .pv-warn {
+  fill: var(--vp-warning);
+}
+.vp-add-svg .pv-dng {
+  fill: var(--vp-danger);
+}
+.vp-add-svg .pv-soft {
+  fill: var(--vp-accent-soft);
+}
+.vp-add-svg .pv-dim {
+  fill: var(--vp-line-strong);
+}
+.vp-add-svg .pv-stroke {
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.vp-add-svg .pv-s-acc {
+  stroke: var(--vp-accent);
+}
+.vp-add-svg .pv-s-warn {
+  stroke: var(--vp-warning);
+}
+.vp-add-svg .pv-s-dim {
+  stroke: var(--vp-line-strong);
+}
+.vp-add-svg .pv-ring {
+  stroke-width: 6;
+}
+.vp-add-svg .pv-r-dim {
+  stroke: var(--vp-track);
+}
+.vp-add-svg .pv-r-acc {
+  stroke: var(--vp-accent);
+}
+.vp-add-svg .pv-r-rose {
+  stroke: var(--vp-rose);
+}
+.vp-add-svg .pv-r-warn {
+  stroke: var(--vp-warning);
+}
+.vp-add-svg .pv-r-ok {
+  stroke: var(--vp-success);
 }
 .vp-add-name {
   font-size: var(--vp-fs-13);

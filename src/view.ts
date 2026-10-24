@@ -1,5 +1,6 @@
 import { ItemView, Notice, Platform, TFile, WorkspaceLeaf, setIcon } from "obsidian";
 import type NotePulsePlugin from "./main";
+import { drawAddPreview } from "./add-preview";
 import { ConfirmModal } from "./dedupe/modals";
 import { writingReportOverview } from "./report-logic";
 import { latestWritingReport } from "./report-storage";
@@ -693,6 +694,7 @@ export class DashboardView extends ItemView {
     const list = panel.createDiv({ cls: "vp-add-list" });
     for (const w of hidden) {
       const b = list.createEl("button", { cls: "vp-add-item", attr: { type: "button", "data-fid": `add:${w.id}` } });
+      drawAddPreview(b.createDiv({ cls: "vp-add-preview" }), w.id);
       b.createDiv({ cls: "vp-add-name", text: widgetName(w.id) });
       b.createDiv({ cls: "vp-add-desc", text: `${widgetDesc(w.id)} · ${w.w} × ${w.h}` });
       b.addEventListener("click", () => this.applyLayout(addWidget(this.plugin.settings.layout, w.id), { reveal: w.id }));
