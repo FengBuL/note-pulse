@@ -1697,13 +1697,15 @@ export class DashboardView extends ItemView {
 
     // tile：画在合并卡“数据概览”的一格里（不是单独的卡片），密度由概览卡按格子大小给
     const dn = tile ?? kpiDensity(this.box(which));
-    const kpi = (icon: string, label: string, help: string) => {
-      const c = tile ? wrap.createDiv({ cls: "vp-kpi vp-tile" + (dn.small ? " is-small" : ""), attr: { role: "group" } }) : this.cardRoot(wrap, "vp-kpi" + (dn.small ? " is-small" : ""), { role: "group" });
+    const kpi = (icon: string, label: string, help: string, note?: string) => {
+      const c = tile ? wrap.createDiv({ cls: "vp-kpi vp-tile" + (dn.small ? " is-tiny" : dn.note ? "" : " is-snug"), attr: { role: "group" } }) : this.cardRoot(wrap, "vp-kpi" + (dn.small ? " is-tiny" : dn.note ? "" : " is-snug"), { role: "group" });
       srLabel(c, label);
       const top = c.createDiv({ cls: "vp-kpi-top" });
       setIcon(top.createSpan({ cls: "vp-card-icon", attr: { "aria-hidden": "true" } }), icon);
       top.createSpan({ cls: "vp-label", text: label });
       this.help(top, help);
+      // 一句话说明下面的曲线（或进度条）画的是什么；卡片太窄时放不下就不显示
+      if (note && dn.viz && dn.note) top.createSpan({ cls: "vp-kpi-note", text: note });
       const row = c.createDiv({ cls: "vp-kpi-row" });
       const num = row.createDiv({ cls: "vp-kpi-num" });
       const side = row.createDiv({ cls: "vp-kpi-side" + (dn.side ? "" : " vp-hide") });
@@ -1737,14 +1739,15 @@ export class DashboardView extends ItemView {
         L(
           "统计所有未被排除的 Markdown 笔记。曲线是近 12 周每周结束时的累计数（不含采集文件夹），按创建日期计。",
           "All Markdown notes that are not excluded. The line is the running total at the end of each of the last 12 weeks (clipping folders left out), by created date."
-        )
+        ),
+        L("曲线：近 12 周累计", "Line: last 12 weeks, running total")
       );
       const aOn = readout(
         a,
         () => {
           this.tweenNum("kpi:notes", bigNumber(a.num, s.totalNotes, unit("notes", s.totalNotes)), s.totalNotes, unit("notes", s.totalNotes));
-          a.side.createSpan({ cls: "vp-kpi-caption", text: L("近 30 天", "30 days") });
-          a.side.createSpan({ cls: "vp-delta is-up", text: `+${fmtFull(n30)}` });
+          a.side.createSpan({ cls: "vp-kpi-caption", text: dn.note ? L("近 30 天新增", "Added in 30 days") : L("近 30 天", "30 days") });
+          a.side.createSpan({ cls: "vp-delta is-up", text: dn.note ? L(`+${fmtFull(n30)} 篇`, `+${fmtFull(n30)} notes`) : `+${fmtFull(n30)}` });
         },
         (i) => ({
           value: fmtFull(notes[i].value),
@@ -1778,14 +1781,15 @@ export class DashboardView extends ItemView {
           `Total words in all notes. The line is the running total of writing over the last 12 weeks (by created date, using each note's current length).${
             skipped > 0 ? `\n${fmtNum(skipped)} of these words are in clipping folders or oversized notes, which are left out of the line, the heatmap and words added.` : ""
           }`
-        )
+        ),
+        L("曲线：近 12 周累计", "Line: last 12 weeks, running total")
       );
       const bOn = readout(
         b,
         () => {
           this.tweenNum("kpi:words", bigNumber(b.num, s.totalWords, unit("words")), s.totalWords, unit("words"));
-          b.side.createSpan({ cls: "vp-kpi-caption", text: L("近 30 天", "30 days") });
-          b.side.createSpan({ cls: "vp-delta is-up", text: `+${fmtNum(w30)}` });
+          b.side.createSpan({ cls: "vp-kpi-caption", text: dn.note ? L("近 30 天新增", "Added in 30 days") : L("近 30 天", "30 days") });
+          b.side.createSpan({ cls: "vp-delta is-up", text: dn.note ? L(`+${fmtNum(w30)}字`, `+${fmtNum(w30)} words`) : `+${fmtNum(w30)}` });
         },
         (i) => {
           const p = splitNum(words[i].value, unit("words"));
@@ -1809,11 +1813,12 @@ export class DashboardView extends ItemView {
       const c = kpi(
         "list-checks",
         L("任务完成率", "Tasks done"),
-        L("已完成任务占全部任务的比例，已取消的任务不计。", "Share of all tasks that are done. Cancelled tasks are not counted.")
+        L("已完成任务占全部任务的比例，已取消的任务不计。", "Share of all tasks that are done. Cancelled tasks are not counted."),
+        L("进度条：已完成的占比", "Bar: share of tasks done")
       );
       const rateEl = bigNumber(c.num, t.total ? String(rate) : "—", t.total ? "%" : "");
       if (t.total) this.tweenNum("kpi:rate", rateEl, rate, "%");
-      c.side.createSpan({ cls: "vp-kpi-caption", text: `${fmtFull(t.done)} / ${fmtFull(t.total)}` });
+      c.side.createSpan({ cls: "vp-kpi-caption", text: dn.note ? L(`已完成 ${fmtFull(t.done)} / ${fmtFull(t.total)}`, `${fmtFull(t.done)} of ${fmtFull(t.total)} done`) : `${fmtFull(t.done)} / ${fmtFull(t.total)}` });
       if (dn.viz) this.meter(c.c.createDiv({ cls: "vp-kpi-viz" }), t.total ? t.done / t.total : 0, "");
     }
 
@@ -1827,13 +1832,14 @@ export class DashboardView extends ItemView {
         L(
           "本月打卡的天数，和本月每天平均写的字数。曲线是近 12 周每周打卡的天数。",
           "Streak days this month and the average words per day this month. The line is the streak days in each of the last 12 weeks."
-        )
+        ),
+        L("曲线：每周打卡天数", "Line: streak days per week")
       );
       const dOn = readout(
         d,
         () => {
           this.tweenNum("kpi:month", bigNumber(d.num, String(month.days), unit("days", month.days)), month.days, unit("days", month.days));
-          d.side.createSpan({ cls: "vp-kpi-caption", text: L(`日均 ${fmtFull(month.average)} 字`, `${fmtFull(month.average)} words a day`) });
+          d.side.createSpan({ cls: "vp-kpi-caption", text: dn.note ? L(`本月打卡，日均 ${fmtFull(month.average)} 字`, `Streak days, ${fmtFull(month.average)} words a day`) : L(`日均 ${fmtFull(month.average)} 字`, `${fmtFull(month.average)} words a day`) });
         },
         (i) => ({
           value: String(weeks[i].value),
@@ -1860,7 +1866,7 @@ export class DashboardView extends ItemView {
     srLabel(card, L("数据概览", "Overview"));
     const tiles = card.createDiv({ cls: "vp-tiles" });
     tiles.setCssProps({ "--vp-ov-cols": String(dn.cols) });
-    const kd: KpiDensity = { viz: dn.viz, small: dn.tileW < 120, side: dn.tileW >= 150 };
+    const kd: KpiDensity = { viz: dn.viz, small: dn.tileW < 120, side: dn.tileW >= 150, note: dn.tileW >= 230 };
     for (const which of (["notes", "words", "taskRate", "month"] as const).slice(0, dn.shown)) this.renderKpi(tiles, s, which, kd);
   }
 

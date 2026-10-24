@@ -95,12 +95,14 @@ export interface KpiDensity {
   small: boolean;
   /** 主数字右边的说明 */
   side: boolean;
+  /** 宽到放得下完整的文字说明（曲线画的是什么、“近 30 天新增 +90 篇”） */
+  note: boolean;
 }
 
 export function kpiDensity(b: Box): KpiDensity {
-  if (b.narrow) return { viz: true, small: innerW(b) < 120, side: innerW(b) >= 130 };
+  if (b.narrow) return { viz: true, small: innerW(b) < 120, side: innerW(b) >= 130, note: innerW(b) >= 230 };
   const w = innerW(b) - (isTight(b.rows) ? -14 : 0);
-  return { viz: b.rows >= 3, small: w < 120, side: w >= 150 };
+  return { viz: b.rows >= 3, small: w < 120, side: w >= 150, note: w >= 230 };
 }
 
 export interface RhythmDensity {

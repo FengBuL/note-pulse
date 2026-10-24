@@ -1074,10 +1074,11 @@
   gap: 6px;
 }
 /* 很窄的数据卡：主数字缩小，不被截断 */
-.vp-kpi.is-small .vp-num {
+.vp-kpi.is-snug .vp-num,
+.vp-kpi.is-tiny .vp-num {
   font-size: var(--vp-fs-20);
 }
-.vp-kpi.is-small .vp-num-unit {
+.vp-kpi.is-tiny .vp-num-unit {
   display: none;
 }
 .vp-kpi-top .vp-label {
@@ -1100,11 +1101,28 @@
   gap: var(--vp-s2);
   min-height: 28px;
 }
+/* 中等宽度的数据卡：数字和说明一行放不下时，说明换到下一行，不截断 */
+.vp-kpi.is-snug .vp-kpi-row {
+  flex-wrap: wrap;
+  row-gap: 0;
+}
+.vp-kpi.is-snug .vp-kpi-side {
+  flex: 0 0 auto;
+}
 .vp-kpi-side {
   display: flex;
   align-items: center;
   gap: 6px;
   min-width: 0;
+}
+.vp-kpi-note {
+  margin-left: auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--vp-subtle);
+  font-size: var(--vp-fs-11);
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .vp-kpi-caption {
   font-size: var(--vp-fs-12);
