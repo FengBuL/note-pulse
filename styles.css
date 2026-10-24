@@ -2983,6 +2983,10 @@ body.is-mobile .vp-root :is(button, [role="button"], [role="tab"], .is-clickable
 .vp-grid.is-editing > .vp-w > :not(.vp-w-remove):not(.vp-w-handle) {
   pointer-events: none;
 }
+/* 换图形样式的控件只在编辑模式里出现，编辑时可以点 */
+.vp-grid.is-editing > .vp-w .vp-style-seg {
+  pointer-events: auto;
+}
 .vp-grid > .vp-w.is-flash {
   outline: 3px solid transparent;
   outline-offset: 3px;

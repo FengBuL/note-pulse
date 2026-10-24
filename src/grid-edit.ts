@@ -83,7 +83,7 @@ export class GridGesture {
     const target = e.target as HTMLElement;
     const card = target.closest<HTMLElement>(".vp-grid > .vp-w");
     const id = card?.dataset.widget;
-    if (!card || !id || e.button !== 0 || this.active || target.closest(".vp-w-remove")) return;
+    if (!card || !id || e.button !== 0 || this.active || target.closest(".vp-w-remove") || target.closest(".vp-style-seg")) return;
     const resize = !!target.closest(".vp-w-handle");
     e.preventDefault();
     card.focus({ preventScroll: true });

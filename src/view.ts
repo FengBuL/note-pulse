@@ -1084,6 +1084,17 @@ export class DashboardView extends ItemView {
     return seg;
   }
 
+  /**
+   * 换图形样式的分段控件：只在编辑模式里出现，平时卡片上不放，免得误点；
+   * 编辑时卡片里的内容本来不响应点击，这个控件例外（vp-style-seg），点它也不会开始拖动。
+   */
+  private styleSeg<T extends string | number>(parent: HTMLElement, options: [T, string][], current: T, onChange: (v: T) => void, label?: string): HTMLElement | null {
+    if (!this.editing) return null;
+    const seg = this.segmented(parent, options, current, onChange, label);
+    seg.addClass("vp-style-seg");
+    return seg;
+  }
+
   private empty(parent: HTMLElement, icon: string, text: string) {
     const e = parent.createDiv({ cls: "vp-empty" });
     setIcon(e.createDiv({ cls: "vp-empty-icon", attr: { "aria-hidden": "true" } }), icon);
@@ -1521,7 +1532,7 @@ export class DashboardView extends ItemView {
             )
           : L("柱子高度和当天写的字数成正比，上面写着具体字数。", "Bar height follows the words written that day, with the number above each bar.")
     );
-    this.segmented<WeekStyle>(
+    this.styleSeg<WeekStyle>(
       top,
       [["dots", L("圆点", "Dots")], ["bars", L("柱状", "Bars")], ["line", L("折线", "Line")]],
       style,
@@ -2171,7 +2182,7 @@ export class DashboardView extends ItemView {
       },
       L("时间范围", "Period")
     );
-    this.segmented<TrendStyle>(ctrls, TREND_STYLES.map((v) => [v, trendStyleName(v)]), style, (v) => this.setChartStyle("trend", v, id), L("图的样式", "Chart style"));
+    this.styleSeg<TrendStyle>(ctrls, TREND_STYLES.map((v) => [v, trendStyleName(v)]), style, (v) => this.setChartStyle("trend", v, id), L("图的样式", "Chart style"));
 
     const dn = trendDensity(this.box(id));
     if (dn.summary) {
@@ -2459,7 +2470,7 @@ export class DashboardView extends ItemView {
   }
 
   private tagStyleSwitch(parent: HTMLElement, cardId: string) {
-    this.segmented<TagStyle>(parent, TAG_STYLES.map((v) => [v, v === "bars" ? L("条形", "Bars") : L("标签云", "Cloud")]), this.plugin.settings.chartStyles.tags, (v) => this.setChartStyle("tags", v, cardId), L("标签的样子", "Tag style"));
+    this.styleSeg<TagStyle>(parent, TAG_STYLES.map((v) => [v, v === "bars" ? L("条形", "Bars") : L("标签云", "Cloud")]), this.plugin.settings.chartStyles.tags, (v) => this.setChartStyle("tags", v, cardId), L("标签的样子", "Tag style"));
   }
 
   /** 标签排行或文件夹排行（独立的“常用标签”和合并卡“结构”共用） */
@@ -2899,7 +2910,7 @@ export class DashboardView extends ItemView {
   }
 
   private rhythmStyleSwitch(parent: HTMLElement, cardId: string) {
-    this.segmented<RhythmStyle>(parent, RHYTHM_STYLES.map((v) => [v, v === "bar" ? L("柱状", "Bar") : v === "line" ? L("折线", "Line") : L("面积", "Area")]), this.plugin.settings.chartStyles.rhythm, (v) => this.setChartStyle("rhythm", v, cardId), L("图的样式", "Chart style"));
+    this.styleSeg<RhythmStyle>(parent, RHYTHM_STYLES.map((v) => [v, v === "bar" ? L("柱状", "Bar") : v === "line" ? L("折线", "Line") : L("面积", "Area")]), this.plugin.settings.chartStyles.rhythm, (v) => this.setChartStyle("rhythm", v, cardId), L("图的样式", "Chart style"));
   }
 
   private rhythmPanel(body: HTMLElement, id: string, s: VaultStats, box: Box) {
@@ -3038,7 +3049,7 @@ export class DashboardView extends ItemView {
   }
 
   private mixStyleSwitch(parent: HTMLElement, cardId: string) {
-    this.segmented<MixStyle>(parent, MIX_STYLES.map((v) => [v, v === "stack" ? L("堆叠条", "Stack") : v === "donut" ? L("环形图", "Donut") : L("列表", "List")]), this.plugin.settings.chartStyles.mix, (v) => this.setChartStyle("mix", v, cardId), L("图的样式", "Chart style"));
+    this.styleSeg<MixStyle>(parent, MIX_STYLES.map((v) => [v, v === "stack" ? L("堆叠条", "Stack") : v === "donut" ? L("环形图", "Donut") : L("列表", "List")]), this.plugin.settings.chartStyles.mix, (v) => this.setChartStyle("mix", v, cardId), L("图的样式", "Chart style"));
   }
 
   private mixPanel(body: HTMLElement, s: VaultStats, box: Box) {
@@ -3272,7 +3283,7 @@ export class DashboardView extends ItemView {
       L("按字数把笔记分成 6 档，看你的笔记大多多长（采集文件夹里的不算）。", "Your notes grouped into six length bands (clipping folders left out).")
     );
     const style = this.plugin.settings.chartStyles.lengths;
-    this.segmented<LengthStyle>(head, LENGTH_STYLES.map((v) => [v, v === "bar" ? L("柱状", "Bar") : L("面积", "Area")]), style, (v) => this.setChartStyle("lengths", v, "lengths"), L("图的样式", "Chart style"));
+    this.styleSeg<LengthStyle>(head, LENGTH_STYLES.map((v) => [v, v === "bar" ? L("柱状", "Bar") : L("面积", "Area")]), style, (v) => this.setChartStyle("lengths", v, "lengths"), L("图的样式", "Chart style"));
     const names: Record<string, string> = { empty: L("空", "Empty"), tiny: "<100", short: "100+", medium: "500+", long: "2千+", huge: "1万+" };
     const en: Record<string, string> = { empty: "Empty", tiny: "<100", short: "100+", medium: "500+", long: "2K+", huge: "10K+" };
     const buckets = lengthBuckets(s);
