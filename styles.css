@@ -3141,17 +3141,6 @@ body.is-mobile .vp-root :is(button, [role="button"], [role="tab"], .is-clickable
   text-align: left;
   cursor: pointer;
 }
-.vp-add-opts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--vp-s1) var(--vp-s2);
-}
-.vp-add-opts:empty {
-  display: none;
-}
-.vp-add-opts .vp-select {
-  max-width: 100%;
-}
 .vp-add-jump {
   position: sticky;
   top: calc(var(--vp-s4) * -1);

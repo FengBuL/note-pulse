@@ -1,6 +1,6 @@
 import { ItemView, Notice, Platform, TFile, WorkspaceLeaf, setIcon } from "obsidian";
 import type NotePulsePlugin from "./main";
-import { drawAddPreview } from "./add-preview";
+import { PreviewVariant, drawAddPreview } from "./add-preview";
 import { CLOUD_FONT_PX, cloudExtent, cloudLayout, cloudLevels, cloudTagSize } from "./cloud";
 import { ConfirmModal } from "./dedupe/modals";
 import { writingReportOverview } from "./report-logic";
@@ -98,16 +98,6 @@ const WIDGET_TEXT: Record<WidgetId, [() => string, () => string]> = {
   monthCompare: [() => L("本月对比上月", "This month vs last"), () => L("字数、新建笔记、打卡天数和上月同期对比", "Words, new notes and streak days against last month")],
   lengths: [() => L("笔记长度分布", "Note length"), () => L("你的笔记大多是几百字还是几千字", "Whether your notes run to hundreds or thousands of words")],
 };
-/** 添加面板里的一组选项（一个分段控件或下拉框） */
-interface AddGroup {
-  key: string;
-  label: string;
-  options: [string, string][];
-  current: string;
-  apply: (v: string) => void;
-}
-
-const hubMetricName = (m: HubMetric) => ({ words: L("写作字数", "Words written"), notes: L("新建笔记", "New notes"), totalNotes: L("笔记总数", "Total notes"), totalWords: L("总字数", "Total words"), checkins: L("打卡天数", "Streak days") })[m];
 const trendStyleName = (v: TrendStyle) => ({ bar: L("柱状", "Bar"), line: L("折线", "Line"), curve: L("曲线", "Curve"), area: L("面积", "Area") })[v];
 const widgetName = (id: WidgetId) => WIDGET_TEXT[id][0]();
 const widgetDesc = (id: WidgetId) => WIDGET_TEXT[id][1]();
@@ -561,7 +551,6 @@ export class DashboardView extends ItemView {
     }
     this.editing = !this.editing;
     this.addOpen = false;
-    this.addState.clear();
     this.undoStack = [];
     this.editBtn?.toggleClass("is-active", this.editing);
     this.editBtn?.setAttr("aria-pressed", String(this.editing));
@@ -633,8 +622,6 @@ export class DashboardView extends ItemView {
         this.liveEl?.setText(L(`${name}，第 ${it.x + 1} 列第 ${it.y + 1} 行，${it.w} × ${it.h}`, `${name}, column ${it.x + 1}, row ${it.y + 1}, ${it.w} × ${it.h}`));
       },
       add: (items, id) => {
-        this.addApply?.();
-        this.addApply = null;
         this.applyLayout(withItems(items), { reveal: id });
       },
       remove: (id) => this.applyLayout(removeWidget(this.plugin.settings.layout, id as WidgetId)),
@@ -693,7 +680,6 @@ export class DashboardView extends ItemView {
     btn("rotate-ccw", L("恢复默认布局", "Restore default"), () => this.applyLayout(defaultLayout()));
     const add = btn("plus", L("添加卡片", "Add a card"), () => {
       this.addOpen = !this.addOpen;
-      if (!this.addOpen) this.addState.clear();
       if (this.stats) this.render(this.stats);
     });
     add.setAttr("aria-expanded", String(this.addOpen));
@@ -702,125 +688,39 @@ export class DashboardView extends ItemView {
   }
 
   /** 添加面板：列出被移除的卡片，点一下加到最后一行第一个放得下的位置 */
-  /**
-   * 添加面板里每张卡片上能先选的东西：和卡片上的切换一一对应（指标、时间范围、标签页、图的样式）。
-   * 选了哪一项（touched）确认添加时才写进去；没动过的不改。样式是按图的种类记的（写作趋势和每周写作共用一个）。
-   * sel 是现在选中的值：有的选项取决于别的选项（结构卡选了“构成”才有构成的图样式），所以每次选完重新算一遍。
-   */
-  private addGroups(id: WidgetId, sel: Record<string, string>): AddGroup[] {
+  /** 添加面板里缩略图按这张卡添加后会用的样式、标签页、指标、范围来画（添加后在编辑模式里可以切换） */
+  private addVariant(id: WidgetId): PreviewVariant {
     const set = this.plugin.settings;
-    const style = <K extends keyof ChartStyles>(key: K, styles: readonly ChartStyles[K][], name: (v: ChartStyles[K]) => string, label: string): AddGroup => ({
-      key: "style",
-      label,
-      options: styles.map((v): [string, string] => [v, name(v)]),
-      current: set.chartStyles[key],
-      apply: (v) => {
-        set.chartStyles = { ...set.chartStyles, [key]: v };
-      },
-    });
-    const trendStyle = () => style("trend", TREND_STYLES, trendStyleName, L("图的样式", "Chart style"));
-    const rhythmStyle = () => style("rhythm", RHYTHM_STYLES, (v) => (v === "bar" ? L("柱状", "Bar") : v === "line" ? L("折线", "Line") : L("面积", "Area")), L("图的样式", "Chart style"));
-    const mixStyle = () => style("mix", MIX_STYLES, (v) => (v === "stack" ? L("堆叠条", "Stack") : v === "donut" ? L("环形图", "Donut") : L("列表", "List")), L("图的样式", "Chart style"));
-    const tagStyle = () => style("tags", TAG_STYLES, (v) => (v === "bars" ? L("条形", "Bars") : L("标签云", "Cloud")), L("标签的样子", "Tag style"));
-    const tab = (options: [string, string][], current: string, apply: (v: string) => void): AddGroup => ({ key: "tab", label: L("标签页", "Tab"), options, current, apply });
-    const range = (current: TrendRange, apply: (v: TrendRange) => void): AddGroup => ({
-      key: "range",
-      label: L("时间范围", "Period"),
-      options: [["30", L("30 天", "30 days")], ["182", L("半年", "6 months")], ["365", L("一年", "1 year")]],
-      current: String(current),
-      apply: (v) => apply(Number(v) as TrendRange),
-    });
-    const curTab = sel.tab;
+    const cs = set.chartStyles;
     switch (id) {
       case "hero":
-        return [
-          {
-            key: "style",
-            label: L("本周显示方式", "This week display"),
-            options: [["dots", L("圆点", "Dots")], ["bars", L("柱状", "Bars")], ["line", L("折线", "Line")]],
-            current: set.weekStyle,
-            apply: (v) => {
-              set.weekStyle = v as WeekStyle;
-            },
-          },
-        ];
+        return { style: set.weekStyle };
       case "trend":
-        return [
-          {
-            key: "metric",
-            label: L("指标", "Metric"),
-            options: [["words", L("字数", "Words")], ["notes", L("新建笔记", "New notes")]],
-            current: this.metric,
-            apply: (v) => {
-              this.metric = v as TrendMetric;
-            },
-          },
-          range(this.range, (v) => {
-            this.range = v;
-          }),
-          trendStyle(),
-        ];
+        return { style: cs.trend, metric: this.metric, range: String(this.range) };
       case "trendHub":
-        return [
-          {
-            key: "metric",
-            label: L("指标", "Metric"),
-            options: HUB_METRICS.map((m): [string, string] => [m, hubMetricName(m)]),
-            current: this.hubMetric,
-            apply: (v) => {
-              this.hubMetric = v as HubMetric;
-            },
-          },
-          range(this.hubRange, (v) => {
-            this.hubRange = v;
-          }),
-          trendStyle(),
-        ];
+        return { style: cs.trend, metric: this.hubMetric, range: String(this.hubRange) };
       case "tasks":
-        return [tab([["due", L("到期", "Due")], ["folder", L("按文件夹", "By folder")]], this.taskTab, (v) => (this.taskTab = v as TaskTab))];
+        return { tab: this.taskTab };
       case "tags":
-        return [tab([["tags", L("标签", "Tags")], ["folders", L("文件夹", "Folders")]], this.tagTab, (v) => (this.tagTab = v as TagTab)), ...((curTab ?? this.tagTab) === "tags" ? [tagStyle()] : [])];
+        return { tab: this.tagTab, style: cs.tags };
       case "rhythm":
-        return [rhythmStyle()];
+        return { style: cs.rhythm };
       case "folders":
-        return [mixStyle()];
+        return { style: cs.mix };
       case "lengths":
-        return [style("lengths", LENGTH_STYLES, (v) => (v === "bar" ? L("柱状", "Bar") : L("面积", "Area")), L("图的样式", "Chart style"))];
+        return { style: cs.lengths };
       case "tasksHub":
-        return [tab([["due", L("到期", "Due")], ["folder", L("按文件夹", "By folder")], ["notes", L("按笔记", "By note")]], this.hubTaskTab, (v) => (this.hubTaskTab = v as typeof this.hubTaskTab))];
-      case "structure": {
-        const t = curTab ?? this.structTab;
-        return [
-          tab(
-            [["tags", L("标签", "Tags")], ["folders", L("文件夹", "Folders")], ["mix", L("构成", "Mix")], ["linked", L("被链接", "Linked")], ["density", L("密度", "Density")]],
-            this.structTab,
-            (v) => (this.structTab = v as typeof this.structTab)
-          ),
-          ...(t === "tags" ? [tagStyle()] : t === "mix" ? [mixStyle()] : []),
-        ];
-      }
-      case "habits": {
-        const t = curTab ?? this.habitTab;
-        return [tab([["rhythm", L("写作节奏", "Rhythm")], ["activity", L("笔记活跃度", "Activity")]], this.habitTab, (v) => (this.habitTab = v as typeof this.habitTab)), ...(t === "rhythm" ? [rhythmStyle()] : [])];
-      }
+        return { tab: this.hubTaskTab };
+      case "structure":
+        return { tab: this.structTab, style: this.structTab === "mix" ? cs.mix : cs.tags };
+      case "habits":
+        return { tab: this.habitTab, style: cs.rhythm };
       case "checkupHub":
-        return [
-          tab(
-            [["brokenLinks", L("断链", "Broken")], ["orphans", L("孤立", "Orphans")], ["sameName", L("同名", "Same name")], ["emptyBig", L("空与超大", "Empty/big")], ["unusedFiles", L("附件", "Files")], ["dupes", L("重复", "Duplicates")]],
-            this.checkupTab ?? "brokenLinks",
-            (v) => (this.checkupTab = v as NonNullable<typeof this.checkupTab>)
-          ),
-        ];
+        return { tab: this.checkupTab ?? "brokenLinks" };
       default:
-        return [];
+        return {};
     }
   }
-
-  /** 添加面板里每张卡片上选好的样式、标签页等（还没添加）；关掉面板或退出编辑时清掉 */
-  private addState = new Map<string, { sel: Record<string, string>; touched: Set<string> }>();
-
-  /** 添加面板里拖卡片进看板时，确认添加（松手）那一刻要写进去的选择 */
-  private addApply: (() => void) | null = null;
 
   private renderAddPanel(parent: HTMLElement) {
     const panel = parent.createDiv({ cls: "vp-card vp-add-panel" });
@@ -832,7 +732,7 @@ export class DashboardView extends ItemView {
       text:
         hidden.length === 0
           ? L("所有卡片都在看板上了。点卡片右上角的 × 可以移除。", "Every card is on the dashboard. Use × on a card to remove it.")
-          : L("点一张卡片添加到最后，或者把它拖到看板上想放的位置。添加前可以先选好样式。灰色的是已经在看板上的，点一下可以找到它。", "Click a card to add it at the end, or drag it onto the dashboard where you want it. Pick its style before adding. Greyed cards are already on the dashboard; click one to find it."),
+          : L("点一张卡片添加到最后，或者把它拖到看板上想放的位置。添加后在编辑模式里可以切换它的样式、指标和标签页。灰色的是已经在看板上的，点一下可以找到它。", "Click a card to add it at the end, or drag it onto the dashboard where you want it. Once added, switch its style, metric or tab while editing. Greyed cards are already on the dashboard; click one to find it."),
     });
     const onBoard = new Set(this.plugin.settings.layout.items.map((i) => i.id));
     const catName: Record<WidgetCategory, [string, string]> = {
@@ -878,104 +778,40 @@ export class DashboardView extends ItemView {
     main.addEventListener("click", () => this.revealCard(w.id));
   }
 
-  /** “添加卡片”里的一张卡片：缩略图、名字和说明、合并卡的标记、添加前能选的选项；点击添加，或者拖到看板上 */
+  /** “添加卡片”里的一张卡片：缩略图、名字和说明、合并卡的标记；点击添加，或者拖到看板上 */
   private addItem(list: HTMLElement, w: WidgetInfo, onBoard: Set<WidgetId>) {
-    {
-      const item = list.createDiv({ cls: "vp-add-item" });
-      // 确认添加之前选的：预览跟着变，添加时才写进设置
-      // 添加别的卡片会重画整个面板：选好但还没添加的，记在视图上，不会丢
-      let state = this.addState.get(w.id);
-      if (!state) {
-        state = { sel: {}, touched: new Set<string>() };
-        this.addState.set(w.id, state);
-      }
-      const { sel, touched } = state;
-      const groups = () => {
-        const gs = this.addGroups(w.id, sel);
-        for (const g of gs) if (sel[g.key] === undefined) sel[g.key] = g.current;
-        return gs;
-      };
-      groups();
-      const main = item.createEl("button", { cls: "vp-add-main", attr: { type: "button", "data-fid": `add:${w.id}` } });
-      const preview = main.createDiv({ cls: "vp-add-preview" });
-      main.createDiv({ cls: "vp-add-name", text: widgetName(w.id) });
-      main.createDiv({ cls: "vp-add-desc", text: `${widgetDesc(w.id)} · ${w.w} × ${w.h}` });
-      // 合并卡：标出来，并说明它包含哪几张单独的卡片；这些卡看板上已经有的，加这张会把同样的数据再显示一遍
-      const parts = MERGED_FROM[w.id];
-      if (parts) {
-        item.addClass("is-merged");
-        main.createDiv({ cls: "vp-add-note", text: L(`合并了：${parts.map((p) => widgetName(p)).join("、")}`, `Combines: ${parts.map((p) => widgetName(p)).join(", ")}`) });
-        const dup = parts.filter((p) => onBoard.has(p));
-        if (dup.length > 0) main.createDiv({ cls: "vp-add-note is-warn", text: L(`看板上已有：${dup.map((p) => widgetName(p)).join("、")}，再加会重复显示同样的数据`, `Already on the dashboard: ${dup.map((p) => widgetName(p)).join(", ")}, so the same data would show twice`) });
-      } else {
-        const hubs = coveredBy(w.id);
-        if (hubs.length > 0) main.createDiv({ cls: "vp-add-note", text: L(`合并卡“${hubs.map((h) => widgetName(h)).join("”“")}”里也有这张`, `Also inside the combined card ${hubs.map((h) => widgetName(h)).join(", ")}`) });
-        const dupHubs = hubs.filter((h) => onBoard.has(h));
-        if (dupHubs.length > 0) main.createDiv({ cls: "vp-add-note is-warn", text: L(`看板上的“${dupHubs.map((h) => widgetName(h)).join("”“")}”已经有它了`, `Already covered by ${dupHubs.map((h) => widgetName(h)).join(", ")} on the dashboard`) });
-      }
-      const opts = item.createDiv({ cls: "vp-add-opts" });
-      const apply = () => {
-        for (const g of groups()) if (touched.has(g.key)) g.apply(sel[g.key]);
-      };
-      const draw = () => {
-        preview.empty();
-        drawAddPreview(preview, w.id, { ...sel });
-        if (parts) preview.createSpan({ cls: "vp-add-badge", text: L("合并卡", "Combined") });
-        const doc = opts.ownerDocument;
-        const focused = opts.contains(doc.activeElement) ? (doc.activeElement as HTMLElement).dataset.fid : undefined;
-        opts.empty();
-        for (const g of groups()) {
-          const choose = (v: string) => {
-            sel[g.key] = v;
-            touched.add(g.key);
-            // 换了标签页，依赖标签页的样式要重新选
-            if (g.key === "tab") {
-              delete sel.style;
-              touched.delete("style");
-            }
-            draw();
-          };
-          const label = L(`${widgetName(w.id)}：${g.label}`, `${widgetName(w.id)}: ${g.label}`);
-          if (g.options.length > 4) {
-            const dd = opts.createEl("select", { cls: "dropdown vp-select", attr: { "aria-label": label, "data-fid": `add:${w.id}:${g.key}` } });
-            for (const [v, text] of g.options) {
-              const o = dd.createEl("option", { text, value: v });
-              if (v === sel[g.key]) o.selected = true;
-            }
-            dd.addEventListener("change", () => choose(dd.value));
-            continue;
-          }
-          const seg = opts.createDiv({ cls: "vp-seg vp-add-seg", attr: { role: "tablist", "aria-label": label } });
-          for (const [v, text] of g.options) {
-            const b = seg.createEl("button", {
-              cls: "vp-seg-btn" + (v === sel[g.key] ? " is-active" : ""),
-              text,
-              attr: { type: "button", role: "tab", "aria-selected": String(v === sel[g.key]), "data-fid": `add:${w.id}:${g.key}:${v}` },
-            });
-            b.addEventListener("click", () => {
-              if (v !== sel[g.key]) choose(v);
-            });
-          }
-        }
-        if (focused) opts.querySelector<HTMLElement>(`[data-fid="${focused}"]`)?.focus({ preventScroll: true });
-      };
-      draw();
-      main.addEventListener("click", () => {
-        apply();
-        this.applyLayout(addWidget(this.plugin.settings.layout, w.id), { reveal: w.id });
-      });
-      // 拖到看板上想放的位置；没怎么动就是点击，由上面的 click 处理
-      main.addEventListener("pointerdown", (e) => {
-        this.addApply = apply;
-        this.gesture?.dragIn(main, { id: w.id, x: 0, y: 0, w: w.w, h: w.h }, e, () => {
-          // 不能放进看板的容器里：它是 container-type 元素，里面的 fixed 定位会相对它而不是窗口，缩略图就会偏离指针。带上 vp-root 是为了拿到设计令牌
-          const ghost = createDiv({ cls: "vp-add-ghost vp-root", attr: { "aria-hidden": "true" } });
-          drawAddPreview(ghost.createDiv({ cls: "vp-add-preview" }), w.id, { ...sel });
-          ghost.createDiv({ cls: "vp-add-name", text: widgetName(w.id) });
-          return ghost;
-        });
-      });
+    const item = list.createDiv({ cls: "vp-add-item" });
+    const variant = this.addVariant(w.id);
+    const main = item.createEl("button", { cls: "vp-add-main", attr: { type: "button", "data-fid": `add:${w.id}` } });
+    const preview = main.createDiv({ cls: "vp-add-preview" });
+    drawAddPreview(preview, w.id, variant);
+    main.createDiv({ cls: "vp-add-name", text: widgetName(w.id) });
+    main.createDiv({ cls: "vp-add-desc", text: `${widgetDesc(w.id)} · ${w.w} × ${w.h}` });
+    // 合并卡：标出来，并说明它包含哪几张单独的卡片；这些卡看板上已经有的，加这张会把同样的数据再显示一遍
+    const parts = MERGED_FROM[w.id];
+    if (parts) {
+      item.addClass("is-merged");
+      preview.createSpan({ cls: "vp-add-badge", text: L("合并卡", "Combined") });
+      main.createDiv({ cls: "vp-add-note", text: L(`合并了：${parts.map((p) => widgetName(p)).join("、")}`, `Combines: ${parts.map((p) => widgetName(p)).join(", ")}`) });
+      const dup = parts.filter((p) => onBoard.has(p));
+      if (dup.length > 0) main.createDiv({ cls: "vp-add-note is-warn", text: L(`看板上已有：${dup.map((p) => widgetName(p)).join("、")}，再加会重复显示同样的数据`, `Already on the dashboard: ${dup.map((p) => widgetName(p)).join(", ")}, so the same data would show twice`) });
+    } else {
+      const hubs = coveredBy(w.id);
+      if (hubs.length > 0) main.createDiv({ cls: "vp-add-note", text: L(`合并卡“${hubs.map((h) => widgetName(h)).join("”“")}”里也有这张`, `Also inside the combined card ${hubs.map((h) => widgetName(h)).join(", ")}`) });
+      const dupHubs = hubs.filter((h) => onBoard.has(h));
+      if (dupHubs.length > 0) main.createDiv({ cls: "vp-add-note is-warn", text: L(`看板上的“${dupHubs.map((h) => widgetName(h)).join("”“")}”已经有它了`, `Already covered by ${dupHubs.map((h) => widgetName(h)).join(", ")} on the dashboard`) });
     }
+    main.addEventListener("click", () => this.applyLayout(addWidget(this.plugin.settings.layout, w.id), { reveal: w.id }));
+    // 拖到看板上想放的位置；没怎么动就是点击，由上面的 click 处理
+    main.addEventListener("pointerdown", (e) => {
+      this.gesture?.dragIn(main, { id: w.id, x: 0, y: 0, w: w.w, h: w.h }, e, () => {
+        // 不能放进看板的容器里：它是 container-type 元素，里面的 fixed 定位会相对它而不是窗口，缩略图就会偏离指针。带上 vp-root 是为了拿到设计令牌
+        const ghost = createDiv({ cls: "vp-add-ghost vp-root", attr: { "aria-hidden": "true" } });
+        drawAddPreview(ghost.createDiv({ cls: "vp-add-preview" }), w.id, variant);
+        ghost.createDiv({ cls: "vp-add-name", text: widgetName(w.id) });
+        return ghost;
+      });
+    });
   }
 
   /** 每张卡片的渲染函数；位置和大小由 mount 挂到卡片根元素上（--vp-x / --vp-y / --vp-w / --vp-h） */
