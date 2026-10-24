@@ -32,7 +32,7 @@ import { DayContext, achievementText, achievements, alertText, computeAlerts, gr
 import { COLS, GAP, GridItem, ROW_H, rowsToPx } from "./grid";
 import { GestureHost, GridGesture, setPlace } from "./grid-edit";
 import { Box, HUB_CHROME, HeroDensity, KpiDensity, activityDensity, goalRingSize, overviewDensity, calendarDensity, innerW, bodyH, densityDensity, densityKey, foldersDensity, heatDensity, heroDensity, isTight, kpiDensity, rhythmDensity, trendDensity } from "./density";
-import { WidgetId, WidgetLayout, WidgetLayoutItem, addWidget, addableWidgets, defaultLayout, limitsOf, readingOrder, removeWidget, sameLayout, withItems } from "./widgets";
+import { MERGED_FROM, WIDGET_CATEGORIES, WidgetCategory, WidgetId, WidgetInfo, WidgetLayout, WidgetLayoutItem, addWidget, addableWidgets, coveredBy, defaultLayout, limitsOf, readingOrder, removeWidget, sameLayout, withItems } from "./widgets";
 import { MOTION, SegRect, animateHeight, countUp, drawLines, markStagger, playLayout, reducedMotion, segRect, slideSeg, snapshotRects } from "./motion";
 import {
   BarItem,
@@ -829,9 +829,35 @@ export class DashboardView extends ItemView {
       panel.createDiv({ cls: "vp-kpi-caption", text: L("所有卡片都在看板上了。点卡片右上角的 × 可以移除。", "Every card is on the dashboard. Use × on a card to remove it.") });
       return;
     }
+    // 分类跳转条：点一下滚到那一类（面板限高，一屏放不下所有类）
+    const jump = panel.createDiv({ cls: "vp-add-jump", attr: { role: "navigation" } });
     panel.createDiv({ cls: "vp-add-hint", text: L("点一张卡片添加到最后，或者把它拖到看板上想放的位置。添加前可以先选好样式。", "Click a card to add it at the end, or drag it onto the dashboard where you want it. Pick its style before adding.") });
-    const list = panel.createDiv({ cls: "vp-add-list" });
-    for (const w of hidden) {
+    const onBoard = new Set(this.plugin.settings.layout.items.map((i) => i.id));
+    const catName: Record<WidgetCategory, [string, string]> = {
+      writing: [L("写作数据", "Writing"), L("今天、趋势、热力图、节奏、目标、回顾", "Today, trends, heatmap, rhythm, goals, reports")],
+      tasks: [L("任务与日程", "Tasks and schedule"), L("待办、完成率、日历", "Open tasks, completion rate, calendar")],
+      structure: [L("标签、文件夹与链接", "Tags, folders and links"), L("标签排行、文件夹构成、被链接最多的笔记、最近编辑", "Tag ranking, folder mix, most linked notes, recent edits")],
+      checkup: [L("库体检", "Vault checkup"), L("断链、孤立笔记、同名、空与超大、未引用的附件、重复内容", "Broken links, orphans, same names, empty and huge notes, unused files, duplicates")],
+    };
+    for (const cat of WIDGET_CATEGORIES) {
+      const inCat = cat.ids.map((id) => hidden.find((h) => h.id === id)).filter((h): h is WidgetInfo => !!h);
+      if (inCat.length === 0) continue;
+      const sec = panel.createDiv({ cls: "vp-add-sec" });
+      const chip = jump.createEl("button", { cls: "vp-add-chip", text: `${catName[cat.id][0]} ${inCat.length}`, attr: { type: "button", "data-fid": `add:cat:${cat.id}` } });
+      chip.addEventListener("click", () => {
+        panel.scrollTo({ top: panel.scrollTop + sec.getBoundingClientRect().top - panel.getBoundingClientRect().top - jump.offsetHeight - 4, behavior: this.motionOn() ? "smooth" : "auto" });
+      });
+      const head = sec.createDiv({ cls: "vp-add-sec-head" });
+      head.createSpan({ cls: "vp-add-sec-name", text: catName[cat.id][0] });
+      head.createSpan({ cls: "vp-add-sec-desc", text: catName[cat.id][1] });
+      const list = sec.createDiv({ cls: "vp-add-list" });
+      for (const w of inCat) this.addItem(list, w, onBoard);
+    }
+  }
+
+  /** “添加卡片”里的一张卡片：缩略图、名字和说明、合并卡的标记、添加前能选的选项；点击添加，或者拖到看板上 */
+  private addItem(list: HTMLElement, w: WidgetInfo, onBoard: Set<WidgetId>) {
+    {
       const item = list.createDiv({ cls: "vp-add-item" });
       // 确认添加之前选的：预览跟着变，添加时才写进设置
       // 添加别的卡片会重画整个面板：选好但还没添加的，记在视图上，不会丢
@@ -851,6 +877,19 @@ export class DashboardView extends ItemView {
       const preview = main.createDiv({ cls: "vp-add-preview" });
       main.createDiv({ cls: "vp-add-name", text: widgetName(w.id) });
       main.createDiv({ cls: "vp-add-desc", text: `${widgetDesc(w.id)} · ${w.w} × ${w.h}` });
+      // 合并卡：标出来，并说明它包含哪几张单独的卡片；这些卡看板上已经有的，加这张会把同样的数据再显示一遍
+      const parts = MERGED_FROM[w.id];
+      if (parts) {
+        item.addClass("is-merged");
+        main.createDiv({ cls: "vp-add-note", text: L(`合并了：${parts.map((p) => widgetName(p)).join("、")}`, `Combines: ${parts.map((p) => widgetName(p)).join(", ")}`) });
+        const dup = parts.filter((p) => onBoard.has(p));
+        if (dup.length > 0) main.createDiv({ cls: "vp-add-note is-warn", text: L(`看板上已有：${dup.map((p) => widgetName(p)).join("、")}，再加会重复显示同样的数据`, `Already on the dashboard: ${dup.map((p) => widgetName(p)).join(", ")}, so the same data would show twice`) });
+      } else {
+        const hubs = coveredBy(w.id);
+        if (hubs.length > 0) main.createDiv({ cls: "vp-add-note", text: L(`合并卡“${hubs.map((h) => widgetName(h)).join("”“")}”里也有这张`, `Also inside the combined card ${hubs.map((h) => widgetName(h)).join(", ")}`) });
+        const dupHubs = hubs.filter((h) => onBoard.has(h));
+        if (dupHubs.length > 0) main.createDiv({ cls: "vp-add-note is-warn", text: L(`看板上的“${dupHubs.map((h) => widgetName(h)).join("”“")}”已经有它了`, `Already covered by ${dupHubs.map((h) => widgetName(h)).join(", ")} on the dashboard`) });
+      }
       const opts = item.createDiv({ cls: "vp-add-opts" });
       const apply = () => {
         for (const g of groups()) if (touched.has(g.key)) g.apply(sel[g.key]);
@@ -858,6 +897,7 @@ export class DashboardView extends ItemView {
       const draw = () => {
         preview.empty();
         drawAddPreview(preview, w.id, { ...sel });
+        if (parts) preview.createSpan({ cls: "vp-add-badge", text: L("合并卡", "Combined") });
         const doc = opts.ownerDocument;
         const focused = opts.contains(doc.activeElement) ? (doc.activeElement as HTMLElement).dataset.fid : undefined;
         opts.empty();
@@ -905,7 +945,8 @@ export class DashboardView extends ItemView {
       main.addEventListener("pointerdown", (e) => {
         this.addApply = apply;
         this.gesture?.dragIn(main, { id: w.id, x: 0, y: 0, w: w.w, h: w.h }, e, () => {
-          const ghost = createDiv({ cls: "vp-add-ghost", attr: { "aria-hidden": "true" } });
+          // 不能放进看板的容器里：它是 container-type 元素，里面的 fixed 定位会相对它而不是窗口，缩略图就会偏离指针。带上 vp-root 是为了拿到设计令牌
+          const ghost = createDiv({ cls: "vp-add-ghost vp-root", attr: { "aria-hidden": "true" } });
           drawAddPreview(ghost.createDiv({ cls: "vp-add-preview" }), w.id, { ...sel });
           ghost.createDiv({ cls: "vp-add-name", text: widgetName(w.id) });
           return ghost;
@@ -1282,7 +1323,7 @@ export class DashboardView extends ItemView {
   }
 
   private segmented<T extends string | number>(parent: HTMLElement, options: [T, string][], current: T, onChange: (v: T) => void, label?: string) {
-    const seg = parent.createDiv({ cls: "vp-seg", attr: { role: "tablist" } });
+    const seg = parent.createDiv({ cls: "vp-seg vp-ctl", attr: { role: "tablist" } });
     if (label) srLabel(seg, label);
     for (const [v, text] of options) {
       const b = seg.createEl("button", {
@@ -1299,12 +1340,11 @@ export class DashboardView extends ItemView {
 
   /**
    * 换图形样式的分段控件：只在编辑模式里出现，平时卡片上不放，免得误点；
-   * 编辑时卡片里的内容本来不响应点击，这个控件例外（vp-style-seg），点它也不会开始拖动。
+   * 编辑时卡片里的内容本来不响应点击，能切换的控件（vp-ctl）例外，点它们也不会开始拖动。
    */
   private styleSeg<T extends string | number>(parent: HTMLElement, options: [T, string][], current: T, onChange: (v: T) => void, label?: string): HTMLElement | null {
     if (!this.editing) return null;
     const seg = this.segmented(parent, options, current, onChange, label);
-    seg.addClass("vp-style-seg");
     return seg;
   }
 
@@ -2312,7 +2352,7 @@ export class DashboardView extends ItemView {
 
   /** 一个小下拉框（选项多的时候比分段控件省地方） */
   private dropdown<T extends string>(parent: HTMLElement, options: [T, string][], current: T, onChange: (v: T) => void, label: string) {
-    const sel = parent.createEl("select", { cls: "dropdown vp-select", attr: { "aria-label": label, "data-fid": `${this.currentPart}:select:${label}` } });
+    const sel = parent.createEl("select", { cls: "dropdown vp-select vp-ctl", attr: { "aria-label": label, "data-fid": `${this.currentPart}:select:${label}` } });
     for (const [v, text] of options) {
       const o = sel.createEl("option", { text, value: v });
       if (v === current) o.selected = true;
@@ -3107,7 +3147,7 @@ export class DashboardView extends ItemView {
   /** 合并卡的标签条占的高度：算内容密度时要扣掉 */
   /** 合并卡的标签条：每个标签可以带数量（有问题时用警示色） */
   private tabStrip<T extends string>(parent: HTMLElement, tabs: { id: T; label: string; count?: number; warn?: boolean }[], current: T, onChange: (v: T) => void, label: string): HTMLElement {
-    const strip = parent.createDiv({ cls: "vp-tabs", attr: { role: "tablist", "aria-label": label } });
+    const strip = parent.createDiv({ cls: "vp-tabs vp-ctl", attr: { role: "tablist", "aria-label": label } });
     for (const t of tabs) {
       const b = strip.createEl("button", {
         cls: "vp-tab" + (t.id === current ? " is-active" : ""),

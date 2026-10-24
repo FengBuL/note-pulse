@@ -85,7 +85,7 @@ export class GridGesture {
     const target = e.target as HTMLElement;
     const card = target.closest<HTMLElement>(".vp-grid > .vp-w");
     const id = card?.dataset.widget;
-    if (!card || !id || e.button !== 0 || this.active || target.closest(".vp-w-remove") || target.closest(".vp-style-seg")) return;
+    if (!card || !id || e.button !== 0 || this.active || target.closest(".vp-w-remove") || target.closest(".vp-ctl")) return;
     const resize = !!target.closest(".vp-w-handle");
     e.preventDefault();
     card.focus({ preventScroll: true });
@@ -313,6 +313,8 @@ export class GridGesture {
    */
   dragIn(src: HTMLElement, item: GridItem, down: PointerEvent, makeGhost: () => HTMLElement) {
     if (this.active || down.button !== 0) return;
+    // 和看板里拖卡片一样：不让浏览器开始选中文字、拖图片
+    down.preventDefault();
     const h = this.host;
     const grid = h.grid;
     const doc = grid.ownerDocument;
@@ -381,7 +383,7 @@ export class GridGesture {
         dragging = true;
         grid.addClass("is-gesture");
         ghost = makeGhost();
-        (grid.closest<HTMLElement>(".vp-root") ?? doc.body).appendChild(ghost);
+        doc.body.appendChild(ghost);
       }
       if (ghost) ghost.setCssProps({ "--vp-gx": `${last.x}px`, "--vp-gy": `${last.y}px` });
       const r = grid.getBoundingClientRect();
@@ -423,6 +425,7 @@ export class GridGesture {
       src.removeEventListener("pointercancel", onCancel);
       src.removeEventListener("lostpointercapture", onCancel);
       doc.removeEventListener("keydown", onEsc, true);
+      doc.removeEventListener("selectstart", noSelect, true);
       try {
         src.releasePointerCapture(down.pointerId);
       } catch {
@@ -462,6 +465,7 @@ export class GridGesture {
       finish(dragging);
     };
     const onCancel = () => finish(false);
+    const noSelect = (e: Event) => e.preventDefault();
     const onEsc = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
       e.preventDefault();
@@ -473,6 +477,7 @@ export class GridGesture {
     src.addEventListener("pointercancel", onCancel);
     src.addEventListener("lostpointercapture", onCancel);
     doc.addEventListener("keydown", onEsc, true);
+    doc.addEventListener("selectstart", noSelect, true);
   }
 
   /* ---------- 键盘：方向键移动一格，Shift + 方向键调大小，Delete 移除 ---------- */

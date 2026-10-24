@@ -221,6 +221,31 @@ export function addableWidgets(layout: WidgetLayout): WidgetInfo[] {
   return hiddenWidgets(layout).filter((w) => !SUPERSEDED.includes(w.id));
 }
 
+export type WidgetCategory = "writing" | "tasks" | "structure" | "checkup";
+
+/** “添加卡片”里的分类，每类里合并卡排在最前面 */
+export const WIDGET_CATEGORIES: { id: WidgetCategory; ids: WidgetId[] }[] = [
+  { id: "writing", ids: ["trendHub", "overview", "habits", "hero", "notes", "words", "month", "heat", "trend", "rhythm", "activity", "lengths", "monthCompare", "goals", "reports"] },
+  { id: "tasks", ids: ["tasksHub", "tasks", "taskRate", "taskNotes", "calendar"] },
+  { id: "structure", ids: ["structure", "tags", "folders", "topLinked", "density", "recent"] },
+  { id: "checkup", ids: ["checkupHub", "brokenLinks", "orphans", "sameName", "emptyBig", "unusedFiles", "dupes"] },
+];
+
+/** 合并卡：把哪几张单独的卡片放进了一张带标签页的卡里 */
+export const MERGED_FROM: Partial<Record<WidgetId, WidgetId[]>> = {
+  trendHub: ["trend"],
+  overview: ["notes", "words", "taskRate", "month"],
+  habits: ["rhythm", "activity"],
+  tasksHub: ["tasks", "taskNotes"],
+  structure: ["tags", "folders", "topLinked", "density"],
+  checkupHub: ["brokenLinks", "orphans", "sameName", "emptyBig", "unusedFiles", "dupes"],
+};
+
+/** 这张单独的卡片也包含在哪几张合并卡里 */
+export function coveredBy(id: WidgetId): WidgetId[] {
+  return (Object.keys(MERGED_FROM) as WidgetId[]).filter((m) => MERGED_FROM[m]?.includes(id));
+}
+
 export function withItems(items: GridItem[]): WidgetLayout {
   return { version: 2, items: items as WidgetLayoutItem[] };
 }

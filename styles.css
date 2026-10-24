@@ -3024,8 +3024,8 @@ body.is-mobile .vp-root :is(button, [role="button"], [role="tab"], .is-clickable
 .vp-grid.is-editing > .vp-w > :not(.vp-w-remove):not(.vp-w-handle) {
   pointer-events: none;
 }
-/* 换图形样式的控件只在编辑模式里出现，编辑时可以点 */
-.vp-grid.is-editing > .vp-w .vp-style-seg {
+/* 卡片里能切换的控件（指标、时间范围、标签页、图的样式）编辑时也能点，点它们不会开始拖动卡片 */
+.vp-grid.is-editing > .vp-w .vp-ctl {
   pointer-events: auto;
 }
 .vp-grid > .vp-w.is-flash {
@@ -3105,7 +3105,7 @@ body.is-mobile .vp-root :is(button, [role="button"], [role="tab"], .is-clickable
 }
 .vp-add-panel {
   /* 面板别占满屏：看板要留在下面，才能把卡片拖上去 */
-  max-height: min(46vh, 420px);
+  max-height: min(50vh, 460px);
   margin-bottom: var(--vp-s4);
   overflow-y: auto;
 }
@@ -3152,13 +3152,83 @@ body.is-mobile .vp-root :is(button, [role="button"], [role="tab"], .is-clickable
 .vp-add-opts .vp-select {
   max-width: 100%;
 }
+.vp-add-jump {
+  position: sticky;
+  top: calc(var(--vp-s4) * -1);
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--vp-s2);
+  margin: calc(var(--vp-s4) * -1) calc(var(--vp-s4) * -1) var(--vp-s3);
+  padding: var(--vp-s3) var(--vp-s4) var(--vp-s2);
+  background: var(--vp-surface);
+}
+.vp-root .vp-shell .vp-add-chip {
+  height: auto;
+  padding: 2px var(--vp-s3);
+  border: 1px solid var(--vp-line);
+  border-radius: var(--vp-r-f);
+  background: var(--vp-surface);
+  box-shadow: none;
+  color: var(--vp-subtle);
+  font-size: var(--vp-fs-12);
+  cursor: pointer;
+}
+.vp-root .vp-shell .vp-add-chip:hover {
+  border-color: var(--vp-accent);
+  color: var(--text-normal);
+}
+.vp-add-sec + .vp-add-sec {
+  margin-top: var(--vp-s5);
+}
+.vp-add-sec-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--vp-s1) var(--vp-s3);
+  margin-bottom: var(--vp-s2);
+  padding-bottom: var(--vp-s1);
+  border-bottom: 1px solid var(--vp-line);
+}
+.vp-add-sec-name {
+  color: var(--text-normal);
+  font-size: var(--vp-fs-13);
+  font-weight: 600;
+}
+.vp-add-sec-desc {
+  color: var(--vp-subtle);
+  font-size: var(--vp-fs-12);
+}
+/* 合并卡：缩略图左上角的标记，卡片边框带强调色 */
+.vp-add-badge {
+  position: absolute;
+  top: var(--vp-s1);
+  right: var(--vp-s1);
+  padding: 1px var(--vp-s2);
+  border-radius: var(--vp-r-f);
+  background: var(--vp-accent);
+  color: var(--text-on-accent, #fff);
+  font-size: var(--vp-fs-11);
+  font-weight: 600;
+}
+.vp-root .vp-shell .vp-add-item.is-merged {
+  border-color: color-mix(in srgb, var(--vp-accent) 45%, transparent);
+}
+.vp-add-note {
+  color: var(--vp-subtle);
+  font-size: var(--vp-fs-12);
+  white-space: normal;
+}
+.vp-add-note.is-warn {
+  color: var(--vp-warning-ink);
+}
 .vp-add-hint {
   margin-bottom: var(--vp-s3);
   color: var(--vp-subtle);
   font-size: var(--vp-fs-12);
 }
 /* 拖拽添加：缩略图跟着指针走 */
-.vp-root .vp-add-ghost {
+.vp-add-ghost.vp-root {
   position: fixed;
   top: var(--vp-gy, 0);
   left: var(--vp-gx, 0);
@@ -3174,6 +3244,7 @@ body.is-mobile .vp-root :is(button, [role="button"], [role="tab"], .is-clickable
   transform: translate(-50%, -50%);
 }
 .vp-add-preview {
+  position: relative;
   aspect-ratio: 16 / 9;
   margin-bottom: var(--vp-s1);
   border-radius: var(--vp-r-s);

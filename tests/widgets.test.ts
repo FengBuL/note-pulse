@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { COLS, overlap } from "../src/grid";
 
 const OPTIONAL = ["trendHub", "overview", "checkupHub", "structure", "habits", "tasksHub", "recent", "goals", "monthCompare", "lengths"];
-import { WIDGETS, WidgetId, addWidget, addableWidgets, defaultLayout, hiddenWidgets, limitsOf, normalizeLayout, readingOrder, removeWidget, sameLayout, widgetInfo } from "../src/widgets";
+import { WIDGETS, WidgetId, addWidget, addableWidgets, coveredBy, defaultLayout, MERGED_FROM, WIDGET_CATEGORIES, hiddenWidgets, limitsOf, normalizeLayout, readingOrder, removeWidget, sameLayout, widgetInfo } from "../src/widgets";
 
 const at = (l: { items: { id: string; x: number; y: number; w: number; h: number }[] }, id: string) => {
   const i = l.items.find((x) => x.id === id);
@@ -151,4 +151,19 @@ test("添加卡片：每周写作被写作趋势完整包含，不在列表里�
   assert.ok(!ids.includes("trend"));
   assert.ok(hiddenWidgets(without).some((w) => w.id === "trend"), "只是不在添加列表里，卡片本身还在目录里");
   assert.ok(addableWidgets(defaultLayout()).every((w) => OPTIONAL.includes(w.id)));
+});
+
+test("添加卡片的分类：每张卡恰好属于一类；合并卡里列的都是真实存在的单张卡，且合并卡在每类的最前面", () => {
+  const all = WIDGET_CATEGORIES.flatMap((c) => c.ids);
+  assert.equal(new Set(all).size, all.length, "没有重复归类");
+  assert.deepEqual([...all].sort(), WIDGETS.map((w) => w.id).sort(), "每张卡都归了类");
+  for (const [hub, parts] of Object.entries(MERGED_FROM)) {
+    assert.ok(widgetInfo(hub), hub);
+    for (const p of parts ?? []) assert.ok(widgetInfo(p), p);
+    const cat = WIDGET_CATEGORIES.find((c) => c.ids.includes(hub as WidgetId))!;
+    const firstSingle = cat.ids.findIndex((id) => !MERGED_FROM[id]);
+    assert.ok(cat.ids.indexOf(hub as WidgetId) < firstSingle, `${hub} 排在同类单张卡前面`);
+  }
+  assert.deepEqual(coveredBy("rhythm"), ["habits"]);
+  assert.deepEqual(coveredBy("hero"), []);
 });
