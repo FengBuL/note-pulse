@@ -187,6 +187,15 @@ export class DedupeService {
     this.notifyViews();
   }
 
+  /** 两篇几乎一样时，把较新的那篇移到回收站（先确认；回收站里可以找回） */
+  trashNote(path: string, keepPath: string) {
+    const file = this.app.vault.getFileByPath(path);
+    if (!file) return;
+    new ConfirmModal(this.app, t("pairTrashTitle"), t("pairTrashText", file.basename, keepPath.split("/").pop()?.replace(/\.md$/i, "") ?? keepPath), t("pairTrashConfirm"), async () => {
+      await this.app.fileManager.trashFile(file);
+    }).open();
+  }
+
   async restoreIgnored() {
     this.settings.ignored = [];
     await this.host.saveDedupeSettings();

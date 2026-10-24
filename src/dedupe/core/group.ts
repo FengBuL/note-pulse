@@ -45,6 +45,8 @@ export interface OverlapPair {
   sharedBlocks: number;
   sharedW: number;
   sharedChars: number;
+  /** Characters the shared blocks occupy in the older note (sharedChars is the newer note's side). */
+  olderChars: number;
   /** Share of the older / newer note's counted content that also appears in the other note. */
   olderRatio: number;
   newerRatio: number;
@@ -207,7 +209,7 @@ export function analyze(files: FileRecord[], options: Partial<GroupOptions> = {}
   groups.sort((a, b) => b.reclaimChars - a.reclaimChars || b.occs.length - a.occs.length || (a.id < b.id ? -1 : 1));
 
   // 4. Overlapping note pairs
-  const pairMap = new Map<string, { a: number; b: number; blocks: number; w: number; chars: number; ids: string[] }>();
+  const pairMap = new Map<string, { a: number; b: number; blocks: number; w: number; chars: number; olderChars: number; ids: string[] }>();
   let skippedBroad = 0;
   for (const g of groups) {
     if (g.occs.length > opts.pairFileCap) {
@@ -220,10 +222,11 @@ export function analyze(files: FileRecord[], options: Partial<GroupOptions> = {}
         const B = g.occs[j];
         const key = `${A.f}|${B.f}`;
         let p = pairMap.get(key);
-        if (!p) pairMap.set(key, (p = { a: A.f, b: B.f, blocks: 0, w: 0, chars: 0, ids: [] }));
+        if (!p) pairMap.set(key, (p = { a: A.f, b: B.f, blocks: 0, w: 0, chars: 0, olderChars: 0, ids: [] }));
         p.blocks++;
         p.w += Math.min(A.block.w, B.block.w);
         p.chars += B.block.r;
+        p.olderChars += A.block.r;
         p.ids.push(g.id);
       }
     }
@@ -242,6 +245,7 @@ export function analyze(files: FileRecord[], options: Partial<GroupOptions> = {}
       sharedBlocks: p.blocks,
       sharedW: p.w,
       sharedChars: p.chars,
+      olderChars: p.olderChars,
       olderRatio,
       newerRatio,
       groupIds: p.ids,

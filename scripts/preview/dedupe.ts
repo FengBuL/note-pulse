@@ -16,6 +16,10 @@ const notes: Record<string, string> = {};
 const body = ["Building effective agents", "上下文工程", "评估循环", "成本与适用边界", "术语表"].map(para);
 notes["2026-08-15 TG01 workflow 与 agent 边界.md"] = body.join("\n\n");
 notes["2026-08-16 TG01 剪藏副本.md"] = body.join("\n\n") + "\n\n" + para("副本里多出来的一段");
+// 两篇一模一样的（复制品）：清理时应该提供“整篇移到回收站”
+const original = ["复制品的第一段", "复制品的第二段", "复制品的第三段"].map(para).join("\n\n");
+notes["2026-08-20 会议纪要.md"] = original;
+notes["2026-08-21 会议纪要 副本.md"] = original;
 // 一篇引用了别人的一段，其余是自己的内容
 const ref = para("Building effective agents, Anthropic Engineering, https://www.anthropic.com/engineering/building-effective-agents");
 for (let i = 1; i <= 12; i++) notes[`2026-08-1${i % 9} 笔记${i}.md`] = `${ref}\n\n${para(`第 ${i} 篇的独立内容甲`)}\n\n${para(`第 ${i} 篇的独立内容乙`)}\n\n${para(`第 ${i} 篇的独立内容丙`)}`;
@@ -33,6 +37,7 @@ const plugin = {
   openHelp() {}, openSettings() {}, async scan() {}, cancelScan() {}, async undoLast() {}, folderList: () => [], async setScope() {},
   startCleanup(items: unknown[], mode?: string) { console.log("startCleanup", items.length, mode); (window as unknown as { __cleanup: unknown[] }).__cleanup = items; },
   pairItems: (ids: string[], older: string, newer: string) => ids.map((id) => ({ id, older, newer })),
+  trashNote(path: string, keep: string) { console.log("trash", path, keep); },
   async openBoth(a: string, b: string) { console.log("openBoth", a, b); },
   async openNote(path: string) { console.log("openNote", path); },
   async ignoreGroup(g: { occs: unknown[] }) { settings.ignored.push(groupKey(g as never)); view.refresh(); },

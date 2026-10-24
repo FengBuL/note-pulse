@@ -75,8 +75,16 @@ const S = {
   ],
   pairsListTitle: ["大面积重复的笔记", "Notes that largely repeat each other"],
   pairsListSub: ["按重复的程度排序", "Sorted by how much they overlap"],
-  pairLead: ["“{0}” 和 “{1}” 重复了 {2}%", "\u201c{0}\u201d and \u201c{1}\u201d overlap by {2}%"],
+  pairLead: ["“{0}” 有 {2}% 和 “{1}” 重复", "{2}% of \u201c{0}\u201d is the same as \u201c{1}\u201d"],
   pairShared: ["共同 {0} 段，约 {1} 字", "{0} shared passages, about {1} words"],
+  pairCopyTag: ["几乎是同一份", "Almost the same note"],
+  pairTrashNewer: ["删除较新的这篇（进回收站）", "Delete the newer one (to trash)"],
+  pairTrashTitle: ["删除较新的这篇", "Delete the newer note"],
+  pairTrashText: [
+    "“{0}” 和 “{1}” 几乎一模一样。“{0}” 会被移到回收站，可以从回收站找回；“{1}” 不动。",
+    "\u201c{0}\u201d and \u201c{1}\u201d are almost identical. \u201c{0}\u201d goes to the trash, where you can restore it; \u201c{1}\u201d is left alone.",
+  ],
+  pairTrashConfirm: ["移到回收站", "Move to trash"],
   pairKeepOlder: ["保留较早的，清理这一篇", "Keep the older, clean this one"],
   scatterTitle: ["零散重复的段落（{0} 处）", "Passages repeated here and there ({0})"],
   scatterHint: [

@@ -448,7 +448,8 @@
   grid-auto-rows: 40px;
   gap: var(--vp-s4);
 }
-.vp-grid > .vp-w {
+/* 用后代选择器，不用 >：卡片局部重画时先放在一个 display: contents 的容器里量尺寸，那时它还不是栅格的直接子元素 */
+.vp-grid .vp-w {
   grid-column: calc(var(--vp-x, 0) + 1) / span var(--vp-w, 4);
   grid-row: calc(var(--vp-y, 0) + 1) / span var(--vp-h, 4);
   min-height: 0;
@@ -844,18 +845,6 @@
   justify-content: center;
   gap: 6px;
 }
-/* 柱状：每根柱子上面写着那天的字数；柱子区域吃掉卡片多出来的高度 */
-.vp-week-val {
-  height: 14px;
-  font-size: var(--vp-fs-11);
-  line-height: 14px;
-  color: var(--vp-subtle);
-  white-space: nowrap;
-}
-.vp-week-val.is-done {
-  color: var(--text-normal);
-  font-weight: 600;
-}
 .vp-week-label {
   font-size: var(--vp-fs-11);
   color: var(--vp-subtle);
@@ -903,29 +892,49 @@
 .vp-week-day.is-today .vp-week-bar {
   box-shadow: var(--vp-ring-today);
 }
+/*
+ * 柱子区域：上面留 16px 给最高那根柱子的字数。--vp-week-f 是这一天的柱高占比（0–1），
+ * 柱子高度、字数的位置都按它算，所以字数始终贴在柱顶；虚线（每日目标）用同样的算法放在 --vp-week-gf 的高度。
+ */
 .vp-week-lane {
   position: relative;
   display: flex;
+  box-sizing: border-box;
   align-items: flex-end;
   justify-content: center;
   flex: 1 1 auto;
   width: 100%;
   min-height: var(--vp-week-lane, 44px);
+  padding-top: 16px;
 }
 .vp-week.has-goal .vp-week-lane::after {
   content: "";
   position: absolute;
   left: 0;
   right: 0;
-  bottom: var(--vp-week-goal);
+  bottom: calc((100% - 16px) * var(--vp-week-gf, 0));
   border-top: 1px dashed color-mix(in srgb, var(--vp-accent) 40%, transparent);
   pointer-events: none;
+}
+.vp-week-val {
+  position: absolute;
+  left: 50%;
+  bottom: calc((100% - 16px) * var(--vp-week-f, 0) + 3px);
+  font-size: var(--vp-fs-11);
+  line-height: 13px;
+  color: var(--vp-subtle);
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+.vp-week-val.is-done {
+  color: var(--text-normal);
+  font-weight: 600;
 }
 .vp-week-bar {
   width: 56%;
   min-width: var(--vp-week-bar, 16px);
   max-width: 64px;
-  height: var(--vp-week-h, 0%);
+  height: calc(var(--vp-week-f, 0) * 100%);
   min-height: 3px;
   border-radius: var(--vp-r-s) var(--vp-r-s) var(--vp-r-xs) var(--vp-r-xs);
   background: color-mix(in srgb, var(--vp-accent) 30%, transparent);
@@ -939,11 +948,7 @@
 .vp-week-meter {
   margin-top: var(--vp-s3);
 }
-.vp-week-legend {
-  margin-top: var(--vp-s2);
-  font-size: var(--vp-fs-11);
-  color: var(--vp-subtle);
-}
+
 
 /* ---------------- 圆环 ---------------- */
 
@@ -1991,11 +1996,11 @@
     grid-auto-rows: auto;
     gap: var(--vp-s3);
   }
-  .vp-grid > .vp-w {
+  .vp-grid .vp-w {
     grid-column: span 2;
     grid-row: auto;
   }
-  .vp-grid > .vp-w.is-small {
+  .vp-grid .vp-w.is-small {
     grid-column: span 1;
   }
   .vp-card,
@@ -4713,6 +4718,16 @@ body.is-mobile .cd-modal .cd-diff-list {
 .cd-keep-pick.is-active .cd-radio-dot {
   border-color: var(--cd-accent);
   background: radial-gradient(circle, var(--cd-accent) 0 3px, transparent 3.5px);
+}
+.cd-copy-tag {
+  align-self: center;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--background-modifier-hover);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
 }
 /* 零散重复的段落：折起来的一栏，打开后里面是逐段的卡片 */
 .cd-scatter {

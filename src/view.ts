@@ -3,7 +3,7 @@ import type NotePulsePlugin from "./main";
 import { ConfirmModal } from "./dedupe/modals";
 import { writingReportOverview } from "./report-logic";
 import { latestWritingReport } from "./report-storage";
-import { overview as dedupeOverview, significantPairs } from "./dedupe/core/summary";
+import { overview as dedupeOverview, pairWording, significantPairs } from "./dedupe/core/summary";
 import {
   TrendMetric,
   TrendRange,
@@ -1450,6 +1450,15 @@ export class DashboardView extends ItemView {
     const style = settings.weekStyle;
     const days = weekDays(s, goal, now);
     const weekWords = days.reduce((a, d) => a + d.words, 0);
+    // 柱子的高度：和每天写的字数成正比，每根柱子上面写着具体字数。
+    // 最高的一天超过每日目标的 4 倍时，整体改成按开方显示（0 到 1 之间开方），这样某天写了几万字也不会把别的天压成一条线，虚线（每日目标）还在看得清的高度上
+    const peak = Math.max(...days.map((d) => d.words), 1);
+    const squash = goal > 0 && peak > goal * 4;
+    const max = goal > 0 ? Math.max(goal, peak) : peak;
+    const frac = (w: number) => {
+      const r = Math.min(1, w / max);
+      return squash ? Math.sqrt(r) : r;
+    };
     const box = createDiv({ cls: `vp-week-box is-${style}` });
     // 圆点、柱子的大小随卡片变（density.ts 按卡片高度算出来的）
     box.setCssProps({ "--vp-week-dot": `${dn.dot}px`, "--vp-week-lane": `${dn.lane}px`, "--vp-week-bar": `${dn.bar}px` });
@@ -1458,6 +1467,18 @@ export class DashboardView extends ItemView {
     sum.createSpan({ cls: "vp-label", text: L("本周 ", "This week ") });
     sum.createSpan({ cls: "vp-week-total", text: fmtFull(weekWords) });
     if (settings.weeklyWordGoal > 0) sum.createSpan({ cls: "vp-week-goal", text: ` / ${fmtFull(settings.weeklyWordGoal)}` });
+    // 图例放进问号里，不一直摆在外面
+    this.help(
+      sum,
+      style === "dots"
+        ? L("✓ 达标；百分比是还没达标那天的进度；虚线圆是还没到的日子。", "✓ goal met; the % is progress on days below the goal; a dashed circle is a day still to come.")
+        : goal > 0
+          ? L(
+              `柱子高度和当天写的字数成正比，上面写着具体字数；实色是达标的日子，虚线是每日目标 ${fmtFull(goal)} 字。${squash ? "有一天比目标高很多，所以整体按开方显示，免得其它天被压成一条线。" : ""}`,
+              `Bar height follows the words written that day, with the number above each bar; solid bars met the goal, the dashed line is the daily goal of ${fmtFull(goal)}.${squash ? " One day is far above the goal, so heights use a square-root scale to keep the other days visible." : ""}`
+            )
+          : L("柱子高度和当天写的字数成正比，上面写着具体字数。", "Bar height follows the words written that day, with the number above each bar.")
+    );
     this.segmented<"dots" | "bars">(
       top,
       [["dots", L("圆点", "Dots")], ["bars", L("柱状", "Bars")]],
@@ -1471,15 +1492,6 @@ export class DashboardView extends ItemView {
     );
 
     const row = box.createDiv({ cls: "vp-week" });
-    // 柱子的高度：和每天写的字数成正比，每根柱子上面写着具体字数。
-    // 最高的一天超过每日目标的 4 倍时，整体改成按开方显示（0 到 1 之间开方），这样某天写了几万字也不会把别的天压成一条线，虚线（每日目标）还在看得清的高度上
-    const peak = Math.max(...days.map((d) => d.words), 1);
-    const squash = goal > 0 && peak > goal * 4;
-    const max = goal > 0 ? Math.max(goal, peak) : peak;
-    const frac = (w: number) => {
-      const r = Math.min(1, w / max);
-      return squash ? Math.sqrt(r) : r;
-    };
     for (const d of days) {
       const c = row.createDiv({ cls: "vp-week-day" + (d.done ? " is-active" : "") + (d.isToday ? " is-today" : "") + (d.future ? " is-future" : "") });
       const w = count(fmtFull(d.words), "words");
@@ -1496,16 +1508,17 @@ export class DashboardView extends ItemView {
         if (d.done) setIcon(dot, "check");
         else if (d.pct !== null) dot.createSpan({ cls: "vp-week-pct", text: `${d.pct}%` });
       } else {
-        c.createDiv({ cls: "vp-week-val" + (d.done ? " is-done" : ""), text: d.future || d.words === 0 ? "" : fmtNum(d.words), attr: { "aria-hidden": "true" } });
         const lane = c.createDiv({ cls: "vp-week-lane", attr: { role: "img", "aria-label": `${dayName} ${desc}` } });
-        const bar = lane.createDiv({ cls: "vp-week-bar" });
-        bar.setCssProps({ "--vp-week-h": `${d.future ? 0 : Math.min(100, Math.max(4, frac(d.words) * 100))}%` });
+        // 柱子高度占 0–1（最矮留 4%）；字数写在柱子正上方，跟着柱子高低走
+        lane.setCssProps({ "--vp-week-f": String(d.future ? 0 : Math.min(1, Math.max(0.04, frac(d.words)))) });
+        if (!d.future && d.words > 0) lane.createSpan({ cls: "vp-week-val" + (d.done ? " is-done" : ""), text: fmtNum(d.words), attr: { "aria-hidden": "true" } });
+        lane.createDiv({ cls: "vp-week-bar" });
       }
       c.createDiv({ cls: "vp-week-label", text: d.isToday ? L("今", "Today") : d.label });
     }
     if (style === "bars" && goal > 0) {
       row.addClass("has-goal");
-      row.setCssProps({ "--vp-week-goal": `${frac(goal) * 100}%` });
+      row.setCssProps({ "--vp-week-gf": String(frac(goal)) });
     }
 
     if (settings.weeklyWordGoal > 0 && dn.weekDetail) {
@@ -1523,15 +1536,6 @@ export class DashboardView extends ItemView {
       });
       meter.createDiv({ cls: "vp-meter-fill" }).setCssProps({ "--vp-meter-width": `${pct}%` });
     }
-    if (!dn.weekDetail) return box;
-    const legend = box.createDiv({ cls: "vp-week-legend" });
-    if (style === "dots") legend.setText(L("✓ 达标 · 百分比为未达标的进度 · 虚线为还没到的日子", "✓ goal met · % progress · dashed: still to come"));
-    else
-      legend.setText(
-        goal > 0
-          ? L(`实色为达标 · 虚线为每日目标 ${fmtFull(goal)} 字${squash ? " · 差距大，柱高按开方显示" : ""}`, `Solid: goal met · dashed line: daily goal of ${fmtFull(goal)}${squash ? " · bar heights use a square-root scale" : ""}`)
-          : L("柱高为当天字数", "Bar height is that day's words")
-      );
     return box;
   }
 
@@ -2478,11 +2482,9 @@ export class DashboardView extends ItemView {
       k.add(L("扫描只读，不会改动笔记", "Read-only, changes nothing"), "", null, L("开始扫描", "Scan"), () => void dd.openReport(true));
     }
     for (const p of pairs.slice(0, 50)) {
-      const newer = baseName(p.newer);
-      const older = baseName(p.older);
-      const pct = Math.round(Math.max(p.newerRatio, p.olderRatio) * 100);
-      const name = L(`${newer} 和 ${older} 重复 ${pct}%`, `${newer} and ${older} overlap ${pct}%`);
-      k.add(name, newer, () => void dd.openNote(p.newer), L("对比", "Compare"), () => void dd.openBoth(p.older, p.newer));
+      const w = pairWording(p);
+      const name = L(`${baseName(w.name)} 有 ${w.pct}% 和 ${baseName(w.other)} 重复`, `${w.pct}% of ${baseName(w.name)} is the same as ${baseName(w.other)}`);
+      k.add(name, baseName(w.name), () => void dd.openNote(w.name), L("对比", "Compare"), () => void dd.openBoth(p.older, p.newer));
     }
     k.done();
     if (n > 0) this.moreLink(k.foot, L("查看和清理", "Review and clean up"), () => void dd.openReport(false));

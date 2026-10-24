@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { analyze, FileRecord } from "../src/dedupe/core/group";
-import { groupKey, noteDay, overview, pairReclaimChars, readablePreview, significantPairs } from "../src/dedupe/core/summary";
+import { groupKey, isNearCopy, noteDay, overview, pairReclaimChars, pairWording, readablePreview, significantPairs } from "../src/dedupe/core/summary";
 import { pairsToItems } from "../src/dedupe/core/plan";
 import { tokenize } from "../src/dedupe/core/tokenize";
 import { OPTS } from "./dedupe/fixtures";
@@ -96,4 +96,32 @@ test("一键处理大面积重复：只清理这些笔记对里的笔记，同�
   }
   assert.ok(pairReclaimChars(pairs) > 0);
   assert.equal(pairReclaimChars([]), 0);
+});
+
+test("看板上的重复内容：比例按整篇全文量，两个长段落一样、其余都不一样的笔记不算；长度几乎一样且参与比对的部分几乎全一样的复制品算", () => {
+  const long = (s: string) => `${s} ${"padding words to make the block long enough for the threshold. ".repeat(4)}`;
+  const A = long("Alpha."), B = long("Beta.");
+  // 很多短句（不够长，不参与比对），两篇各写各的
+  const shorts = (tag: string) => Array.from({ length: 80 }, (_, i) => `- ${tag} note line number ${i}`).join("\n");
+  const x = rec("x.md", `${A}\n\n${B}\n\n${shorts("x")}\n`, 1);
+  const y = rec("y.md", `${A}\n\n${B}\n\n${shorts("y").split("\n").slice(0, 60).join("\n")}\n`, 2);
+  const ax = analyze([x, y]);
+  assert.equal(ax.pairs.length, 1, "按参与比对的段落算，这一对是 100%");
+  assert.equal(significantPairs(ax, new Set()).length, 0, "但共同部分只占全文一小部分，不算大面积重复");
+  // 同样的短句，两篇都一样：整篇几乎一模一样（复制品）
+  const same = shorts("same");
+  const c = rec("c.md", `${A}\n\n${B}\n\n${same}\n`, 3);
+  const d = rec("d.md", `${A}\n\n${B}\n\n${same}\n`, 4);
+  const ad = analyze([c, d]);
+  assert.equal(significantPairs(ad, new Set()).length, 1, "长度一样、比对部分全一样，是复制品");
+  assert.ok(ad.pairs[0].olderChars > 0, "老的一边的共同字数也记下了");
+  assert.ok(isNearCopy(ad, ad.pairs[0]), "复制品");
+  assert.ok(!isNearCopy(ax, ax.pairs[0]), "长度差很多的不算复制品");
+});
+
+test("pairWording：哪一篇的重复比例更高就说哪一篇", () => {
+  const p = { older: "a.md", newer: "b.md", olderRatio: 0.76, newerRatio: 0.45 } as never;
+  assert.deepEqual(pairWording(p), { name: "a.md", other: "b.md", pct: 76 });
+  const q = { older: "a.md", newer: "b.md", olderRatio: 0.5, newerRatio: 0.9 } as never;
+  assert.deepEqual(pairWording(q), { name: "b.md", other: "a.md", pct: 90 });
 });

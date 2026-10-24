@@ -2,7 +2,7 @@ import { ItemView, Platform, WorkspaceLeaf, setIcon } from "obsidian";
 import type { DedupeService as ClipDedupePlugin } from "./service";
 import type { DupGroup, OverlapPair } from "./core/group";
 import { groupItem, pairsToItems } from "./core/plan";
-import { noteDay, overview, pairReclaimChars, readablePreview, significantPairs } from "./core/summary";
+import { isNearCopy, noteDay, overview, pairReclaimChars, pairWording, readablePreview, significantPairs } from "./core/summary";
 import { StrKey, t } from "./i18n";
 import type { ScanProgress } from "./scanner";
 import { splitList } from "./settings";
@@ -367,10 +367,10 @@ export class ClipDedupeView extends ItemView {
     const p = this.plugin;
     const a = p.analysis;
     if (!a) return;
-    const pct = Math.round(Math.max(pr.newerRatio, pr.olderRatio) * 100);
+    const w = pairWording(pr);
     const card = parent.createDiv({ cls: "cd-card cd-item cd-pair-card" });
     const head = card.createDiv({ cls: "cd-item-head" });
-    head.createDiv({ cls: "cd-item-title", text: t("pairLead", baseName(pr.newer), baseName(pr.older), pct) });
+    head.createDiv({ cls: "cd-item-title", text: t("pairLead", baseName(w.name), baseName(w.other), w.pct) });
     head.createSpan({ cls: "cd-item-save", text: t("pairShared", pr.sharedBlocks, fmtNum(Math.round(pr.sharedChars))) });
 
     // 共同部分里最长的一段，让人一眼认出“是同一篇”
@@ -397,11 +397,19 @@ export class ClipDedupeView extends ItemView {
     row(pr.older, true);
     row(pr.newer, false);
 
+    // 几乎是同一份：主要动作是把较新的整篇移到回收站；只是部分重复：保留较早的，把这一篇里重复的段落标出来
+    const copy = isNearCopy(a, pr);
+    if (copy) head.createSpan({ cls: "cd-copy-tag", text: t("pairCopyTag") });
     const acts = card.createDiv({ cls: "cd-item-actions" });
+    const markIt = () => p.startCleanup(p.pairItems(pr.groupIds, pr.older, pr.newer), "mark");
     const main = acts.createEl("button", { cls: "cd-btn is-primary", attr: { type: "button" } });
-    setIcon(main.createSpan({ cls: "cd-btn-icon", attr: { "aria-hidden": "true" } }), "check");
-    main.createSpan({ cls: "cd-btn-label", text: t("pairKeepOlder") });
-    main.addEventListener("click", () => p.startCleanup(p.pairItems(pr.groupIds, pr.older, pr.newer), "mark"));
+    setIcon(main.createSpan({ cls: "cd-btn-icon", attr: { "aria-hidden": "true" } }), copy ? "trash-2" : "check");
+    main.createSpan({ cls: "cd-btn-label", text: copy ? t("pairTrashNewer") : t("pairKeepOlder") });
+    main.addEventListener("click", () => (copy ? p.trashNote(pr.newer, pr.older) : markIt()));
+    if (copy) {
+      const mark = acts.createEl("button", { cls: "cd-btn", text: t("pairKeepOlder"), attr: { type: "button" } });
+      mark.addEventListener("click", markIt);
+    }
     const both = acts.createEl("button", { cls: "cd-btn", text: t("pairOpenBoth"), attr: { type: "button" } });
     both.addEventListener("click", () => void p.openBoth(pr.older, pr.newer));
     const ign = acts.createEl("button", { cls: "cd-btn is-quiet", text: t("ignore"), attr: { type: "button" } });
