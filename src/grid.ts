@@ -88,23 +88,34 @@ function firstFreeY(others: Rect[], r: Rect, from = 0): number {
 
 /**
  * 把 pin 钉在它现在的位置，被它挡住的卡片让开，然后整体上浮。
- * - 让位：先看能不能放到 pin 正上方（拖动时），放不下或者是调大小，就放到下面；
- * - 没被挡住的卡片原地不动，只会因为让出来的空位往上补。
+ * 按阅读顺序一张张处理：和已经安排好的卡（pin 和前面让开的卡）碰上的才挪，没碰上的原地不动。
+ * 让位的办法：拖动时先看能不能放进 pin 刚离开的位置（两张卡互换），再看能不能放到 pin 正上方；
+ * 调大小时先看右边有没有空位（邻居向右让一让）；都不行就往下推到不碰为止。被推下去的卡又会挡住它下面的卡，下面的卡轮到时同样被推下去，
+ * 所以整列会一起往下挪，不会有卡跳到页面最底下去。
  */
-function settle<T extends GridItem>(items: T[], pin: T, mode: "move" | "resize"): T[] {
+function settle<T extends GridItem>(items: T[], pin: T, mode: "move" | "resize", from?: Rect): T[] {
   const rest = items.filter((i) => i.id !== pin.id).sort(byPos);
   const placed: T[] = [pin];
-  const moving: T[] = [];
-  for (const it of rest) (overlap(it, pin) ? moving : placed).push(it);
-  for (const it of moving) {
-    let y = -1;
-    if (mode === "move") {
-      const above = pin.y - it.h;
-      if (above >= 0 && !placed.some((o) => overlap(o, { ...it, y: above }))) y = above;
+  rest.forEach((it, idx) => {
+    if (!placed.some((o) => overlap(o, it))) {
+      placed.push(it);
+      return;
     }
-    if (y < 0) y = firstFreeY(placed, it, pin.y);
-    placed.push({ ...it, y });
-  }
+    // 互换和“放到上面”要避开所有别的卡（包括还没轮到的），不然会压到它们
+    const everyone = (): Rect[] => [...placed, ...rest.slice(idx + 1)];
+    let spot: Rect | null = null;
+    if (mode === "move") {
+      const slot = from && { x: clamp(from.x, 0, COLS - it.w), y: from.y, w: it.w, h: it.h };
+      const above = { x: it.x, y: pin.y - it.h, w: it.w, h: it.h };
+      if (slot && !everyone().some((o) => overlap(o, slot))) spot = slot;
+      else if (above.y >= 0 && !everyone().some((o) => overlap(o, above))) spot = above;
+    } else {
+      // 调大小往右撑到邻居：邻居向右让一让，行结构不变
+      const right = { x: pin.x + pin.w, y: it.y, w: it.w, h: it.h };
+      if (right.x + it.w <= COLS && !everyone().some((o) => overlap(o, right))) spot = right;
+    }
+    placed.push(spot ? { ...it, x: spot.x, y: spot.y } : { ...it, y: firstFreeY(placed, it, it.y) });
+  });
   return compact(placed);
 }
 
@@ -116,7 +127,7 @@ export function moveItem<T extends GridItem>(items: T[], id: string, x: number, 
   const cur = items.find((i) => i.id === id);
   if (!cur) return items;
   const pin = { ...cur, x: clamp(int(x, cur.x), 0, COLS - cur.w), y: Math.max(0, int(y, cur.y)) };
-  return settle(items, pin, "move");
+  return settle(items, pin, "move", cur);
 }
 
 /** 调大小：夹在这张卡的范围里，也不超出右边界（右边放不下时不挪左边，只是不能再变宽） */

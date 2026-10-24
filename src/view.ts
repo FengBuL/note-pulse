@@ -24,9 +24,10 @@ import {
   weeklyWords,
 } from "./dashboard-logic";
 import { GroupStat, Hint, TaskInfo, VaultStats, addDays, dayKey, isCheckinDay, pad2, startOfDay } from "./stats";
-import { COLS, GAP, rowsToPx } from "./grid";
+import { COLS, GAP, GridItem, rowsToPx } from "./grid";
+import { GestureHost, GridGesture, setPlace } from "./grid-edit";
 import { Box, activityDensity, bodyH, densityDensity, densityKey, foldersDensity, heatDensity, heroDensity, isTight, kpiDensity, rhythmDensity, trendDensity } from "./density";
-import { WidgetId, WidgetLayout, WidgetLayoutItem, addWidget, defaultLayout, hiddenWidgets, readingOrder, removeWidget, sameLayout } from "./widgets";
+import { WidgetId, WidgetLayout, WidgetLayoutItem, addWidget, defaultLayout, hiddenWidgets, limitsOf, readingOrder, removeWidget, sameLayout, withItems } from "./widgets";
 import { MOTION, SegRect, animateHeight, countUp, drawLines, markStagger, playLayout, reducedMotion, segRect, slideSeg, snapshotRects } from "./motion";
 import {
   BarItem,
@@ -197,6 +198,15 @@ export class DashboardView extends ItemView {
 
     if (Platform.isMobile) this.installTapGuard(root);
 
+    // 编辑看板时 Cmd / Ctrl + Z 撤销
+    this.registerDomEvent(root.ownerDocument, "keydown", (e: KeyboardEvent) => {
+      if (!this.editing || e.key.toLowerCase() !== "z" || !(e.metaKey || e.ctrlKey) || e.shiftKey || !this.isVisible()) return;
+      const t = e.target as HTMLElement | null;
+      if (t && (/^(input|textarea|select)$/i.test(t.tagName) || t.isContentEditable)) return;
+      e.preventDefault();
+      this.undo();
+    });
+
     // 窗口宽度变了：卡片的实际像素大小跟着变，该换内容的换内容，列表重新截一遍
     this.lastWidth = root.clientWidth;
     if (typeof ResizeObserver !== "undefined") {
@@ -230,7 +240,9 @@ export class DashboardView extends ItemView {
       const oy = el.ownerDocument.defaultView?.getComputedStyle(el).overflowY;
       if ((oy === "auto" || oy === "scroll") && el.scrollHeight > el.clientHeight + 1) return el;
     }
-    return root;
+    // 没有可滚动的祖先（比如本地预览，整页在滚）：用文档本身
+    const doc = root.ownerDocument.scrollingElement;
+    return doc instanceof HTMLElement && doc.scrollHeight > doc.clientHeight + 1 ? doc : root;
   }
 
   /** 执行 fn（会重绘 DOM），之后把滚动位置放回去；下一帧再校正一次，应对图表异步量宽后的高度变化 */
@@ -368,6 +380,10 @@ export class DashboardView extends ItemView {
   /* ================= 渲染 ================= */
 
   render(stats: VaultStats) {
+    if (this.gesture?.active) {
+      this.pendingStats = stats;
+      return;
+    }
     // 重绘期间把内容区高度撑住，避免清空 → 重建的瞬间页面塌缩、滚动位置被夹到顶部
     const hold = this.bodyEl.offsetHeight;
     if (hold > 0) this.bodyEl.setCssProps({ "--vp-held-height": `${hold}px` });
@@ -440,6 +456,11 @@ export class DashboardView extends ItemView {
       const fn = this.widgetRenderer(item.id, stats, ck);
       if (fn) this.define(item.id, grid, fn);
     }
+    this.gesture = null;
+    if (this.editing && !this.narrow) {
+      this.gesture = new GridGesture(this.gestureHost(grid));
+      this.gesture.attach();
+    }
     if (this.plugin.settings.layout.items.length === 0) {
       const e = body.createDiv({ cls: "vp-card vp-fullempty" });
       this.empty(
@@ -451,7 +472,7 @@ export class DashboardView extends ItemView {
   }
 
   /** 卡片的实际大小变了（窗口缩放、拖动调大小）：内容该变的重画，列表重新截 */
-  private refit(ids?: string[]) {
+  private refit(ids?: string[], inPlace = false) {
     if (!this.stats || !this.gridEl || this.contentEl.clientWidth === 0) return;
     const narrow = this.contentEl.clientWidth < 760;
     if (narrow !== this.narrow) {
@@ -461,7 +482,7 @@ export class DashboardView extends ItemView {
     }
     for (const it of this.plugin.settings.layout.items) {
       if (ids && !ids.includes(it.id)) continue;
-      if (densityKey(it.id, this.box(it.id)) !== this.densityKeys.get(it.id)) this.rerender(it.id, "resize");
+      if (densityKey(it.id, this.box(it.id)) !== this.densityKeys.get(it.id)) this.rerender(it.id, "resize", inPlace);
       else this.fitters.get(it.id)?.();
     }
   }
@@ -476,6 +497,15 @@ export class DashboardView extends ItemView {
   /** 看板容器窄于 760px（手机、平板竖屏、分屏的窄面板）：卡片排成一列，只看不改 */
   private narrow = false;
   private resizeFrame = 0;
+  /** 拖动、调大小进行中的那套布局（还没保存）；平时是 null */
+  private live: WidgetLayoutItem[] | null = null;
+  private gesture: GridGesture | null = null;
+  /** 手势进行中收到的刷新：等手势结束再画 */
+  private pendingStats: VaultStats | null = null;
+  /** 编辑期间最近 20 次改动，Cmd / Ctrl + Z 撤销 */
+  private undoStack: WidgetLayout[] = [];
+  private undoBtn: HTMLButtonElement | null = null;
+  private liveEl: HTMLElement | null = null;
 
   private toggleEditing() {
     if (!this.editing && this.narrow) {
@@ -484,14 +514,16 @@ export class DashboardView extends ItemView {
     }
     this.editing = !this.editing;
     this.addOpen = false;
+    this.undoStack = [];
     this.editBtn?.toggleClass("is-active", this.editing);
     this.editBtn?.setAttr("aria-pressed", String(this.editing));
     if (this.stats) this.render(this.stats);
   }
 
   /** 改布局：立刻保存（随 data.json 同步），用已有统计重画 */
-  private applyLayout(next: WidgetLayout, opts: { focusId?: string; reveal?: string } = {}) {
+  private applyLayout(next: WidgetLayout, opts: { focusId?: string; reveal?: string; noUndo?: boolean } = {}) {
     if (sameLayout(next, this.plugin.settings.layout)) return;
+    if (!opts.noUndo) this.pushUndo();
     this.plugin.settings.layout = next;
     void this.plugin.saveViewSetting();
     // 卡片从原来的位置滑到新位置，新加的淡入
@@ -500,6 +532,62 @@ export class DashboardView extends ItemView {
     if (before && this.gridEl) playLayout(this.gridEl, before);
     if (opts.focusId) this.contentEl.querySelector<HTMLElement>(`[data-fid="${opts.focusId}"]`)?.focus({ preventScroll: true });
     if (opts.reveal) this.revealCard(opts.reveal);
+  }
+
+  private pushUndo() {
+    this.undoStack.push(this.plugin.settings.layout);
+    if (this.undoStack.length > 20) this.undoStack.shift();
+    if (this.undoBtn) this.undoBtn.disabled = false;
+  }
+
+  private undo() {
+    const prev = this.undoStack.pop();
+    if (this.undoBtn) this.undoBtn.disabled = this.undoStack.length === 0;
+    if (prev) this.applyLayout(prev, { noUndo: true });
+  }
+
+  /** 手势保存：布局已经画在页面上了，只存设置，不重画 */
+  private commitLayout(next: WidgetLayout) {
+    if (sameLayout(next, this.plugin.settings.layout)) return;
+    this.pushUndo();
+    this.plugin.settings.layout = next;
+    void this.plugin.saveViewSetting();
+  }
+
+  /** 拖动、调大小期间：只改各张卡的位置和大小，不保存，不重画内容 */
+  private showLive(items: GridItem[], skip?: string) {
+    this.live = items as WidgetLayoutItem[];
+    for (const it of items) {
+      if (it.id === skip) continue;
+      const el = this.parts.get(it.id);
+      if (!el) continue;
+      setPlace(el, it);
+      el.toggleClass("is-small", it.w <= 3);
+    }
+  }
+
+  private gestureHost(grid: HTMLElement): GestureHost {
+    return {
+      grid,
+      items: () => this.plugin.settings.layout.items,
+      limitsOf,
+      show: (items, skip) => this.showLive(items, skip),
+      commit: (items) => this.commitLayout(withItems(items)),
+      resized: (id) => this.refit([id], true),
+      announce: (id, it) => {
+        const name = widgetName(id as WidgetId);
+        this.liveEl?.setText(L(`${name}，第 ${it.x + 1} 列第 ${it.y + 1} 行，${it.w} × ${it.h}`, `${name}, column ${it.x + 1}, row ${it.y + 1}, ${it.w} × ${it.h}`));
+      },
+      remove: (id) => this.applyLayout(removeWidget(this.plugin.settings.layout, id as WidgetId)),
+      ended: () => {
+        this.live = null;
+        const s = this.pendingStats;
+        this.pendingStats = null;
+        if (s) this.render(s);
+      },
+      scroller: () => this.scroller(),
+      motion: () => this.motionOn(),
+    };
   }
 
   /** 滚到这张卡并闪一下 */
@@ -514,6 +602,14 @@ export class DashboardView extends ItemView {
   private editTools(el: HTMLElement, id: WidgetId) {
     const name = widgetName(id);
     el.addClass("is-editing");
+    const it = this.itemOf(id);
+    el.setAttr("tabindex", "0");
+    el.setAttr("role", "group");
+    el.setAttr(
+      "aria-label",
+      L(`${name}${it ? `，${it.w} × ${it.h}` : ""}。方向键移动，Shift 加方向键调大小，Delete 移除`, `${name}${it ? `, ${it.w} × ${it.h}` : ""}. Arrow keys move, Shift + arrow keys resize, Delete removes`)
+    );
+    el.createDiv({ cls: "vp-w-handle", attr: { "aria-hidden": "true", "data-fid": `edit:${id}:size` } });
     const x = el.createEl("button", { cls: "vp-w-remove", attr: { type: "button", "aria-label": L(`从看板上移除 ${name}`, `Remove ${name} from the dashboard`), "data-fid": `edit:${id}:hide` } });
     setIcon(x, "x");
     x.addEventListener("click", () => this.applyLayout(removeWidget(this.plugin.settings.layout, id)));
@@ -523,6 +619,7 @@ export class DashboardView extends ItemView {
   private renderEditBar(parent: HTMLElement) {
     const bar = parent.createDiv({ cls: "vp-editbar", attr: { role: "toolbar", "aria-label": L("编辑看板", "Edit dashboard") } });
     bar.createDiv({ cls: "vp-editbar-hint", text: L("拖动卡片换位置，拖右下角调大小", "Drag a card to move it, drag its corner to resize") });
+    this.liveEl = bar.createDiv({ cls: "vp-sr-only", attr: { "aria-live": "polite", role: "status" } });
     const acts = bar.createDiv({ cls: "vp-editbar-actions" });
     const btn = (icon: string, text: string, fn: () => void, primary = false) => {
       const b = acts.createEl("button", { cls: "vp-btn is-compact" + (primary ? " is-primary" : ""), attr: { type: "button" } });
@@ -531,6 +628,9 @@ export class DashboardView extends ItemView {
       b.addEventListener("click", fn);
       return b;
     };
+    this.undoBtn = btn("undo-2", L("撤销", "Undo"), () => this.undo());
+    this.undoBtn.disabled = this.undoStack.length === 0;
+    this.undoBtn.setAttr("title", L("撤销（Cmd / Ctrl + Z）", "Undo (Cmd / Ctrl + Z)"));
     btn("rotate-ccw", L("恢复默认布局", "Restore default"), () => this.applyLayout(defaultLayout()));
     const add = btn("plus", L("添加卡片", "Add a card"), () => {
       this.addOpen = !this.addOpen;
@@ -609,7 +709,7 @@ export class DashboardView extends ItemView {
 
   /** 这张卡片在布局里的位置和大小 */
   private itemOf(id: string): WidgetLayoutItem | null {
-    return this.plugin.settings.layout.items.find((i) => i.id === id) ?? null;
+    return (this.live ?? this.plugin.settings.layout.items).find((i) => i.id === id) ?? null;
   }
 
   /** 看板栅格现在有多宽（量不到时，比如标签页在后台，退回用面板宽度减去左右边距） */
@@ -734,7 +834,7 @@ export class DashboardView extends ItemView {
    * 没开动效时，切换标签页沿用旧办法：高度只增不减，避免整页高度塌缩、处在底部时滚动位置被夹回去；
    * 展开状态下不锁，否则切到别的标签页后卡片会停在展开时的高度。
    */
-  private rerender(key: string, mode: "swap" | "resize" = "swap") {
+  private rerender(key: string, mode: "swap" | "resize" = "swap", inPlace = false) {
     const old = this.parts.get(key);
     const fn = this.renderers.get(key);
     if (!old || !fn || !this.stats) return;
@@ -750,11 +850,25 @@ export class DashboardView extends ItemView {
       // 先用一个 display: contents 的占位容器就地渲染，这样图表量到的是最终宽度，不会闪烁
       const wrapper = createDiv();
       wrapper.setCssProps({ display: "contents" });
-      old.replaceWith(wrapper);
+      // 拖角调大小时旧卡片不能离开文档（指针还捕获在它上面，一离开就会被释放），新内容画在它旁边
+      if (inPlace) old.after(wrapper);
+      else old.replaceWith(wrapper);
       this.mount(key, wrapper, fn);
       const fresh = this.parts.get(key);
       if (!fresh) {
-        wrapper.replaceWith(old);
+        if (inPlace) wrapper.remove();
+        else wrapper.replaceWith(old);
+        return;
+      }
+      if (inPlace) {
+        // 拖角调大小时：卡片元素本身不能换（指针还捕获在它上面），只换里面的内容
+        const keep = Array.from(old.querySelectorAll(":scope > .vp-w-badge"));
+        const gestureClasses = ["is-resizing-card", "is-dragging", "is-editing"].filter((c) => old.hasClass(c));
+        old.className = fresh.className;
+        for (const c of gestureClasses) old.addClass(c);
+        old.replaceChildren(...Array.from(fresh.childNodes), ...keep);
+        wrapper.remove();
+        this.parts.set(key, old);
         return;
       }
       wrapper.replaceWith(fresh);

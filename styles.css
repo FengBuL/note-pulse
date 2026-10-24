@@ -2091,6 +2091,72 @@ body.is-mobile .vp-root :is(button, [role="button"], [role="tab"], .is-clickable
 .vp-grid.is-editing > .vp-w:hover {
   outline-color: var(--vp-accent);
 }
+.vp-grid.is-editing > .vp-w {
+  touch-action: none;
+  user-select: none;
+}
+.vp-grid.is-editing > .vp-w:focus-visible {
+  outline: 2px solid var(--vp-accent);
+}
+/* 拖动：卡片跟着手走（不加缓动），略微抬起；原来的位置换成虚线占位框 */
+.vp-grid > .vp-w.is-dragging {
+  z-index: 8;
+  transform: translate(var(--vp-drag-x, 0px), var(--vp-drag-y, 0px)) scale(1.02);
+  box-shadow: var(--vp-shadow-pop);
+  transition: none;
+  pointer-events: none;
+}
+.vp-grid.is-gesture,
+.vp-grid.is-gesture * {
+  user-select: none;
+}
+.vp-grid.is-gesture > .vp-w:not(.is-dragging):hover {
+  box-shadow: var(--vp-shadow);
+}
+.vp-grid > .vp-ph {
+  grid-column: calc(var(--vp-x, 0) + 1) / span var(--vp-w, 4);
+  grid-row: calc(var(--vp-y, 0) + 1) / span var(--vp-h, 4);
+  border: 1.5px dashed var(--vp-accent);
+  border-radius: var(--vp-r-m);
+  background: color-mix(in srgb, var(--vp-accent) 8%, transparent);
+  pointer-events: none;
+}
+/* 右下角的调大小拖柄 */
+.vp-w-handle {
+  position: absolute;
+  z-index: 3;
+  right: 3px;
+  bottom: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: var(--vp-r-s);
+  cursor: pointer;
+  touch-action: none;
+  background: linear-gradient(
+    135deg,
+    transparent 0 52%,
+    color-mix(in srgb, var(--vp-accent) 70%, transparent) 52% 60%,
+    transparent 60% 72%,
+    color-mix(in srgb, var(--vp-accent) 70%, transparent) 72% 80%,
+    transparent 80%
+  );
+}
+.vp-w-handle:hover {
+  background-color: var(--vp-hover);
+}
+.vp-w-badge {
+  position: absolute;
+  z-index: 4;
+  right: 12px;
+  bottom: 28px;
+  padding: 2px 10px;
+  border-radius: var(--vp-r-f);
+  background: var(--vp-accent);
+  color: var(--text-on-accent, #fff);
+  font-size: var(--vp-fs-12);
+  font-weight: 600;
+  pointer-events: none;
+}
 /* 编辑时卡片里的内容不响应点击，避免拖动时误点开笔记；只有移除按钮和调大小的拖柄可以点 */
 .vp-grid.is-editing > .vp-w > :not(.vp-w-remove):not(.vp-w-handle) {
   pointer-events: none;

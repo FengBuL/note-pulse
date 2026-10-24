@@ -148,10 +148,14 @@ export function snapshotRects(root: HTMLElement): Map<string, DOMRect> {
   return out;
 }
 
-/** FLIP：重画之后，每张卡片从旧位置和大小平滑过渡到新的；新出现的卡片淡入 */
-export function playLayout(root: HTMLElement, before: Map<string, DOMRect>) {
+/**
+ * FLIP：重画之后，每张卡片从旧位置和大小平滑过渡到新的；新出现的卡片淡入。
+ * ms：过渡时长（拖动让位 200）；skip：不动画的那张（正被拖着的卡，或拖角调大小时直接到位的那张）。
+ */
+export function playLayout(root: HTMLElement, before: Map<string, DOMRect>, opts: { ms?: number; skip?: string } = {}) {
+  const ms = opts.ms ?? MOTION.resize;
   root.querySelectorAll<HTMLElement>("[data-widget]").forEach((el) => {
-    if (!el.animate) return;
+    if (!el.animate || el.dataset.widget === opts.skip) return;
     const old = before.get(el.dataset.widget as string);
     const now = el.getBoundingClientRect();
     if (!old) {
@@ -165,7 +169,7 @@ export function playLayout(root: HTMLElement, before: Map<string, DOMRect>) {
     if (Math.abs(dx) < 1 && Math.abs(dy) < 1 && Math.abs(sx - 1) < 0.01 && Math.abs(sy - 1) < 0.01) return;
     el.animate(
       [{ transformOrigin: "top left", transform: `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})` }, { transformOrigin: "top left", transform: "none" }],
-      { duration: MOTION.resize, easing: EASE }
+      { duration: ms, easing: EASE }
     );
   });
 }

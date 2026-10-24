@@ -21,7 +21,7 @@ const app = {
 const plugin = {
   settings, lastStats: stats, dedupe,
   requestRefresh: async () => undefined, openSettings: () => undefined, openFile: async () => undefined, openSearch: () => undefined,
-  revealFolder: () => undefined, saveSettings: async () => undefined, saveViewSetting: async () => undefined, openWritingReport: async () => undefined,
+  revealFolder: () => undefined, saveSettings: async () => undefined, saveViewSetting: async () => { const w = window as unknown as { __saves?: number }; w.__saves = (w.__saves ?? 0) + 1; }, openWritingReport: async () => undefined,
   setClippingFolder: async () => undefined, excludeFolder: async () => undefined, dismissHint: async () => undefined, setOutlierExclusion: async () => undefined,
 };
 const host = document.getElementById("app") as HTMLElement;
@@ -42,3 +42,5 @@ void view.onOpen().then(() => {
   settings.layout = withItems(items) as WidgetLayout;
   view.render(stats);
 };
+// 测试用：当前保存的布局
+(window as unknown as { previewSaved: () => unknown }).previewSaved = () => JSON.parse(JSON.stringify(settings.layout.items));

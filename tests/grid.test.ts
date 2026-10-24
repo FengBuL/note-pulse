@@ -56,6 +56,16 @@ test("拖动：往下拖过一张卡，两张换位置", () => {
   assert.equal(pos(out, "a"), "0,3 12x3");
 });
 
+test("拖动：同一行里拖到邻居上，两张卡互换位置，不留洞", () => {
+  const base = [it("a", 0, 0, 4, 3), it("b", 4, 0, 4, 3), it("c", 8, 0, 4, 3), it("d", 0, 3, 12, 2)];
+  const out = moveItem(base, "c", 0, 0);
+  assertValid(out);
+  assert.equal(pos(out, "c"), "0,0 4x3");
+  assert.equal(pos(out, "a"), "8,0 4x3", "a 进了 c 刚离开的位置");
+  assert.equal(pos(out, "b"), "4,0 4x3", "没被挡住的 b 原地不动");
+  assert.equal(pos(out, "d"), "0,3 12x2");
+});
+
 test("拖动：只拖一点点，位置回到原样", () => {
   const base = [it("a", 0, 0, 12, 3), it("b", 0, 3, 12, 3)];
   assert.deepEqual(moveItem(base, "a", 0, 1), base);
@@ -98,12 +108,36 @@ test("调大小：夹在范围里，不超出右边界；长高把下面的卡�
   assert.equal(pos(back, "b"), "0,2 12x3", "缩回去，下面的卡补上来");
 });
 
-test("调大小：往右撑到邻居，邻居被推到下面，不会跑到上面去", () => {
+test("调大小：往右撑到邻居，邻居向右让一让（右边没空位才被推到下面），不会跑到上面去", () => {
   const base = [it("a", 0, 0, 4, 3), it("b", 4, 0, 4, 3), it("c", 0, 3, 4, 3)];
   const out = resizeItem(base, "a", 6, 3, limitsOf);
   assertValid(out);
   assert.equal(pos(out, "a"), "0,0 6x3");
-  assert.equal(pos(out, "b"), "4,3 4x3");
+  assert.equal(pos(out, "b"), "6,0 4x3");
+  assert.equal(pos(out, "c"), "0,3 4x3");
+  const tight = resizeItem([it("a", 0, 0, 4, 3), it("b", 4, 0, 8, 3), it("c", 0, 3, 4, 3)], "a", 6, 3, limitsOf);
+  assertValid(tight);
+  assert.equal(pos(tight, "b"), "4,3 8x3", "右边放不下，b 被推到下面");
+});
+
+test("调大小：下面一整列卡跟着往下挪，缩回去再补上来", () => {
+  const base = [it("a", 0, 0, 12, 3), it("b", 0, 3, 12, 3), it("c", 0, 6, 12, 3), it("d", 0, 9, 6, 3), it("e", 6, 9, 6, 3)];
+  const out = resizeItem(base, "a", 12, 5, limitsOf);
+  assertValid(out);
+  assert.equal(pos(out, "b"), "0,5 12x3");
+  assert.equal(pos(out, "c"), "0,8 12x3");
+  assert.equal(pos(out, "d"), "0,11 6x3");
+  assert.equal(pos(out, "e"), "6,11 6x3");
+  assert.deepEqual(resizeItem(out, "a", 12, 3, limitsOf), base);
+});
+
+test("调大小：长高碰到下面整行的大卡，大卡和它下面的卡一起往下挪，不会跳到页面最底下", () => {
+  const base = [it("n1", 0, 0, 3, 3), it("n2", 3, 0, 3, 3), it("big", 0, 3, 12, 4), it("x", 0, 7, 8, 4), it("y", 8, 7, 4, 4)];
+  const out = resizeItem(base, "n1", 4, 4, limitsOf);
+  assertValid(out);
+  assert.equal(pos(out, "big"), "0,4 12x4");
+  assert.equal(pos(out, "x"), "0,8 8x4");
+  assert.equal(pos(out, "n2"), "4,0 3x3", "右边有空位，邻居向右让一让");
 });
 
 test("sizeRange：右边界限制最大宽度", () => {
@@ -120,7 +154,7 @@ test("键盘：方向键移动一格，Shift + 方向键调大小", () => {
   assert.equal(pos(left, "a"), "0,3 4x3");
   const grown = growItem(base, "a", 1, 1, limitsOf);
   assert.equal(pos(grown, "a"), "0,0 5x4");
-  assert.equal(pos(grown, "b"), "4,4 4x3", "撑到邻居，邻居被推到下面");
+  assert.equal(pos(grown, "b"), "5,0 4x3", "撑到邻居，邻居向右让一让");
 });
 
 test("找空位：最后一行右边有空位就放那里，否则另起一行", () => {
