@@ -7,8 +7,10 @@
  * 手感上的几个做法：
  * - 被拖的卡（或调大小的卡）每一帧都跟着指针走，像素级，不按格子跳；格子吸附只体现在虚线占位框上。
  * - 指针事件合并到每帧处理一次；被拖的卡提升成独立的合成层，移动只是合成，不重绘。
- * - 别的卡的让位：干扰小的（最多挪 3 张，或者比现在挪得少）立刻让；会把一大片卡片推开的，
+ * - 拖动时别的卡的让位：干扰小的（最多挪 3 张，或者比现在挪得少）立刻让；会把一大片卡片推开的，
  *   指针要在那一格停一会儿（250ms）才让，划过去的途中不会让整个版面乱跳。
+ * - 调大小时，移动途中只有卡片自己和虚线框在变，别的卡一动不动（它们的重排和动画是最费力的部分），
+ *   指针停住 120ms 后才让位；内容每 200ms 重画一次。
  */
 import { COLS, GAP, GridItem, LimitsOf, ROW_H, bestMove, displacedCount, growItem, nudgeItem, resizeItem } from "./grid";
 import { MOTION, playLayout, snapshotRects } from "./motion";
@@ -58,8 +60,10 @@ const SHIFT_MS = 200;
 const CALM = 3;
 /** 会大面积推开别的卡的让位，指针要停这么久才生效 */
 const DWELL_MS = 250;
-/** 调大小时按这个间隔重画内容 */
-const REDRAW_MS = 90;
+/** 调大小时，内容（列表、图表）按这个间隔重画 */
+const REDRAW_MS = 200;
+/** 调大小时，指针停住这么久，别的卡才跟着让位（移动途中只有虚线框在变，别的卡一动不动） */
+const REST_MS = 120;
 
 export class GridGesture {
   /** 正在进行的手势（期间不要整页重画） */
@@ -142,11 +146,19 @@ export class GridGesture {
       dwell = 0;
     };
 
-    /** 别的卡让位：干扰小的立刻让，会大面积推开别的卡的要等指针停一会儿 */
+    /** 别的卡让位：干扰小的立刻让，会大面积推开别的卡的要等指针停一会儿；调大小则一律等指针停住 */
     const follow = (next: GridItem[]) => {
       want = next;
       if (same(next, shown)) {
         cancelDwell();
+        return;
+      }
+      if (resize) {
+        cancelDwell();
+        dwell = win.setTimeout(() => {
+          dwell = 0;
+          if (dragging && !same(want, shown)) showNow(want);
+        }, REST_MS);
         return;
       }
       const dn = displacedCount(base, next, id);
@@ -193,6 +205,7 @@ export class GridGesture {
         const next = resizeItem(base, id, w, hh, h.limitsOf);
         const me = next.find((i) => i.id === id);
         if (badge && me) badge.setText(`${me.w} × ${me.h}`);
+        if (placeholder && me) setPlace(placeholder, me);
         follow(next);
         // 内容按固定间隔重画，不是每一帧
         const now = win.performance.now();
