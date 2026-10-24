@@ -38,6 +38,7 @@ interface AppInternals {
   };
   setting?: {
     open?: () => void;
+    close?: () => void;
     openTabById?: (id: string) => void;
   };
 }
@@ -93,6 +94,11 @@ export default class NotePulsePlugin extends Plugin {
       id: "open-dashboard",
       name: L("打开看板", "Open dashboard"),
       callback: () => this.activateView(),
+    });
+    this.addCommand({
+      id: "show-guide",
+      name: L("查看 2.0 新手引导", "Show the 2.0 guide"),
+      callback: () => void this.showGuide(),
     });
     this.addCommand({
       id: "refresh-dashboard",
@@ -365,6 +371,13 @@ export default class NotePulsePlugin extends Plugin {
     } else {
       new Notice(L(`请启用核心插件“搜索”。查询：${query}`, `Turn on the core Search plugin. Query: ${query}`));
     }
+  }
+
+  /** 打开看板并开始新版本引导（命令、设置里的按钮用）；设置窗口开着的话先关掉，不然遮住看板 */
+  async showGuide() {
+    (this.app as unknown as AppInternals).setting?.close?.();
+    await this.activateView();
+    this.getViews()[0]?.startTour(true);
   }
 
   openSettings() {

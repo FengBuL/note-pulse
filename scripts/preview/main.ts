@@ -3,11 +3,12 @@ import { mk, q, stats } from "./sample";
 import { DashboardView } from "../../src/view";
 import { DEFAULT_SETTINGS } from "../../src/settings";
 import { setLanguage } from "../../src/i18n";
+import { GUIDE_VERSION } from "../../src/tour-logic";
 import { WidgetLayout, withItems } from "../../src/widgets";
 
 const lang = (q.get("lang") === "en" ? "en" : "zh") as "en" | "zh";
 setLanguage(lang);
-const settings = { ...DEFAULT_SETTINGS, language: lang, dailyWordGoal: 500, weeklyWordGoal: 10000, onboarded: true, weekStyle: (q.get("week") === "bars" ? "bars" : "dots") as "dots" | "bars" };
+const settings = { ...DEFAULT_SETTINGS, language: lang, dailyWordGoal: 500, weeklyWordGoal: 10000, onboarded: true, guideSeen: q.get("tour") === "1" ? "" : GUIDE_VERSION, weekStyle: (q.get("week") === "bars" ? "bars" : "dots") as "dots" | "bars" };
 const dedupe = {
   scanning: false, stale: false, analysis: null as unknown, ignoredSet: () => new Set<string>(),
   openReport: async () => undefined, startCleanup: () => undefined,
@@ -46,3 +47,6 @@ void view.onOpen().then(() => {
 (window as unknown as { previewSaved: () => unknown }).previewSaved = () => JSON.parse(JSON.stringify(settings.layout.items));
 // 测试用：当前设置
 (window as unknown as { previewSettings: () => typeof settings }).previewSettings = () => settings;
+
+// 测试用：主动开始新版本引导
+(window as unknown as { previewTour: () => void }).previewTour = () => view.startTour(true);

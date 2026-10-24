@@ -50,6 +50,8 @@ export interface DashboardSettings {
   agenda: Agenda;
   /** 已经庆祝过的达成（每日目标、每周目标、连续打卡里程碑），免得每次打开都撒花 */
   celebrated: string[];
+  /** 看过哪个版本的新版本引导（GUIDE_VERSION）。空表示还没看过。存在 data.json 里，随库同步，换设备不会再弹一次 */
+  guideSeen: string;
   /** 各张图表选的画法（柱状 / 折线 / 曲线 / 面积 / 环形图 / 标签云……） */
   chartStyles: ChartStyles;
   autoRefresh: boolean;
@@ -96,6 +98,7 @@ export const DEFAULT_SETTINGS: DashboardSettings = {
   layout: defaultLayout(),
   agenda: {},
   celebrated: [],
+  guideSeen: "",
   chartStyles: { ...DEFAULT_CHART_STYLES },
   autoRefresh: true,
   refreshDelaySec: 3,
@@ -299,7 +302,7 @@ export class DashboardSettingTab extends PluginSettingTab {
           },
           {
             name: L("本周的显示方式", "This week display"),
-            desc: L("今日写作卡里本周七天的样子。圆点：达标打勾，没达标显示完成百分比。柱状：柱高是当天字数，虚线是每日目标。折线：七天的字数连成一条线。也可以直接在看板上切换。", "How the seven days of this week look on the Today card. Dots: a check for days that met the goal, otherwise the percentage done. Bars: bar height is that day's words, the dashed line is the daily goal. Line: the seven days joined by a line. You can also switch on the dashboard."),
+            desc: L("今日写作卡里本周七天的样子。圆点：达标打勾，没达标显示完成百分比。柱状：柱高是当天字数，虚线是每日目标。折线：七天的字数连成一条线。编辑看板时也可以直接在卡片上切换。", "How the seven days of this week look on the Today card. Dots: a check for days that met the goal, otherwise the percentage done. Bars: bar height is that day's words, the dashed line is the daily goal. Line: the seven days joined by a line. You can also switch it on the card while editing the dashboard."),
             render: (setting) =>
               setting.addDropdown((d) =>
                 d
@@ -313,6 +316,11 @@ export class DashboardSettingTab extends PluginSettingTab {
                     this.plugin.refreshViewsOnly();
                   })
               ),
+          },
+          {
+            name: L("新手引导", "Guide"),
+            desc: L("一步一步看看 2.0 的新功能：编辑看板、拖动和调大小、切换图的样子、添加卡片。升级后第一次打开看板会自动出现一次。", "A step-by-step look at what is new in 2.0: editing the dashboard, dragging and resizing, switching chart styles, adding cards. It appears once automatically after upgrading."),
+            render: (setting) => setting.addButton((b) => b.setButtonText(L("查看", "Show")).onClick(() => void this.plugin.showGuide())),
           },
           {
             name: L("创建日期字段名", "Created date properties"),
@@ -716,6 +724,7 @@ export function migrateWritingSettings(settings: DashboardSettings): void {
   settings.layout = normalizeLayout(settings.layout);
   settings.agenda = sanitizeAgenda(settings.agenda);
   settings.chartStyles = sanitizeChartStyles(settings.chartStyles);
+  if (typeof settings.guideSeen !== "string") settings.guideSeen = DEFAULT_SETTINGS.guideSeen;
   settings.celebrated = Array.isArray(settings.celebrated) ? settings.celebrated.filter((x): x is string => typeof x === "string") : [];
 }
 

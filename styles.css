@@ -82,6 +82,7 @@
   --vp-t-step: 40ms;
   --vp-t-cell: 30ms;
   --vp-t-stagger: 600ms;
+  --vp-t-tour: 2800ms;
   --vp-t-flash: 1300ms;
   --vp-scroll-max: 296px;
   --vp-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
@@ -312,6 +313,278 @@
   }
   90% {
     transform: translateY(1px);
+  }
+}
+
+/* ---------------- 新版本引导：遮罩 + 高亮框 + 提示卡 ---------------- */
+
+.vp-tour.vp-root {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 70;
+  background: none;
+}
+.vp-tour-dim {
+  position: absolute;
+  background: rgba(18, 10, 40, 0.58);
+}
+.vp-tour-dim.is-top {
+  top: 0;
+  right: 0;
+  left: 0;
+  height: var(--vp-sy, 50%);
+}
+.vp-tour-dim.is-bottom {
+  top: calc(var(--vp-sy, 50%) + var(--vp-sh, 0px));
+  right: 0;
+  bottom: 0;
+  left: 0;
+}
+.vp-tour-dim.is-left {
+  top: var(--vp-sy, 50%);
+  left: 0;
+  width: var(--vp-sx, 50%);
+  height: var(--vp-sh, 0px);
+}
+.vp-tour-dim.is-right {
+  top: var(--vp-sy, 50%);
+  right: 0;
+  left: calc(var(--vp-sx, 50%) + var(--vp-sw, 0px));
+  height: var(--vp-sh, 0px);
+}
+.vp-tour.is-ready .vp-tour-dim {
+  transition: top var(--vp-t-base) var(--vp-ease), left var(--vp-t-base) var(--vp-ease), width var(--vp-t-base) var(--vp-ease), height var(--vp-t-base) var(--vp-ease);
+}
+.vp-tour-spot {
+  position: absolute;
+  top: var(--vp-sy, 50%);
+  left: var(--vp-sx, 50%);
+  box-sizing: border-box;
+  width: var(--vp-sw, 0px);
+  height: var(--vp-sh, 0px);
+  border: 2px solid var(--vp-accent);
+  border-radius: var(--vp-r-m);
+  opacity: 0;
+  pointer-events: none;
+}
+.vp-tour.has-spot .vp-tour-spot {
+  opacity: 1;
+  animation: vp-tour-pulse var(--vp-t-live) ease-in-out infinite;
+}
+.vp-tour.is-ready .vp-tour-spot {
+  transition: top var(--vp-t-base) var(--vp-ease), left var(--vp-t-base) var(--vp-ease), width var(--vp-t-base) var(--vp-ease), height var(--vp-t-base) var(--vp-ease), opacity var(--vp-t-base) var(--vp-ease);
+}
+@keyframes vp-tour-pulse {
+  0%,
+  100% {
+    border-color: var(--vp-accent);
+  }
+  50% {
+    border-color: color-mix(in srgb, var(--vp-accent) 40%, white);
+  }
+}
+.vp-tour-card {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--vp-s2);
+  box-sizing: border-box;
+  width: 340px;
+  max-width: calc(100vw - 28px);
+  padding: var(--vp-s4);
+  border: 1px solid var(--vp-border);
+  border-radius: var(--vp-r-m);
+  background: var(--vp-surface);
+  box-shadow: var(--vp-shadow-pop);
+  color: var(--text-normal);
+  transform: translate(var(--vp-cx, 0px), var(--vp-cy, 0px));
+}
+.vp-tour-card.is-centered {
+  width: 420px;
+}
+.vp-tour.is-ready .vp-tour-card {
+  transition: transform var(--vp-t-base) var(--vp-ease);
+}
+.vp-tour-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--vp-s2);
+}
+.vp-tour-count {
+  color: var(--vp-subtle);
+  font-size: var(--vp-fs-12);
+}
+.vp-tour .vp-tour-skip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--vp-s1);
+  height: auto;
+  padding: 2px var(--vp-s2);
+  border: none;
+  border-radius: var(--vp-r-s);
+  background: none;
+  box-shadow: none;
+  color: var(--vp-subtle);
+  font-size: var(--vp-fs-12);
+  cursor: pointer;
+}
+.vp-tour .vp-tour-skip:hover {
+  background: var(--vp-hover);
+  color: var(--text-normal);
+}
+.vp-tour-skip svg {
+  width: 12px;
+  height: 12px;
+}
+.vp-tour-title {
+  font-size: var(--vp-fs-15);
+  font-weight: 700;
+}
+.vp-tour-body {
+  color: var(--text-muted);
+  font-size: var(--vp-fs-13);
+  line-height: 1.65;
+}
+.vp-tour-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--vp-s3);
+  margin-top: var(--vp-s2);
+}
+.vp-tour-dots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.vp-tour-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--vp-r-f);
+  background: var(--vp-line-strong);
+}
+.vp-tour-dot.is-on {
+  width: 16px;
+  background: var(--vp-accent);
+}
+.vp-tour-btns {
+  display: flex;
+  flex: none;
+  gap: var(--vp-s2);
+}
+.vp-tour .vp-tour-btn {
+  height: auto;
+  padding: var(--vp-s1) var(--vp-s3);
+  border: 1px solid var(--vp-line-strong);
+  border-radius: var(--vp-r-s);
+  background: var(--vp-surface);
+  box-shadow: none;
+  color: var(--text-normal);
+  font-size: var(--vp-fs-13);
+  cursor: pointer;
+}
+.vp-tour .vp-tour-btn:hover {
+  border-color: var(--vp-accent);
+}
+.vp-tour .vp-tour-btn.is-primary {
+  border-color: var(--vp-accent);
+  background: var(--vp-accent);
+  color: var(--text-on-accent, #fff);
+  font-weight: 600;
+}
+/* 演示：光标在目标上做一遍操作（拖动卡片、拖角调大小、点切换） */
+.vp-tour-cursor {
+  position: absolute;
+  top: var(--vp-tour-y, 0px);
+  left: var(--vp-tour-x, 0px);
+  width: 26px;
+  height: 26px;
+  opacity: 0;
+  pointer-events: none;
+}
+.vp-tour-cursor.is-on {
+  opacity: 1;
+  animation: vp-tour-cursor var(--vp-t-tour) ease-in-out infinite;
+}
+.vp-tour-cursor-shape {
+  fill: var(--text-normal);
+  stroke: var(--vp-surface);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+@keyframes vp-tour-cursor {
+  0%,
+  14% {
+    transform: translate(0, 0) scale(1);
+  }
+  24% {
+    transform: translate(0, 0) scale(0.82);
+  }
+  68% {
+    transform: translate(var(--vp-tour-dx, 0px), var(--vp-tour-dy, 0px)) scale(0.82);
+  }
+  80% {
+    transform: translate(var(--vp-tour-dx, 0px), var(--vp-tour-dy, 0px)) scale(1);
+  }
+  100% {
+    transform: translate(0, 0) scale(1);
+  }
+}
+.vp-grid > .vp-w.vp-tour-drag {
+  z-index: 8;
+  animation: vp-tour-drag var(--vp-t-tour) ease-in-out infinite;
+}
+@keyframes vp-tour-drag {
+  0%,
+  14% {
+    transform: none;
+  }
+  24% {
+    transform: scale(1.02);
+  }
+  68% {
+    transform: translate(var(--vp-tour-dx, 0px), var(--vp-tour-dy, 0px)) scale(1.02);
+  }
+  80% {
+    transform: translate(var(--vp-tour-dx, 0px), var(--vp-tour-dy, 0px));
+  }
+  100% {
+    transform: none;
+  }
+}
+.vp-grid > .vp-w.vp-tour-grow {
+  z-index: 8;
+  transform-origin: top left;
+  animation: vp-tour-grow var(--vp-t-tour) ease-in-out infinite;
+}
+@keyframes vp-tour-grow {
+  0%,
+  24% {
+    transform: none;
+  }
+  68%,
+  80% {
+    transform: scale(1.06);
+  }
+  100% {
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .vp-tour-cursor,
+  .vp-tour.has-spot .vp-tour-spot,
+  .vp-grid > .vp-w.vp-tour-drag,
+  .vp-grid > .vp-w.vp-tour-grow {
+    animation: none;
+  }
+  .vp-tour-cursor {
+    display: none;
   }
 }
 

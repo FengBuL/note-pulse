@@ -1,6 +1,8 @@
 import { ItemView, Notice, Platform, TFile, WorkspaceLeaf, setIcon } from "obsidian";
 import type NotePulsePlugin from "./main";
 import { PreviewVariant, drawAddPreview } from "./add-preview";
+import { Tour, TourHost } from "./tour";
+import { GUIDE_VERSION, TourState, TourTarget, tourSteps } from "./tour-logic";
 import { CLOUD_FONT_PX, cloudExtent, cloudLayout, cloudLevels, cloudTagSize } from "./cloud";
 import { ConfirmModal } from "./dedupe/modals";
 import { writingReportOverview } from "./report-logic";
@@ -224,7 +226,10 @@ export class DashboardView extends ItemView {
     // 切回看板时，看有没有刚达成、还没庆祝过的目标
     this.registerEvent(
       this.app.workspace.on("active-leaf-change", (leaf) => {
-        if (leaf?.view === this) this.celebrateSoon();
+        if (leaf?.view === this) {
+          this.maybeStartTour();
+          this.celebrateSoon();
+        }
       })
     );
     // 全屏：按钮的图标和提示跟着状态换
@@ -353,6 +358,11 @@ export class DashboardView extends ItemView {
     this.tapGuardCleanup?.();
     this.tapGuardCleanup = null;
     window.clearTimeout(this.celebrateTimer);
+    window.clearTimeout(this.tourTimer);
+    this.tourTimer = 0;
+    this.tour?.destroy();
+    this.tour = null;
+    this.tourRestore = null;
     if (this.resizeFrame) window.cancelAnimationFrame(this.resizeFrame);
     this.resizeFrame = 0;
     this.disconnectObservers();
@@ -505,6 +515,100 @@ export class DashboardView extends ItemView {
         "layout-dashboard",
         Platform.isMobile ? L("看板上没有卡片。在电脑上用右上角的铅笔添加。", "The dashboard has no cards. Add some on a computer with the pencil at the top right.") : L("看板上没有卡片。点右上角的铅笔添加。", "The dashboard has no cards. Use the pencil at the top right to add some.")
       );
+    }
+    this.maybeStartTour();
+  }
+
+  /* ---------- 新版本引导 ---------- */
+
+  private tour: Tour | null = null;
+  private tourTimer = 0;
+  /** 引导开始前看板是不是在编辑、面板开没开：结束后恢复 */
+  private tourRestore: TourState | null = null;
+  /** 看板还没画好时用户就要求看引导：画好后再开始 */
+  private tourPending = false;
+  private addBtnEl: HTMLElement | null = null;
+  private doneBtnEl: HTMLElement | null = null;
+
+  /** 升级后第一次打开看板：稍等一下让看板先浮现出来，再开始引导；看过就不再自动出现 */
+  private maybeStartTour() {
+    if (this.tourTimer || this.tour?.active) return;
+    if (this.plugin.settings.guideSeen === GUIDE_VERSION && !this.tourPending) return;
+    this.tourTimer = window.setTimeout(() => {
+      this.tourTimer = 0;
+      if (!this.isVisible() || this.tour?.active || this.gesture?.active) return;
+      this.startTour(this.tourPending);
+    }, 1800);
+  }
+
+  /** 开始引导；force 是用户主动要看（命令、设置、编辑栏里的按钮），不管看过没有 */
+  startTour(force = false) {
+    if (this.tour?.active) return;
+    if (!this.stats || this.stats.totalNotes === 0) {
+      if (force) this.tourPending = true;
+      return;
+    }
+    if (!force && this.plugin.settings.guideSeen === GUIDE_VERSION) return;
+    this.tourPending = false;
+    const wide = !this.narrow && !Platform.isMobile;
+    this.tourRestore = { editing: this.editing, addOpen: this.addOpen };
+    this.tour = new Tour(this.tourHost(), tourSteps(wide));
+    this.tour.start();
+  }
+
+  private tourHost(): TourHost {
+    return {
+      doc: this.contentEl.ownerDocument,
+      apply: (state) => this.tourApply(state),
+      find: (target) => this.tourFind(target),
+      end: () => {
+        this.tour = null;
+        const back = this.tourRestore;
+        this.tourRestore = null;
+        if (back) this.tourApply(back);
+        // 看完和中途跳过都算看过，下次不再自动出现
+        this.plugin.settings.guideSeen = GUIDE_VERSION;
+        void this.plugin.saveViewSetting();
+      },
+    };
+  }
+
+  /** 把看板调到引导这一步要的状态（进编辑、开关“添加卡片”面板） */
+  private tourApply(state: TourState) {
+    if (state.editing !== this.editing) this.toggleEditing();
+    if (this.editing && state.addOpen !== this.addOpen) {
+      this.addOpen = state.addOpen;
+      if (this.stats) this.render(this.stats);
+    }
+  }
+
+  /** 引导这一步要高亮的界面元素；找不到返回 null */
+  private tourFind(target: TourTarget): HTMLElement | null {
+    const first = () => this.gridEl?.querySelector<HTMLElement>(":scope > .vp-w") ?? null;
+    switch (target) {
+      case "greeting":
+        return this.greetingEl;
+      case "alerts": {
+        const a = this.contentEl.querySelector<HTMLElement>(".vp-alerts");
+        return a && a.childElementCount > 0 ? a : null;
+      }
+      case "editBtn":
+        return this.editBtn;
+      case "card":
+      case "firstCard":
+        return first();
+      case "handle":
+        return first()?.querySelector<HTMLElement>(".vp-w-handle") ?? null;
+      case "switch": {
+        const ctl = this.gridEl?.querySelector<HTMLElement>(":scope > .vp-w .vp-ctl");
+        return ctl?.closest<HTMLElement>(".vp-ctrls") ?? ctl ?? null;
+      }
+      case "addBtn":
+        return this.addBtnEl;
+      case "addPanel":
+        return this.contentEl.querySelector<HTMLElement>(".vp-add-panel");
+      case "doneBtn":
+        return this.doneBtnEl;
     }
   }
 
@@ -678,12 +782,14 @@ export class DashboardView extends ItemView {
     this.undoBtn.disabled = this.undoStack.length === 0;
     this.undoBtn.setAttr("title", L("撤销（Cmd / Ctrl + Z）", "Undo (Cmd / Ctrl + Z)"));
     btn("rotate-ccw", L("恢复默认布局", "Restore default"), () => this.applyLayout(defaultLayout()));
+    btn("circle-help", L("新手引导", "Guide"), () => this.startTour(true));
     const add = btn("plus", L("添加卡片", "Add a card"), () => {
       this.addOpen = !this.addOpen;
       if (this.stats) this.render(this.stats);
     });
     add.setAttr("aria-expanded", String(this.addOpen));
-    btn("check", L("完成", "Done"), () => this.toggleEditing(), true);
+    this.addBtnEl = add;
+    this.doneBtnEl = btn("check", L("完成", "Done"), () => this.toggleEditing(), true);
     if (this.addOpen) this.renderAddPanel(parent);
   }
 
@@ -1475,7 +1581,8 @@ export class DashboardView extends ItemView {
   }
 
   private maybeCelebrate() {
-    if (!this.stats || !this.isVisible() || this.editing || this.stats.totalNotes === 0) return;
+    // 新版本引导还没看过（或正在看）时先不撒花，等看完再说，免得两样东西叠在一起
+    if (!this.stats || !this.isVisible() || this.editing || this.stats.totalNotes === 0 || this.tour?.active || this.plugin.settings.guideSeen !== GUIDE_VERSION) return;
     const set = this.plugin.settings;
     const ck = this.computeCheckin(this.stats);
     const found = achievements(this.dayContext(this.stats, ck), new Set(set.celebrated));
