@@ -3214,6 +3214,21 @@ body.is-mobile .vp-root :is(button, [role="button"], [role="tab"], .is-clickable
 .vp-root .vp-shell .vp-add-item.is-merged {
   border-color: color-mix(in srgb, var(--vp-accent) 45%, transparent);
 }
+/* 已经在看板上的：灰色，不能再添加 */
+.vp-root .vp-shell .vp-add-item.is-added {
+  border-style: dashed;
+  background: transparent;
+}
+.vp-add-item.is-added .vp-add-preview svg,
+.vp-add-item.is-added .vp-add-name,
+.vp-add-item.is-added .vp-add-desc {
+  filter: grayscale(1);
+  opacity: 0.5;
+}
+.vp-add-badge.is-added {
+  background: var(--vp-track);
+  color: var(--vp-subtle);
+}
 .vp-add-note {
   color: var(--vp-subtle);
   font-size: var(--vp-fs-12);

@@ -32,7 +32,7 @@ import { DayContext, achievementText, achievements, alertText, computeAlerts, gr
 import { COLS, GAP, GridItem, ROW_H, rowsToPx } from "./grid";
 import { GestureHost, GridGesture, setPlace } from "./grid-edit";
 import { Box, HUB_CHROME, HeroDensity, KpiDensity, activityDensity, goalRingSize, overviewDensity, calendarDensity, innerW, bodyH, densityDensity, densityKey, foldersDensity, heatDensity, heroDensity, isTight, kpiDensity, rhythmDensity, trendDensity } from "./density";
-import { MERGED_FROM, WIDGET_CATEGORIES, WidgetCategory, WidgetId, WidgetInfo, WidgetLayout, WidgetLayoutItem, addWidget, addableWidgets, coveredBy, defaultLayout, limitsOf, readingOrder, removeWidget, sameLayout, withItems } from "./widgets";
+import { MERGED_FROM, SUPERSEDED, WIDGET_CATEGORIES, WidgetCategory, WidgetId, WidgetInfo, WidgetLayout, WidgetLayoutItem, addWidget, addableWidgets, coveredBy, defaultLayout, widgetInfo, limitsOf, readingOrder, removeWidget, sameLayout, withItems } from "./widgets";
 import { MOTION, SegRect, animateHeight, countUp, drawLines, markStagger, playLayout, reducedMotion, segRect, slideSeg, snapshotRects } from "./motion";
 import {
   BarItem,
@@ -825,13 +825,15 @@ export class DashboardView extends ItemView {
   private renderAddPanel(parent: HTMLElement) {
     const panel = parent.createDiv({ cls: "vp-card vp-add-panel" });
     const hidden = addableWidgets(this.plugin.settings.layout);
-    if (hidden.length === 0) {
-      panel.createDiv({ cls: "vp-kpi-caption", text: L("所有卡片都在看板上了。点卡片右上角的 × 可以移除。", "Every card is on the dashboard. Use × on a card to remove it.") });
-      return;
-    }
     // 分类跳转条：点一下滚到那一类（面板限高，一屏放不下所有类）
     const jump = panel.createDiv({ cls: "vp-add-jump", attr: { role: "navigation" } });
-    panel.createDiv({ cls: "vp-add-hint", text: L("点一张卡片添加到最后，或者把它拖到看板上想放的位置。添加前可以先选好样式。", "Click a card to add it at the end, or drag it onto the dashboard where you want it. Pick its style before adding.") });
+    panel.createDiv({
+      cls: "vp-add-hint",
+      text:
+        hidden.length === 0
+          ? L("所有卡片都在看板上了。点卡片右上角的 × 可以移除。", "Every card is on the dashboard. Use × on a card to remove it.")
+          : L("点一张卡片添加到最后，或者把它拖到看板上想放的位置。添加前可以先选好样式。灰色的是已经在看板上的，点一下可以找到它。", "Click a card to add it at the end, or drag it onto the dashboard where you want it. Pick its style before adding. Greyed cards are already on the dashboard; click one to find it."),
+    });
     const onBoard = new Set(this.plugin.settings.layout.items.map((i) => i.id));
     const catName: Record<WidgetCategory, [string, string]> = {
       writing: [L("写作数据", "Writing"), L("今天、趋势、热力图、节奏、目标、回顾", "Today, trends, heatmap, rhythm, goals, reports")],
@@ -840,10 +842,12 @@ export class DashboardView extends ItemView {
       checkup: [L("库体检", "Vault checkup"), L("断链、孤立笔记、同名、空与超大、未引用的附件、重复内容", "Broken links, orphans, same names, empty and huge notes, unused files, duplicates")],
     };
     for (const cat of WIDGET_CATEGORIES) {
-      const inCat = cat.ids.map((id) => hidden.find((h) => h.id === id)).filter((h): h is WidgetInfo => !!h);
+      // 已经在看板上的也列出来（灰色），这样看得出加过哪些；被别的卡完整包含而不再单列的（每周写作）只有在看板上时才列
+      const inCat = cat.ids.filter((id) => onBoard.has(id) || !SUPERSEDED.includes(id)).map((id) => widgetInfo(id)).filter((h): h is WidgetInfo => !!h);
       if (inCat.length === 0) continue;
+      const addable = inCat.filter((w) => !onBoard.has(w.id)).length;
       const sec = panel.createDiv({ cls: "vp-add-sec" });
-      const chip = jump.createEl("button", { cls: "vp-add-chip", text: `${catName[cat.id][0]} ${inCat.length}`, attr: { type: "button", "data-fid": `add:cat:${cat.id}` } });
+      const chip = jump.createEl("button", { cls: "vp-add-chip", text: `${catName[cat.id][0]} ${addable}/${inCat.length}`, attr: { type: "button", "data-fid": `add:cat:${cat.id}` } });
       chip.addEventListener("click", () => {
         panel.scrollTo({ top: panel.scrollTop + sec.getBoundingClientRect().top - panel.getBoundingClientRect().top - jump.offsetHeight - 4, behavior: this.motionOn() ? "smooth" : "auto" });
       });
@@ -851,8 +855,27 @@ export class DashboardView extends ItemView {
       head.createSpan({ cls: "vp-add-sec-name", text: catName[cat.id][0] });
       head.createSpan({ cls: "vp-add-sec-desc", text: catName[cat.id][1] });
       const list = sec.createDiv({ cls: "vp-add-list" });
-      for (const w of inCat) this.addItem(list, w, onBoard);
+      for (const w of inCat) {
+        if (onBoard.has(w.id)) this.addedItem(list, w);
+        else this.addItem(list, w, onBoard);
+      }
     }
+  }
+
+  /** “添加卡片”里已经在看板上的卡片：灰色，不能再添加；点一下滚到看板上的那张并闪一下 */
+  private addedItem(list: HTMLElement, w: WidgetInfo) {
+    const item = list.createDiv({ cls: "vp-add-item is-added" });
+    const main = item.createEl("button", { cls: "vp-add-main", attr: { type: "button", "data-fid": `add:${w.id}`, "aria-label": L(`${widgetName(w.id)}，已在看板上，点一下找到它`, `${widgetName(w.id)}, already on the dashboard; click to find it`) } });
+    const preview = main.createDiv({ cls: "vp-add-preview" });
+    drawAddPreview(preview, w.id, {});
+    preview.createSpan({ cls: "vp-add-badge is-added", text: L("已添加", "Added") });
+    main.createDiv({ cls: "vp-add-name", text: widgetName(w.id) });
+    main.createDiv({ cls: "vp-add-desc", text: widgetDesc(w.id) });
+    const parts = MERGED_FROM[w.id];
+    if (parts) main.createDiv({ cls: "vp-add-note", text: L(`合并了：${parts.map((p) => widgetName(p)).join("、")}`, `Combines: ${parts.map((p) => widgetName(p)).join(", ")}`) });
+    const hubs = coveredBy(w.id);
+    if (hubs.length > 0) main.createDiv({ cls: "vp-add-note", text: L(`合并卡“${hubs.map((h) => widgetName(h)).join("”“")}”里也有这张`, `Also inside the combined card ${hubs.map((h) => widgetName(h)).join(", ")}`) });
+    main.addEventListener("click", () => this.revealCard(w.id));
   }
 
   /** “添加卡片”里的一张卡片：缩略图、名字和说明、合并卡的标记、添加前能选的选项；点击添加，或者拖到看板上 */
