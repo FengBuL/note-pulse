@@ -130,6 +130,40 @@ export function moveItem<T extends GridItem>(items: T[], id: string, x: number, 
   return settle(items, pin, "move", cur);
 }
 
+/** 除了 exceptId，有几张卡的位置或大小和 base 不一样 */
+export function displacedCount(base: GridItem[], next: GridItem[], exceptId: string): number {
+  let n = 0;
+  for (const a of base) {
+    if (a.id === exceptId) continue;
+    const b = next.find((i) => i.id === a.id);
+    if (!b || b.x !== a.x || b.y !== a.y || b.w !== a.w || b.h !== a.h) n++;
+  }
+  return n;
+}
+
+/**
+ * 拖动落点：指针所在的格子，和它周围一圈 8 个格子，挑“挪动别的卡最少”的那个
+ * （距离也算一点代价：偏一格相当于多挪半张卡）。这样落点会被吸到互换、并排这类干扰最小的位置上，
+ * 而不是每次都把一大片卡片推得乱七八糟。仍然只取决于拖动开始时的布局和指针位置。
+ */
+export function bestMove<T extends GridItem>(items: T[], id: string, x: number, y: number): T[] {
+  const cur = items.find((i) => i.id === id);
+  if (!cur) return items;
+  let best: T[] | null = null;
+  let bestScore = Infinity;
+  for (let dy = -1; dy <= 1; dy++) {
+    for (let dx = -1; dx <= 1; dx++) {
+      const out = moveItem(items, id, x + dx, y + dy);
+      const score = displacedCount(items, out, id) * 2 + Math.abs(dx) + Math.abs(dy);
+      if (score < bestScore) {
+        bestScore = score;
+        best = out;
+      }
+    }
+  }
+  return best ?? items;
+}
+
 /** 调大小：夹在这张卡的范围里，也不超出右边界（右边放不下时不挪左边，只是不能再变宽） */
 export function resizeItem<T extends GridItem>(items: T[], id: string, w: number, h: number, limitsOf: LimitsOf): T[] {
   const cur = items.find((i) => i.id === id);

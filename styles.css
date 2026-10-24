@@ -267,6 +267,27 @@
  * 12 列等比拉宽（窗口越宽卡片越宽），一行固定 40px、行间距 16px：h 行高 = 40h + 16(h − 1)。
  * 每张卡的位置和大小由 JS 写成 --vp-x / --vp-y / --vp-w / --vp-h（列、行、占几列、占几行）。
  */
+/* 位置变量不往下继承：改它们时不用重算卡片里几百个元素的样式 */
+@property --vp-x {
+  syntax: "<integer>";
+  inherits: false;
+  initial-value: 0;
+}
+@property --vp-y {
+  syntax: "<integer>";
+  inherits: false;
+  initial-value: 0;
+}
+@property --vp-w {
+  syntax: "<integer>";
+  inherits: false;
+  initial-value: 4;
+}
+@property --vp-h {
+  syntax: "<integer>";
+  inherits: false;
+  initial-value: 4;
+}
 .vp-grid {
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
@@ -2098,20 +2119,36 @@ body.is-mobile .vp-root :is(button, [role="button"], [role="tab"], .is-clickable
 .vp-grid.is-editing > .vp-w:focus-visible {
   outline: 2px solid var(--vp-accent);
 }
-/* 拖动：卡片跟着手走（不加缓动），略微抬起；原来的位置换成虚线占位框 */
+/*
+ * 拖动：卡片跟着手走（不加缓动），略微抬起；原来的位置换成虚线占位框。
+ * transform 由 JS 直接写在卡片上，不用 CSS 变量（变量会被里面几百个元素继承，每帧都要重算样式）；
+ * will-change 让它成为独立的合成层，移动时只是合成，不重绘。
+ */
 .vp-grid > .vp-w.is-dragging {
   z-index: 8;
-  transform: translate(var(--vp-drag-x, 0px), var(--vp-drag-y, 0px)) scale(1.02);
+  will-change: transform;
   box-shadow: var(--vp-shadow-pop);
   transition: none;
   pointer-events: none;
+}
+/* 拖角调大小：卡片自己的宽高由 JS 按像素写成 width / height，跟着指针走；虚线框显示吸附后的大小 */
+.vp-grid > .vp-w.is-resizing-card {
+  z-index: 8;
+  justify-self: start;
+  align-self: start;
+  overflow: hidden;
+  contain: layout paint;
+  box-shadow: var(--vp-shadow-pop);
+  transition: none;
 }
 .vp-grid.is-gesture,
 .vp-grid.is-gesture * {
   user-select: none;
 }
-.vp-grid.is-gesture > .vp-w:not(.is-dragging):hover {
+/* 手势期间卡片不响应悬停：悬停阴影的过渡会让每一帧都重绘一大片 */
+.vp-grid.is-gesture > .vp-w:not(.is-dragging):not(.is-resizing-card) {
   box-shadow: var(--vp-shadow);
+  transition: none;
 }
 .vp-grid > .vp-ph {
   grid-column: calc(var(--vp-x, 0) + 1) / span var(--vp-w, 4);

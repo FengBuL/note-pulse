@@ -3,8 +3,14 @@
  * HTML5 拖放拿不到中途位置，做不了实时让位，拖动的样子也由浏览器决定。
  * 算法（让位、上浮、夹范围）在 grid.ts，这里只管 DOM：跟手、占位框、让位动画、自动滚动、Esc 取消。
  * 拖动过程中不保存、不重画卡片内容，只改位置；松手保存一次。
+ *
+ * 手感上的几个做法：
+ * - 被拖的卡（或调大小的卡）每一帧都跟着指针走，像素级，不按格子跳；格子吸附只体现在虚线占位框上。
+ * - 指针事件合并到每帧处理一次；被拖的卡提升成独立的合成层，移动只是合成，不重绘。
+ * - 别的卡的让位：干扰小的（最多挪 3 张，或者比现在挪得少）立刻让；会把一大片卡片推开的，
+ *   指针要在那一格停一会儿（250ms）才让，划过去的途中不会让整个版面乱跳。
  */
-import { COLS, GAP, GridItem, LimitsOf, ROW_H, growItem, moveItem, nudgeItem, resizeItem } from "./grid";
+import { COLS, GAP, GridItem, LimitsOf, ROW_H, bestMove, displacedCount, growItem, nudgeItem, resizeItem } from "./grid";
 import { MOTION, playLayout, snapshotRects } from "./motion";
 
 export interface GestureHost {
@@ -16,8 +22,10 @@ export interface GestureHost {
   show(items: GridItem[], skip?: string): void;
   /** 手势结束：保存这套布局 */
   commit(items: GridItem[]): void;
-  /** 某张卡的大小变了（拖角调大小时每跨过一个格子调用一次）：按新尺寸重画内容 */
+  /** 某张卡的大小变了：按新尺寸重画内容、重新截列表（拖角调大小时按固定间隔调用） */
   resized(id: string): void;
+  /** 拖角调大小期间，这张卡的图表不要跟着每一帧重画 */
+  freeze(id: string | null): void;
   /** 键盘操作的读屏播报 */
   announce(id: string, item: GridItem): void;
   /** 键盘按 Delete：移除这张卡 */
@@ -39,11 +47,19 @@ const same = (a: GridItem[], b: GridItem[]): boolean =>
     return !!y && y.x === x.x && y.y === x.y && y.w === x.w && y.h === x.h;
   });
 
+const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+
 const DRAG_THRESHOLD = 4;
 const EDGE = 48;
 const MAX_SCROLL = 18;
 const SETTLE_MS = 160;
 const SHIFT_MS = 200;
+/** 最多挪动这么多张别的卡，就算“干扰小”，立刻让位 */
+const CALM = 3;
+/** 会大面积推开别的卡的让位，指针要停这么久才生效 */
+const DWELL_MS = 250;
+/** 调大小时按这个间隔重画内容 */
+const REDRAW_MS = 90;
 
 export class GridGesture {
   /** 正在进行的手势（期间不要整页重画） */
@@ -79,33 +95,77 @@ export class GridGesture {
     const base = h.items().map((i) => ({ ...i }));
     const cur0 = base.find((i) => i.id === id);
     if (!cur0) return;
+    const lim = h.limitsOf(id);
     const gridRect = grid.getBoundingClientRect();
     const cardRect = card.getBoundingClientRect();
     const unitX = (grid.clientWidth + GAP) / COLS;
     const unitY = ROW_H + GAP;
     const origin = { x: cardRect.left - gridRect.left, y: cardRect.top - gridRect.top };
+    // 调大小：卡片自己的像素范围（最小、最大，右边不能超出栅格）
+    const minW = lim.minW * unitX - GAP;
+    const maxW = Math.min(lim.maxW, COLS - cur0.x) * unitX - GAP;
+    const minH = lim.minH * unitY - GAP;
+    const maxH = lim.maxH * unitY - GAP;
     const startScroll = scroller.scrollTop;
     const pointerId = down.pointerId;
     this.active = true;
+
     let last = { x: down.clientX, y: down.clientY };
+    let dirty = false;
     let dragging = false;
-    let shown = base;
+    let shown = base; // 页面上现在画着的
+    let want = base; // 指针此刻指的
     let placeholder: HTMLElement | null = null;
     let badge: HTMLElement | null = null;
     let raf = 0;
-    let frame = 0;
+    let dwell = 0;
+    let redraw = 0;
+    let lastRedraw = 0;
+
     try {
       card.setPointerCapture(pointerId);
     } catch {
       /* 合成事件没有真正的指针，忽略 */
     }
 
-    const flipTo = (next: GridItem[], opts: { ms: number; skip?: string }) => {
+    const showNow = (next: GridItem[]) => {
+      shown = next;
       const before = h.motion() ? snapshotRects(grid) : null;
       h.show(next, resize ? undefined : id);
       const me = next.find((i) => i.id === id);
       if (placeholder && me) setPlace(placeholder, me);
-      if (before) playLayout(grid, before, opts);
+      if (before) playLayout(grid, before, { ms: SHIFT_MS, skip: id });
+    };
+
+    const cancelDwell = () => {
+      if (dwell) win.clearTimeout(dwell);
+      dwell = 0;
+    };
+
+    /** 别的卡让位：干扰小的立刻让，会大面积推开别的卡的要等指针停一会儿 */
+    const follow = (next: GridItem[]) => {
+      want = next;
+      if (same(next, shown)) {
+        cancelDwell();
+        return;
+      }
+      const dn = displacedCount(base, next, id);
+      if (dn <= CALM || dn <= displacedCount(base, shown, id)) {
+        cancelDwell();
+        showNow(next);
+        return;
+      }
+      cancelDwell();
+      dwell = win.setTimeout(() => {
+        dwell = 0;
+        if (dragging && !same(want, shown)) showNow(want);
+      }, DWELL_MS);
+    };
+
+    const redrawContent = () => {
+      redraw = 0;
+      lastRedraw = win.performance.now();
+      h.resized(id);
     };
 
     const update = () => {
@@ -116,56 +176,59 @@ export class GridGesture {
         dragging = true;
         grid.addClass("is-gesture");
         card.addClass(resize ? "is-resizing-card" : "is-dragging");
+        placeholder = grid.createDiv({ cls: "vp-ph", attr: { "data-widget": "__ph", "aria-hidden": "true" } });
+        setPlace(placeholder, cur0);
         if (resize) {
           badge = card.createDiv({ cls: "vp-w-badge", attr: { "aria-hidden": "true" } });
-        } else {
-          placeholder = grid.createDiv({ cls: "vp-ph", attr: { "data-widget": "__ph", "aria-hidden": "true" } });
-          setPlace(placeholder, cur0);
+          h.freeze(id);
         }
-        raf = win.requestAnimationFrame(tick);
       }
-      let next: GridItem[];
       if (resize) {
+        // 卡片自己按像素跟着指针长大变小；虚线框显示吸附后的大小
+        const wpx = clamp(cardRect.width + dx, minW, maxW);
+        const hpx = clamp(cardRect.height + dy, minH, maxH);
+        card.setCssProps({ width: `${wpx}px`, height: `${hpx}px` });
         const w = Math.round((cardRect.width + dx + GAP) / unitX);
         const hh = Math.round((cardRect.height + dy + GAP) / unitY);
-        next = resizeItem(base, id, w, hh, h.limitsOf);
+        const next = resizeItem(base, id, w, hh, h.limitsOf);
         const me = next.find((i) => i.id === id);
         if (badge && me) badge.setText(`${me.w} × ${me.h}`);
+        follow(next);
+        // 内容按固定间隔重画，不是每一帧
+        const now = win.performance.now();
+        if (!redraw) redraw = win.setTimeout(redrawContent, Math.max(0, REDRAW_MS - (now - lastRedraw)));
       } else {
-        card.setCssProps({ "--vp-drag-x": `${dx}px`, "--vp-drag-y": `${dy}px` });
-        next = moveItem(base, id, Math.round((origin.x + dx) / unitX), Math.round((origin.y + dy) / unitY));
-      }
-      if (same(next, shown)) return;
-      const prev = shown.find((i) => i.id === id);
-      shown = next;
-      flipTo(next, { ms: SHIFT_MS, skip: id });
-      const me = next.find((i) => i.id === id);
-      if (resize && prev && me && (prev.w !== me.w || prev.h !== me.h) && !frame) {
-        // 每跨过一个格子重画这张卡的内容，每帧最多一次
-        frame = win.requestAnimationFrame(() => {
-          frame = 0;
-          h.resized(id);
-        });
+        card.setCssProps({ transform: `translate3d(${dx}px, ${dy}px, 0) scale(1.02)` });
+        follow(bestMove(base, id, Math.round((origin.x + dx) / unitX), Math.round((origin.y + dy) / unitY)));
       }
     };
 
-    /** 指针靠近滚动区上下边缘 48px 时自动滚动 */
-    const tick = () => {
-      // 文档本身在滚动时，可见范围是窗口而不是整个文档
-      const r = scroller === doc.scrollingElement ? { top: 0, bottom: win.innerHeight } : scroller.getBoundingClientRect();
-      let v = 0;
-      if (last.y < r.top + EDGE) v = -((r.top + EDGE - last.y) / EDGE) * MAX_SCROLL;
-      else if (last.y > r.bottom - EDGE) v = ((last.y - (r.bottom - EDGE)) / EDGE) * MAX_SCROLL;
-      if (v) {
-        scroller.scrollTop += v;
+    /** 每帧一次：指针靠近滚动区上下边缘 48px 时自动滚动，然后处理这一帧里攒下的指针移动 */
+    const frame = () => {
+      if (dragging) {
+        // 文档本身在滚动时，可见范围是窗口而不是整个文档
+        const r = scroller === doc.scrollingElement ? { top: 0, bottom: win.innerHeight } : scroller.getBoundingClientRect();
+        let v = 0;
+        if (last.y < r.top + EDGE) v = -((r.top + EDGE - last.y) / EDGE) * MAX_SCROLL;
+        else if (last.y > r.bottom - EDGE) v = ((last.y - (r.bottom - EDGE)) / EDGE) * MAX_SCROLL;
+        if (v) {
+          scroller.scrollTop += v;
+          dirty = true;
+        }
+      }
+      if (dirty) {
+        dirty = false;
         update();
       }
-      raf = win.requestAnimationFrame(tick);
+      raf = win.requestAnimationFrame(frame);
     };
+    raf = win.requestAnimationFrame(frame);
 
     const finish = (commit: boolean) => {
       win.cancelAnimationFrame(raf);
-      win.cancelAnimationFrame(frame);
+      cancelDwell();
+      if (redraw) win.clearTimeout(redraw);
+      redraw = 0;
       card.removeEventListener("pointermove", onMove);
       card.removeEventListener("pointerup", onUp);
       card.removeEventListener("pointercancel", onCancel);
@@ -181,20 +244,21 @@ export class GridGesture {
         h.ended();
         return;
       }
-      const final = commit ? shown : base;
-      // 落位：从手指松开的地方滑进占位框（取消时滑回原位）；拖角调大小的那张直接到位
+      // 松手时指针指在哪就落在哪（取消则回到原位）；被拖的卡从松手的地方滑进去
+      const final = commit ? want : base;
       const from = card.getBoundingClientRect();
       card.removeClass("is-dragging");
       card.removeClass("is-resizing-card");
-      card.setCssProps({ "--vp-drag-x": "", "--vp-drag-y": "" });
+      card.setCssProps({ transform: "", width: "", height: "" });
       grid.removeClass("is-gesture");
       placeholder?.remove();
       badge?.remove();
       const before = h.motion() ? snapshotRects(grid) : null;
-      if (before && !resize) before.set(id, from);
+      if (before) before.set(id, from);
       h.show(final);
-      if (before) playLayout(grid, before, { ms: commit && !resize ? SETTLE_MS : SHIFT_MS, skip: resize ? id : undefined });
+      if (before) playLayout(grid, before, { ms: commit ? SETTLE_MS : SHIFT_MS });
       this.active = false;
+      if (resize) h.freeze(null);
       if (commit && !same(final, base)) h.commit(final);
       if (resize) h.resized(id);
       h.ended();
@@ -202,11 +266,12 @@ export class GridGesture {
 
     const onMove = (e: PointerEvent) => {
       last = { x: e.clientX, y: e.clientY };
-      update();
+      dirty = true;
     };
     const onUp = (e: PointerEvent) => {
       last = { x: e.clientX, y: e.clientY };
-      update();
+      if (dirty || !dragging) update();
+      dirty = false;
       finish(true);
     };
     const onCancel = () => finish(false);

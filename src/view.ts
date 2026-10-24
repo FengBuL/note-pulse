@@ -126,6 +126,10 @@ export class DashboardView extends ItemView {
   private parts = new Map<string, HTMLElement>();
   private renderers = new Map<string, (host: HTMLElement) => void>();
   private partObservers = new Map<string, ResizeObserver[]>();
+  /** 每张卡里按大小重画图表的函数（拖角调大小时按固定间隔手动调用） */
+  private redrawers = new Map<string, (() => void)[]>();
+  /** 正在拖角调大小的那张卡：它的图表不要跟着每一帧重画 */
+  private freezeKey: string | null = null;
   private currentPart = "";
   private bodyHost!: HTMLElement;
   private helpPop: HTMLElement | null = null;
@@ -330,6 +334,7 @@ export class DashboardView extends ItemView {
       if (key !== undefined && k !== key) continue;
       for (const o of list) o.disconnect();
       this.partObservers.delete(k);
+      this.redrawers.delete(k);
     }
   }
 
@@ -573,7 +578,13 @@ export class DashboardView extends ItemView {
       limitsOf,
       show: (items, skip) => this.showLive(items, skip),
       commit: (items) => this.commitLayout(withItems(items)),
-      resized: (id) => this.refit([id], true),
+      resized: (id) => {
+        this.refit([id], true);
+        for (const redraw of this.redrawers.get(id) ?? []) redraw();
+      },
+      freeze: (id) => {
+        this.freezeKey = id;
+      },
       announce: (id, it) => {
         const name = widgetName(id as WidgetId);
         this.liveEl?.setText(L(`${name}，第 ${it.x + 1} 列第 ${it.y + 1} 行，${it.w} × ${it.h}`, `${name}, column ${it.x + 1}, row ${it.y + 1}, ${it.w} × ${it.h}`));
@@ -1054,6 +1065,7 @@ export class DashboardView extends ItemView {
   private responsive(el: HTMLElement, draw: (width: number, height: number) => void, watchHeight?: { narrowH: number }) {
     let lastW = -1;
     let lastH = -1;
+    const key = this.currentPart;
     const run = () => {
       const w = Math.floor(el.clientWidth);
       const h = watchHeight ? (this.narrow ? watchHeight.narrowH : Math.floor(el.clientHeight)) : 0;
@@ -1064,10 +1076,14 @@ export class DashboardView extends ItemView {
       draw(w, h);
     };
     run();
+    const redraws = this.redrawers.get(key) || [];
+    redraws.push(run);
+    this.redrawers.set(key, redraws);
     if (typeof ResizeObserver !== "undefined") {
-      const ro = new ResizeObserver(() => run());
+      const ro = new ResizeObserver(() => {
+        if (this.freezeKey !== key) run();
+      });
       ro.observe(el);
-      const key = this.currentPart;
       const list = this.partObservers.get(key) || [];
       list.push(ro);
       this.partObservers.set(key, list);

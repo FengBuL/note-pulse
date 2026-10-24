@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { COLS, GAP, GridItem, Limits, ROW_H, addItem, compact, findSpot, flowItems, growItem, moveItem, nudgeItem, overlap, removeItem, repairItems, resizeItem, rowsToPx, sizeRange } from "../src/grid";
+import { COLS, GAP, GridItem, Limits, ROW_H, addItem, bestMove, displacedCount, compact, findSpot, flowItems, growItem, moveItem, nudgeItem, overlap, removeItem, repairItems, resizeItem, rowsToPx, sizeRange } from "../src/grid";
 
 const LIM: Limits = { minW: 2, maxW: 12, minH: 2, maxH: 10 };
 const limitsOf = (id: string): Limits => (id.startsWith("n") ? { minW: 2, maxW: 4, minH: 2, maxH: 4 } : LIM);
@@ -277,4 +277,24 @@ test("拖动结果只取决于起点布局和当前位置，和中间走过的�
     for (let wander = 0; wander < 5; wander++) moveItem(base, id, pick(12), pick(20));
     assert.deepEqual(moveItem(base, id, x, y), moveItem(base, id, x, y));
   }
+});
+
+test("拖动落点吸附到干扰最小的格子；挪动别的卡的数量不会比直接落在指针格子上更多", () => {
+  const base = [it("a", 0, 0, 4, 3), it("b", 4, 0, 4, 3), it("c", 8, 0, 4, 3), it("d", 0, 3, 4, 3), it("e", 4, 3, 4, 3), it("f", 8, 3, 4, 3)];
+  for (let x = 0; x <= 8; x++) for (let y = 0; y <= 6; y++) {
+    const direct = moveItem(base, "a", x, y);
+    const snapped = bestMove(base, "a", x, y);
+    assertValid(snapped, `${x},${y}`);
+    assert.ok(displacedCount(base, snapped, "a") <= displacedCount(base, direct, "a"), `${x},${y}`);
+  }
+  // 偏了一格的拖动：落在 b 的右半边，吸附成和 b 互换，而不是把 b、c 都推走
+  const snapped = bestMove(base, "a", 5, 0);
+  assert.ok(displacedCount(base, snapped, "a") <= 1);
+});
+
+test("displacedCount：不算被拖的那张，位置或大小变了才算", () => {
+  const base = [it("a", 0, 0, 4, 3), it("b", 4, 0, 4, 3)];
+  assert.equal(displacedCount(base, base, "a"), 0);
+  assert.equal(displacedCount(base, [it("a", 8, 0, 4, 3), it("b", 4, 0, 4, 3)], "a"), 0);
+  assert.equal(displacedCount(base, [it("a", 8, 0, 4, 3), it("b", 4, 0, 6, 3)], "a"), 1);
 });
