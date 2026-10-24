@@ -613,9 +613,10 @@
   overflow: hidden;
   pointer-events: none;
 }
+/* 祝贺放在面板顶部居中：放在最下面时，用户的视线在卡片上，根本看不到 */
 .vp-celebrate-toast {
   position: absolute;
-  bottom: var(--vp-s6);
+  top: var(--vp-s5);
   left: 50%;
   display: flex;
   align-items: center;
@@ -634,7 +635,7 @@
 @keyframes vp-toast-in {
   from {
     opacity: 0;
-    transform: translate(-50%, 12px);
+    transform: translate(-50%, -14px);
   }
   to {
     opacity: 1;
