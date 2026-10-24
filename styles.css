@@ -128,11 +128,13 @@
   padding: 0;
 }
 .vp-shell {
-  max-width: 1360px;
-  margin: 0 auto;
   padding: var(--vp-s5) var(--vp-s5) var(--vp-s6);
 }
 .vp-hidden {
+  display: none;
+}
+/* 选择器带上 .vp-root，才压得过 .vp-row 等后面定义的 display */
+.vp-root .vp-hide {
   display: none;
 }
 
@@ -261,28 +263,26 @@
 
 /* ---------------- 12 列栅格 ---------------- */
 
+/*
+ * 12 列等比拉宽（窗口越宽卡片越宽），一行固定 40px、行间距 16px：h 行高 = 40h + 16(h − 1)。
+ * 每张卡的位置和大小由 JS 写成 --vp-x / --vp-y / --vp-w / --vp-h（列、行、占几列、占几行）。
+ */
 .vp-grid {
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
+  grid-auto-rows: 40px;
   gap: var(--vp-s4);
 }
-/* 2.0 小组件档位：S 3 列 · M 4 列 · L 8 列 · XL 整行（M/L 和 1.8 的 4/8 分栏一致） */
-.vp-grid .vp-w.is-s {
-  grid-column: span 3;
-}
-.vp-grid .vp-w.is-m {
-  grid-column: span 4;
-}
-.vp-grid .vp-w.is-l {
-  grid-column: span 8;
-}
-.vp-grid .vp-w.is-xl {
-  grid-column: 1 / -1;
+.vp-grid > .vp-w {
+  grid-column: calc(var(--vp-x, 0) + 1) / span var(--vp-w, 4);
+  grid-row: calc(var(--vp-y, 0) + 1) / span var(--vp-h, 4);
+  min-height: 0;
 }
 
 /* ---------------- 卡片 ---------------- */
 
 .vp-card {
+  container: vc / inline-size;
   position: relative;
   box-sizing: border-box;
   display: flex;
@@ -310,12 +310,21 @@
 .vp-card-title {
   display: flex;
   align-items: center;
+  min-width: 0;
   gap: var(--vp-s2);
   font-size: var(--vp-fs-13);
   font-weight: 600;
   letter-spacing: 0.01em;
   color: var(--text-normal);
   white-space: nowrap;
+}
+.vp-card-title > span:not(.vp-card-icon) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vp-card-title .vp-help {
+  flex: none;
 }
 .vp-card-icon {
   display: inline-flex;
@@ -340,8 +349,34 @@
 .vp-card-body {
   display: flex;
   flex-direction: column;
-  flex: 1;
+  flex: 1 1 0;
   min-width: 0;
+  min-height: 0;
+}
+/* 2 行高的卡片：内边距收小，标题缩成一行小字 */
+.vp-card.is-tight {
+  padding: 10px 16px;
+}
+.vp-card.is-tight .vp-card-head {
+  min-height: 20px;
+  margin-bottom: 6px;
+}
+.vp-card.is-tight .vp-card-icon {
+  width: 20px;
+  height: 20px;
+}
+/* 列表类卡片：高度由卡片定死，放不下的行由 JS 折叠成“还有 N 个” */
+.vp-fit {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.vp-fit.vp-scroll {
+  overflow-y: auto;
+}
+.vp-card-foot {
+  flex: none;
 }
 .vp-card-foot {
   display: flex;
@@ -349,6 +384,9 @@
   gap: var(--vp-s2) var(--vp-s4);
   margin-top: auto;
   padding-top: var(--vp-s2);
+}
+.vp-card-foot:empty {
+  display: none;
 }
 
 /* ---------------- 文字层级 ---------------- */
@@ -500,18 +538,21 @@
 .vp-hero {
   background: var(--vp-hero-bg);
   border-color: color-mix(in srgb, var(--vp-accent) 20%, transparent);
-  padding: 22px 26px;
 }
+/* 窄或矮：圆环 + 连续打卡两栏；够宽：再加本周七天；窄但够高：本周七天放到下面 */
 .vp-hero-main {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) minmax(250px, 1.35fr);
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
   gap: 30px;
-  flex: 1;
+  flex: 1 1 0;
+  min-height: 0;
 }
-/* M：没有本周七天，只剩圆环和连续打卡两栏 */
-.vp-w.is-m .vp-hero-main {
-  grid-template-columns: auto minmax(0, 1fr);
+.vp-hero-main.is-wide {
+  grid-template-columns: auto minmax(0, 1fr) minmax(250px, 1.35fr);
+}
+.vp-hero-main.is-stacked > .vp-week-box {
+  grid-column: 1 / -1;
 }
 .vp-hero-streak {
   display: flex;
@@ -537,9 +578,14 @@
   grid-template-columns: auto auto minmax(0, 1fr);
   align-items: center;
   gap: 28px;
-  margin-top: var(--vp-s5);
-  padding-top: var(--vp-s4);
+  flex: none;
+  margin-top: var(--vp-s4);
+  padding-top: var(--vp-s3);
   border-top: 1px solid color-mix(in srgb, var(--vp-accent) 14%, transparent);
+}
+.vp-hero-foot.is-short {
+  grid-template-columns: auto auto;
+  justify-content: start;
 }
 .vp-hero-stat,
 .vp-hero-recent {
@@ -742,8 +788,24 @@
 /* ---------------- 数据卡 ---------------- */
 
 .vp-kpi {
-  padding: 18px 20px 14px;
+  padding: 16px 20px 12px;
   gap: var(--vp-s3);
+}
+.vp-kpi.is-tight {
+  padding: 10px 16px;
+  gap: 6px;
+}
+/* 很窄的数据卡：主数字缩小，不被截断 */
+.vp-kpi.is-small .vp-num {
+  font-size: var(--vp-fs-20);
+}
+.vp-kpi.is-small .vp-num-unit {
+  display: none;
+}
+.vp-kpi-top .vp-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .vp-kpi-top {
   display: flex;
@@ -776,12 +838,14 @@
 .vp-kpi.is-scrubbing .vp-num-value {
   color: var(--vp-accent-ink);
 }
+/* 迷你图占数字下面剩下的高度：卡片拉高，图就变高 */
 .vp-kpi-viz {
   position: relative;
   display: flex;
   align-items: flex-end;
-  height: 40px;
-  margin-top: auto;
+  flex: 1 1 0;
+  min-height: 0;
+  margin-top: var(--vp-s1);
 }
 .vp-spark {
   display: block;
@@ -929,15 +993,16 @@
 }
 .vp-chart-wrap {
   position: relative;
+  flex: 1 1 0;
   width: 100%;
-  min-height: 220px;
+  min-height: 0;
 }
 .vp-chart-empty {
   flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  min-height: 220px;
+  min-height: 0;
 }
 .vp-chart {
   display: block;
@@ -1083,7 +1148,9 @@
 }
 .vp-heatmap-wrap {
   position: relative;
+  flex: 1 1 0;
   width: 100%;
+  min-height: 0;
 }
 .vp-heatmap-host {
   display: flex;
@@ -1154,10 +1221,20 @@
   height: 10px;
   border-radius: var(--vp-r-xs);
 }
+/* 选中某天：详情盖在卡片下半部分（卡片高度是定死的，不占版面） */
 .vp-day-detail {
-  margin-top: var(--vp-s4);
-  padding-top: var(--vp-s3);
-  border-top: 1px solid var(--vp-line);
+  position: absolute;
+  z-index: 4;
+  left: var(--vp-s3);
+  right: var(--vp-s3);
+  bottom: var(--vp-s3);
+  max-height: 72%;
+  overflow-y: auto;
+  padding: var(--vp-s3) var(--vp-s4);
+  border: 1px solid var(--vp-border);
+  border-radius: var(--vp-r-m);
+  background: var(--vp-surface);
+  box-shadow: var(--vp-shadow-pop);
   animation: vp-fade var(--vp-t-base) var(--vp-ease);
 }
 .vp-day-detail-head {
@@ -1341,55 +1418,18 @@
 .vp-group-row .vp-meter.is-inline {
   width: 100%;
 }
+/* 很窄的卡片：去掉进度条，只留名字和数字 */
+@container vc (max-width: 260px) {
+  .vp-group-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .vp-group-row .vp-meter.is-inline {
+    display: none;
+  }
+}
 
 /* ---------------- 库体检 ---------------- */
 
-.vp-live {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  margin-right: auto;
-  font-size: var(--vp-fs-12);
-  color: var(--text-muted);
-}
-.vp-live-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--vp-success);
-  box-shadow: var(--vp-halo-live);
-  animation: vp-breathe var(--vp-t-live) var(--vp-ease) infinite;
-}
-@keyframes vp-breathe {
-  50% {
-    opacity: 0.45;
-  }
-}
-.vp-checkup {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--vp-s5) 28px;
-}
-/* L（8 列）放不下三栏操作按钮，改两栏 */
-.vp-w.is-l .vp-checkup {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-.vp-checkup-col {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-.vp-checkup-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--vp-s2);
-  margin-bottom: 6px;
-}
-.vp-checkup-title {
-  font-size: var(--vp-fs-13);
-  font-weight: 600;
-}
 .vp-checkup-row .vp-row-name.is-clickable:hover {
   color: var(--vp-accent-ink);
 }
@@ -1726,28 +1766,26 @@
 
 /* ---------------- 响应式（按看板自身宽度） ---------------- */
 
-@container vd (max-width: 1080px) {
-  /* 中等宽度：M / L / XL 占满，S 仍然四张一行（和 1.8 一样） */
-  .vp-grid .vp-w.is-m,
-  .vp-grid .vp-w.is-l,
-  .vp-grid .vp-w.is-xl {
-    grid-column: 1 / -1;
-  }
-  .vp-checkup {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    row-gap: var(--vp-s5);
-  }
-}
-@container vd (max-width: 760px) {
+/*
+ * 窄面板（手机、平板竖屏、分屏的窄面板，< 760px）：卡片排成一列，宽度 ≤ 3 列的小卡两张一行，
+ * 顺序按电脑上从上到下、从左到右读；高度用内容的自然高度（电脑上存的行数是按宽卡算的，在这里不对）。
+ * 这个宽度要和 view.ts 里判断窄面板的 760 保持一致。
+ */
+@container vd (max-width: 759.98px) {
   .vp-shell {
     padding: var(--vp-s4) var(--vp-s4) var(--vp-s5);
   }
   .vp-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-auto-rows: auto;
     gap: var(--vp-s3);
   }
-  /* 窄：S 两张一行 */
-  .vp-grid .vp-w.is-s {
-    grid-column: span 6;
+  .vp-grid > .vp-w {
+    grid-column: span 2;
+    grid-row: auto;
+  }
+  .vp-grid > .vp-w.is-small {
+    grid-column: span 1;
   }
   .vp-card,
   .vp-hero {
@@ -1792,16 +1830,10 @@
   }
 }
 @container vd (max-width: 560px) {
-  .vp-checkup {
-    grid-template-columns: minmax(0, 1fr);
-  }
   .vp-kpi-row {
     flex-direction: column;
     align-items: flex-start;
     gap: 6px;
-  }
-  .vp-kpi-viz {
-    display: none;
   }
 }
 @container vd (max-width: 480px) {
@@ -1872,30 +1904,34 @@ body.is-mobile .vp-root :is(button, [role="button"], [role="tab"], .is-clickable
   --vp-cat-4: #3987e5;
 }
 
-/* 写作节奏：单一系列只用强调色，最常写的一天实色 */
+/* 写作节奏：单一系列只用强调色，最常写的一天实色；高度由卡片给，柱子跟着变高 */
 .vp-rhythm {
   display: flex;
-  align-items: flex-end;
+  align-items: stretch;
   gap: var(--vp-s2);
-  height: 84px;
-  margin-top: var(--vp-s3);
-}
-.vp-rhythm.is-mini {
-  height: 40px;
-  gap: var(--vp-s1);
+  flex: 1 1 0;
+  min-height: 0;
+  margin-top: var(--vp-s2);
 }
 .vp-rhythm-col {
   flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: flex-end;
+  min-width: 0;
   gap: var(--vp-s1);
-  height: 100%;
+}
+.vp-rhythm-lane {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  flex: 1 1 0;
+  min-height: 0;
+  width: 100%;
 }
 .vp-rhythm-bar {
   width: 100%;
-  max-width: 22px;
+  max-width: 28px;
   height: var(--vp-rhythm-h, 4%);
   min-height: 3px;
   border-radius: var(--vp-r-xs) var(--vp-r-xs) 0 0;
@@ -1904,9 +1940,15 @@ body.is-mobile .vp-root :is(button, [role="button"], [role="tab"], .is-clickable
 .vp-rhythm-col.is-best .vp-rhythm-bar {
   background: var(--vp-accent);
 }
-.vp-rhythm-label {
+.vp-rhythm-label,
+.vp-rhythm-value {
   font-size: var(--vp-fs-11);
   color: var(--vp-subtle);
+  white-space: nowrap;
+}
+.vp-rhythm-col.is-best .vp-rhythm-value {
+  color: var(--text-normal);
+  font-weight: 600;
 }
 
 /* 笔记活跃度：两个数 + 分段条（两段之间 2px 间隙） */
@@ -2030,8 +2072,8 @@ body.is-mobile .vp-root :is(button, [role="button"], [role="tab"], .is-clickable
   color: var(--vp-accent-ink);
 }
 
-/* 小卡片（S）里的主数字和说明上下排 */
-.vp-w.is-s .vp-kpi-caption {
+/* 窄的小卡片（≤ 3 列）里的主数字和说明上下排 */
+.vp-w.is-small .vp-kpi-caption {
   display: block;
 }
 
@@ -2046,53 +2088,95 @@ body.is-mobile .vp-root :is(button, [role="button"], [role="tab"], .is-clickable
   outline-offset: 3px;
   cursor: move;
 }
-/* 编辑时卡片里的内容不响应点击，避免拖动时误点开笔记 */
-.vp-grid.is-editing > .vp-w > :not(.vp-w-tools) {
-  pointer-events: none;
-}
-.vp-w.is-dragging {
-  opacity: 0.5;
-}
-.vp-w.is-drop {
-  outline-style: solid;
+.vp-grid.is-editing > .vp-w:hover {
   outline-color: var(--vp-accent);
 }
-/* 工具条占卡片顶部单独一条，不盖住卡片自己的标题和控件 */
-.vp-w-tools {
+/* 编辑时卡片里的内容不响应点击，避免拖动时误点开笔记；只有移除按钮和调大小的拖柄可以点 */
+.vp-grid.is-editing > .vp-w > :not(.vp-w-remove):not(.vp-w-handle) {
+  pointer-events: none;
+}
+.vp-grid > .vp-w.is-flash {
+  outline: 3px solid transparent;
+  outline-offset: 3px;
+  animation: vp-card-flash var(--vp-t-flash) var(--vp-ease);
+}
+@keyframes vp-card-flash {
+  0%,
+  40% {
+    outline-color: var(--vp-accent);
+  }
+}
+/* 移除：卡片右上角外凸的小圆钮，不盖住卡片自己的标题和控件 */
+.vp-w-remove {
+  position: absolute;
+  z-index: 3;
+  top: -9px;
+  right: -9px;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 50%;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+.vp-root .vp-shell .vp-w-remove {
+  border: 1px solid var(--vp-line-strong);
+  background: var(--vp-surface);
+  box-shadow: var(--vp-shadow-press);
+}
+.vp-root .vp-shell .vp-w-remove:hover {
+  color: var(--vp-danger-ink);
+  border-color: var(--vp-danger);
+}
+.vp-w-remove svg {
+  width: 13px;
+  height: 13px;
+}
+/* 编辑栏：粘在页面顶上，拖动、滚动时一直看得到 */
+.vp-editbar {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   flex-wrap: wrap;
-  gap: var(--vp-s1);
-  margin: calc(var(--vp-s2) * -1) calc(var(--vp-s2) * -1) var(--vp-s3);
-  padding: 0 0 var(--vp-s2);
-  border-bottom: 1px dashed var(--vp-line-strong);
-  cursor: default;
+  gap: var(--vp-s2) var(--vp-s4);
+  margin-bottom: var(--vp-s4);
+  padding: var(--vp-s2) var(--vp-s3) var(--vp-s2) var(--vp-s4);
+  border: 1px solid var(--vp-border);
+  border-radius: var(--vp-r-m);
+  background: var(--vp-surface);
+  box-shadow: var(--vp-shadow-raise);
 }
-.vp-w.is-s .vp-w-tools .vp-w-name {
-  visibility: hidden;
-}
-.vp-w-tools .vp-w-name {
-  margin-right: auto;
+.vp-editbar-hint {
   font-size: var(--vp-fs-12);
-  font-weight: 600;
   color: var(--vp-accent-ink);
+  font-weight: 500;
 }
-.vp-w-tools .vp-icon-btn[disabled] {
-  opacity: 0.35;
-  cursor: default;
+.vp-editbar-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--vp-s2);
+}
+.vp-btn-icon {
+  display: inline-flex;
+}
+.vp-btn-icon svg {
+  width: 14px;
+  height: 14px;
 }
 .vp-add-panel {
-  margin-top: var(--vp-s4);
-}
-.vp-add-panel .vp-card-head .vp-link {
-  margin-left: auto;
+  margin-bottom: var(--vp-s4);
 }
 .vp-add-list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: var(--vp-s2);
-  margin-top: var(--vp-s3);
 }
 .vp-root .vp-shell .vp-add-item {
   display: block;
@@ -2120,6 +2204,35 @@ body.is-mobile .vp-root :is(button, [role="button"], [role="tab"], .is-clickable
   white-space: normal;
 }
 
+/* 窄面板里卡片高度跟内容走：正文按内容撑开；列表、图表没有定死的高度，给个上限 */
+.vp-grid.is-narrow .vp-card-body,
+.vp-grid.is-narrow .vp-hero-main {
+  flex: none;
+}
+/* 窄面板里列表、图表没有定死的高度，给个上限 */
+.vp-grid.is-narrow .vp-fit {
+  flex: none;
+  max-height: var(--vp-fit-max, 320px);
+}
+.vp-grid.is-narrow .vp-fit.vp-scroll {
+  max-height: var(--vp-scroll-max);
+}
+.vp-grid.is-narrow .vp-kpi-viz {
+  flex: none;
+  height: 40px;
+}
+.vp-grid.is-narrow .vp-chart-wrap {
+  flex: none;
+  height: 220px;
+}
+.vp-grid.is-narrow .vp-heatmap-wrap {
+  flex: none;
+}
+.vp-grid.is-narrow .vp-rhythm {
+  flex: none;
+  height: 110px;
+}
+
 /* ---------------- 动效 ----------------
    只在 .vp-motion（设置里开着动效）下生效；系统“减弱动态效果”时下面的媒体查询一并关掉。
    is-intro：首次打开看板，挂在根上约 1.8 秒；is-swap：切换标签页 / 范围后挂在那张卡上约 1.2 秒。
@@ -2143,10 +2256,8 @@ body.is-mobile .vp-root :is(button, [role="button"], [role="tab"], .is-clickable
 /* 列表行、条形、本周七天、库体检各栏：依次滑入 */
 .vp-motion.is-intro .vp-row,
 .vp-motion.is-intro .vp-barrow,
-.vp-motion.is-intro .vp-checkup-col,
 .vp-motion .is-swap .vp-row,
-.vp-motion .is-swap .vp-barrow,
-.vp-motion .is-swap .vp-checkup-col {
+.vp-motion .is-swap .vp-barrow {
   animation: vp-slide-in var(--vp-t-enter) var(--vp-ease-out) both;
   animation-delay: calc(var(--vp-enter, 0) * var(--vp-t-stagger) + var(--vp-i, 0) * var(--vp-t-step) - var(--vp-intro-offset, 0ms));
 }
@@ -2298,13 +2409,15 @@ body.is-mobile .vp-root :is(button, [role="button"], [role="tab"], .is-clickable
   padding: 0 var(--vp-s2);
   mask-image: linear-gradient(180deg, #000 calc(100% - var(--vp-s5)), transparent);
 }
+/* 列表卡片展开后在卡片里滚动：高度由卡片定，不再限高 */
+.vp-fit.vp-scroll {
+  max-height: none;
+  margin-bottom: 0;
+}
 .vp-scroll:focus-visible {
   outline: 2px solid var(--vp-accent);
   outline-offset: 2px;
   border-radius: var(--vp-r-s);
-}
-.vp-checkup-col.is-open .vp-checkup-title {
-  color: var(--vp-accent-ink);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -4451,6 +4564,10 @@ body.is-mobile .cd-modal .cd-diff-list {
 }
 .vp-report-card .vp-card-head {
   margin-bottom: 8px;
+}
+/* 面板窄、周报月报上下叠放不下时，在卡片里滚动 */
+.vp-report-card .vp-card-body {
+  overflow-y: auto;
 }
 .vp-report-head-actions {
   margin-left: auto;

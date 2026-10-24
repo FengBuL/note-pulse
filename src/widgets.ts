@@ -1,9 +1,5 @@
-/* 2.0 小组件：卡片目录和布局。纯数据与纯函数，不依赖 Obsidian API，便于单元测试。 */
-
-/** 档位：在 12 列栅格里占几列。S 3 · M 4 · L 8 · XL 12（M/L 和 1.8 的 4/8 分栏一致，默认布局看起来不变） */
-export type WidgetSize = "s" | "m" | "l" | "xl";
-
-export const SIZE_SPAN: Record<WidgetSize, number> = { s: 3, m: 4, l: 8, xl: 12 };
+/* 2.0 小组件：卡片目录和网格布局。纯数据与纯函数，不依赖 Obsidian API，便于单元测试。 */
+import { COLS, GridItem, Limits, addItem, compact, flowItems, repairItems } from "./grid";
 
 export type WidgetId =
   | "hero"
@@ -15,107 +11,170 @@ export type WidgetId =
   | "heat"
   | "trend"
   | "tags"
-  | "checkup"
   | "reports"
   | "topLinked"
   | "rhythm"
   | "activity"
   | "taskNotes"
   | "density"
-  | "folders";
+  | "folders"
+  | "brokenLinks"
+  | "orphans"
+  | "sameName"
+  | "emptyBig"
+  | "unusedFiles"
+  | "dupes";
 
-export interface WidgetInfo {
+export interface WidgetInfo extends Limits {
   id: WidgetId;
-  /** 支持的档位，第一个是添加时的默认档位 */
-  sizes: WidgetSize[];
+  /** 添加时的默认宽（列）和高（行） */
+  w: number;
+  h: number;
   /** 2.0 新加的卡片 */
   isNew?: boolean;
 }
 
-/** 卡片目录：顺序就是“添加卡片”里的顺序 */
-export const WIDGETS: WidgetInfo[] = [
-  { id: "hero", sizes: ["l", "m", "xl"] },
-  { id: "tasks", sizes: ["m", "l"] },
-  { id: "notes", sizes: ["s", "m"] },
-  { id: "words", sizes: ["s", "m"] },
-  { id: "taskRate", sizes: ["s", "m"] },
-  { id: "month", sizes: ["s", "m"] },
-  { id: "heat", sizes: ["xl", "l"] },
-  { id: "trend", sizes: ["l", "xl"] },
-  { id: "tags", sizes: ["m", "l"] },
-  { id: "checkup", sizes: ["xl", "l"] },
-  { id: "reports", sizes: ["xl", "l"] },
-  { id: "topLinked", sizes: ["m", "l"], isNew: true },
-  { id: "rhythm", sizes: ["m", "s"], isNew: true },
-  { id: "activity", sizes: ["m", "s"], isNew: true },
-  { id: "taskNotes", sizes: ["m", "l"], isNew: true },
-  { id: "density", sizes: ["s"], isNew: true },
-  { id: "folders", sizes: ["m", "l"], isNew: true },
-];
-
-export interface LayoutItem {
-  id: WidgetId;
-  size: WidgetSize;
-}
-
-export interface WidgetLayout {
-  version: 1;
-  items: LayoutItem[];
-}
+const spec = (id: WidgetId, minW: number, maxW: number, minH: number, maxH: number, w: number, h: number, isNew = false): WidgetInfo => ({
+  id,
+  minW,
+  maxW,
+  minH,
+  maxH,
+  w,
+  h,
+  ...(isNew ? { isNew } : {}),
+});
 
 /**
- * 默认布局：前面和 1.8 一样（今日写作 + 接下来、四张数据卡、热力图、每周写作 + 标签），
- * 然后 6 张新卡片排两行（4+4+4、4+4+3，第二行末尾空一列），最后库体检和写作回顾。
+ * 卡片目录：顺序就是“添加卡片”里的顺序。
+ * 宽高范围的依据是：在这个范围里内容能跟着有意义地变化，超出范围只会多出空白或被截断。
  */
-export function defaultLayout(): WidgetLayout {
-  return {
-    version: 1,
-    items: [
-      { id: "hero", size: "l" },
-      { id: "tasks", size: "m" },
-      { id: "notes", size: "s" },
-      { id: "words", size: "s" },
-      { id: "taskRate", size: "s" },
-      { id: "month", size: "s" },
-      { id: "heat", size: "xl" },
-      { id: "trend", size: "l" },
-      { id: "tags", size: "m" },
-      // 2.0 新卡片
-      { id: "rhythm", size: "m" },
-      { id: "activity", size: "m" },
-      { id: "topLinked", size: "m" },
-      { id: "folders", size: "m" },
-      { id: "taskNotes", size: "m" },
-      { id: "density", size: "s" },
-      { id: "checkup", size: "xl" },
-      { id: "reports", size: "xl" },
-    ],
-  };
-}
+export const WIDGETS: WidgetInfo[] = [
+  spec("hero", 5, 12, 4, 8, 8, 6),
+  spec("tasks", 3, 12, 3, 12, 4, 6),
+  spec("notes", 2, 6, 2, 4, 3, 3),
+  spec("words", 2, 6, 2, 4, 3, 3),
+  spec("taskRate", 2, 6, 2, 4, 3, 3),
+  spec("month", 2, 6, 2, 4, 3, 3),
+  spec("heat", 6, 12, 4, 6, 12, 5),
+  spec("trend", 5, 12, 4, 10, 8, 7),
+  spec("tags", 3, 12, 3, 12, 4, 7),
+  spec("brokenLinks", 3, 12, 3, 12, 4, 5, true),
+  spec("orphans", 3, 12, 3, 12, 4, 5, true),
+  spec("sameName", 3, 12, 3, 12, 4, 5, true),
+  spec("emptyBig", 3, 12, 3, 12, 4, 4, true),
+  spec("unusedFiles", 3, 12, 3, 12, 4, 4, true),
+  spec("dupes", 3, 12, 3, 8, 4, 4, true),
+  spec("reports", 8, 12, 4, 6, 12, 4),
+  spec("topLinked", 3, 12, 3, 12, 4, 4, true),
+  spec("rhythm", 3, 8, 3, 6, 4, 4, true),
+  spec("activity", 3, 8, 2, 4, 4, 4, true),
+  spec("taskNotes", 3, 12, 3, 12, 4, 3, true),
+  spec("density", 2, 6, 2, 4, 4, 3, true),
+  spec("folders", 3, 12, 2, 5, 4, 3, true),
+];
 
 const INFO = new Map(WIDGETS.map((w) => [w.id, w]));
 
-export function widgetInfo(id: WidgetId): WidgetInfo | undefined {
-  return INFO.get(id);
+export function widgetInfo(id: string): WidgetInfo | undefined {
+  return INFO.get(id as WidgetId);
+}
+
+const isKnown = (id: string): boolean => INFO.has(id as WidgetId);
+
+/** 布局里没有的卡片也要能查到范围（读到坏数据时不会走到这里，只是给类型兜底） */
+export function limitsOf(id: string): Limits {
+  const w = INFO.get(id as WidgetId);
+  return w ? { minW: w.minW, maxW: w.maxW, minH: w.minH, maxH: w.maxH } : { minW: 1, maxW: COLS, minH: 1, maxH: 12 };
+}
+
+export interface WidgetLayoutItem extends GridItem {
+  id: WidgetId;
+}
+
+export interface WidgetLayout {
+  version: 2;
+  items: WidgetLayoutItem[];
 }
 
 /**
- * 读到的布局可能来自别的版本、被同步弄坏或被手改：去掉未知的卡片和重复项，
- * 不支持的档位换成这张卡的默认档位；没有或读不懂时用默认布局。
+ * 默认布局（12 列，单位是格子）：前面和 1.8 一样，其后 6 张新卡片、库体检拆出的 6 张卡，最后写作回顾。
+ *
+ *   y0   今日写作 8×6                     | 接下来 4×6
+ *   y6   笔记 3×3 | 总字数 3×3 | 任务完成率 3×3 | 本月写作 3×3
+ *   y9   写作热力图 12×5
+ *   y14  每周写作 8×7                     | 常用标签 4×7
+ *   y21  写作节奏 4×4 | 笔记活跃度 4×4 | 最常被链接 4×4
+ *   y25  文件夹构成 4×3 | 任务最多的笔记 4×3 | 链接密度 4×3
+ *   y28  断链 4×5 | 孤立笔记 4×5 | 同名笔记 4×5
+ *   y33  空笔记与超大笔记 4×4 | 未引用的附件 4×4 | 重复内容 4×4
+ *   y37  写作回顾 12×4
+ */
+const DEFAULT_ORDER: [WidgetId, number, number][] = [
+  ["hero", 8, 6],
+  ["tasks", 4, 6],
+  ["notes", 3, 3],
+  ["words", 3, 3],
+  ["taskRate", 3, 3],
+  ["month", 3, 3],
+  ["heat", 12, 5],
+  ["trend", 8, 7],
+  ["tags", 4, 7],
+  ["rhythm", 4, 4],
+  ["activity", 4, 4],
+  ["topLinked", 4, 4],
+  ["folders", 4, 3],
+  ["taskNotes", 4, 3],
+  ["density", 4, 3],
+  ["brokenLinks", 4, 5],
+  ["orphans", 4, 5],
+  ["sameName", 4, 5],
+  ["emptyBig", 4, 4],
+  ["unusedFiles", 4, 4],
+  ["dupes", 4, 4],
+  ["reports", 12, 4],
+];
+
+export function defaultLayout(): WidgetLayout {
+  return { version: 2, items: flowItems(DEFAULT_ORDER.map(([id, w, h]) => ({ id, w, h }))) as WidgetLayoutItem[] };
+}
+
+/** 2.0 开发中的档位布局（只在开发者本机存在过）：档位 → 占几列 */
+const V1_SPAN: Record<string, number> = { s: 3, m: 4, l: 8, xl: 12 };
+/** 档位布局里的“库体检”换成拆分后的 6 张卡，放在它原来的位置 */
+const CHECKUP_SPLIT: WidgetId[] = ["brokenLinks", "orphans", "sameName", "emptyBig", "unusedFiles", "dupes"];
+
+function migrateV1(raw: { items: unknown[] }): WidgetLayout {
+  const seen = new Set<string>();
+  const entries: { id: WidgetId; w: number; h: number }[] = [];
+  const push = (id: WidgetId, cols: number) => {
+    const info = INFO.get(id);
+    if (!info || seen.has(id)) return;
+    seen.add(id);
+    entries.push({ id, w: Math.min(info.maxW, Math.max(info.minW, cols)), h: info.h });
+  };
+  for (const it of raw.items) {
+    if (!it || typeof it !== "object") continue;
+    const { id, size } = it as { id?: unknown; size?: unknown };
+    if (typeof id !== "string") continue;
+    const cols = V1_SPAN[String(size)] ?? INFO.get(id as WidgetId)?.w ?? 4;
+    if (id === "checkup") for (const c of CHECKUP_SPLIT) push(c, INFO.get(c)?.w ?? 4);
+    else push(id as WidgetId, cols);
+  }
+  return { version: 2, items: flowItems(entries) as WidgetLayoutItem[] };
+}
+
+/**
+ * 读到的布局可能来自别的版本、被同步弄坏或被手改：
+ * - 没有或读不懂：默认布局；
+ * - v1（档位）：迁移到网格；
+ * - v2：去掉未知卡和重复卡，尺寸夹进范围，重叠的推开，整体上浮。
  */
 export function normalizeLayout(raw: unknown): WidgetLayout {
   if (!raw || typeof raw !== "object" || !Array.isArray((raw as { items?: unknown }).items)) return defaultLayout();
-  const seen = new Set<string>();
-  const items: LayoutItem[] = [];
-  for (const it of (raw as { items: unknown[] }).items) {
-    if (!it || typeof it !== "object") continue;
-    const { id, size } = it as { id?: unknown; size?: unknown };
-    const info = typeof id === "string" ? INFO.get(id as WidgetId) : undefined;
-    if (!info || seen.has(info.id)) continue;
-    seen.add(info.id);
-    items.push({ id: info.id, size: info.sizes.includes(size as WidgetSize) ? (size as WidgetSize) : info.sizes[0] });
-  }
-  return { version: 1, items };
+  const r = raw as { version?: unknown; items: unknown[] };
+  if (r.version === 1 || (r.version === undefined && r.items.some((i) => i && typeof i === "object" && "size" in i))) return migrateV1(r);
+  return { version: 2, items: repairItems(r.items, limitsOf, isKnown) as WidgetLayoutItem[] };
 }
 
 /** 隐藏着、可以添加的卡片 */
@@ -124,44 +183,29 @@ export function hiddenWidgets(layout: WidgetLayout): WidgetInfo[] {
   return WIDGETS.filter((w) => !on.has(w.id));
 }
 
-export function setSize(layout: WidgetLayout, id: WidgetId, size: WidgetSize): WidgetLayout {
-  const info = INFO.get(id);
-  if (!info || !info.sizes.includes(size)) return layout;
-  return { version: 1, items: layout.items.map((i) => (i.id === id ? { id, size } : i)) };
+export function withItems(items: GridItem[]): WidgetLayout {
+  return { version: 2, items: items as WidgetLayoutItem[] };
 }
 
-export function removeWidget(layout: WidgetLayout, id: WidgetId): WidgetLayout {
-  return { version: 1, items: layout.items.filter((i) => i.id !== id) };
-}
-
-/** 加到最后，用这张卡的默认档位 */
+/** 加一张卡：用这张卡的默认大小，放在最后一行第一个放得下的位置 */
 export function addWidget(layout: WidgetLayout, id: WidgetId): WidgetLayout {
   const info = INFO.get(id);
   if (!info || layout.items.some((i) => i.id === id)) return layout;
-  return { version: 1, items: [...layout.items, { id, size: info.sizes[0] }] };
+  return withItems(addItem(layout.items, { id, x: 0, y: 0, w: info.w, h: info.h }));
 }
 
-/** 往前（-1）或往后（+1）挪一格 */
-export function moveWidget(layout: WidgetLayout, id: WidgetId, delta: -1 | 1): WidgetLayout {
-  const i = layout.items.findIndex((x) => x.id === id);
-  const j = i + delta;
-  if (i < 0 || j < 0 || j >= layout.items.length) return layout;
-  const items = [...layout.items];
-  [items[i], items[j]] = [items[j], items[i]];
-  return { version: 1, items };
-}
-
-/** 拖动：把 id 放到 before 前面（before 为 null 时放到最后） */
-export function placeWidget(layout: WidgetLayout, id: WidgetId, before: WidgetId | null): WidgetLayout {
-  const item = layout.items.find((x) => x.id === id);
-  if (!item || id === before) return layout;
-  const rest = layout.items.filter((x) => x.id !== id);
-  const at = before ? rest.findIndex((x) => x.id === before) : -1;
-  if (at < 0) rest.push(item);
-  else rest.splice(at, 0, item);
-  return { version: 1, items: rest };
+export function removeWidget(layout: WidgetLayout, id: WidgetId): WidgetLayout {
+  return withItems(compact(layout.items.filter((i) => i.id !== id)));
 }
 
 export function sameLayout(a: WidgetLayout, b: WidgetLayout): boolean {
-  return a.items.length === b.items.length && a.items.every((x, i) => x.id === b.items[i].id && x.size === b.items[i].size);
+  return a.items.length === b.items.length && a.items.every((x, i) => {
+    const y = b.items[i];
+    return x.id === y.id && x.x === y.x && x.y === y.y && x.w === y.w && x.h === y.h;
+  });
+}
+
+/** 把卡片按阅读顺序（先上后下、先左后右）排好，窄屏排成一列时用这个顺序 */
+export function readingOrder(layout: WidgetLayout): WidgetLayoutItem[] {
+  return [...layout.items].sort((a, b) => a.y - b.y || a.x - b.x);
 }

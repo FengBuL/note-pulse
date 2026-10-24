@@ -3,6 +3,7 @@ import { mk, q, stats } from "./sample";
 import { DashboardView } from "../../src/view";
 import { DEFAULT_SETTINGS } from "../../src/settings";
 import { setLanguage } from "../../src/i18n";
+import { WidgetLayout, withItems } from "../../src/widgets";
 
 const lang = (q.get("lang") === "en" ? "en" : "zh") as "en" | "zh";
 setLanguage(lang);
@@ -34,4 +35,10 @@ void view.onOpen().then(() => {
 (window as unknown as { previewRefresh: (delta: number) => void }).previewRefresh = (delta) => {
   stats.totalWords += delta;
   view.render({ ...stats, generatedAt: stats.generatedAt });
+};
+
+// 测试用：把布局换成指定的几张卡（位置和大小自己定），并重画
+(window as unknown as { previewLayout: (items: { id: string; x: number; y: number; w: number; h: number }[]) => void }).previewLayout = (items) => {
+  settings.layout = withItems(items) as WidgetLayout;
+  view.render(stats);
 };

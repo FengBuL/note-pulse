@@ -24,7 +24,9 @@ import {
   weeklyWords,
 } from "./dashboard-logic";
 import { GroupStat, Hint, TaskInfo, VaultStats, addDays, dayKey, isCheckinDay, pad2, startOfDay } from "./stats";
-import { WidgetId, WidgetLayout, WidgetSize, addWidget, defaultLayout, hiddenWidgets, moveWidget, placeWidget, removeWidget, sameLayout, setSize, widgetInfo } from "./widgets";
+import { COLS, GAP, rowsToPx } from "./grid";
+import { Box, activityDensity, bodyH, densityDensity, densityKey, foldersDensity, heatDensity, heroDensity, isTight, kpiDensity, rhythmDensity, trendDensity } from "./density";
+import { WidgetId, WidgetLayout, WidgetLayoutItem, addWidget, defaultLayout, hiddenWidgets, readingOrder, removeWidget, sameLayout } from "./widgets";
 import { MOTION, SegRect, animateHeight, countUp, drawLines, markStagger, playLayout, reducedMotion, segRect, slideSeg, snapshotRects } from "./motion";
 import {
   BarItem,
@@ -42,7 +44,7 @@ import {
   svgEl,
 } from "./charts";
 import { baseName } from "./checkup-logic";
-import { L, UnitKind, count, fullDate, monthDay, monthShort, plural, unit, weekdayName, weekdayShort } from "./i18n";
+import { L, count, fullDate, monthDay, monthShort, plural, unit, weekdayName, weekdayShort } from "./i18n";
 
 let reportDetailsId = 0;
 
@@ -63,7 +65,12 @@ const WIDGET_TEXT: Record<WidgetId, [() => string, () => string]> = {
   heat: [() => L("写作热力图", "Writing heatmap"), () => L("最多一年的每日写作", "Daily writing for up to a year")],
   trend: [() => L("每周写作", "Weekly writing"), () => L("每周或每天的字数、新建笔记", "Words or new notes per week or day")],
   tags: [() => L("常用标签", "Top tags"), () => L("标签和文件夹排行", "Tag and folder ranking")],
-  checkup: [() => L("库体检", "Vault checkup"), () => L("断链、孤立笔记、重复内容等", "Broken links, orphans, duplicates and more")],
+  brokenLinks: [() => L("断链", "Broken links"), () => L("指向不存在笔记的链接，能唯一确定的可以一键修复", "Links to notes that don't exist; one click fixes the unambiguous ones")],
+  orphans: [() => L("孤立笔记", "Orphans"), () => L("没有任何链接进出的笔记", "Notes with no links in or out")],
+  sameName: [() => L("同名笔记", "Same name"), () => L("名字相同的笔记，链接时容易指错", "Notes sharing a name, which makes links ambiguous")],
+  emptyBig: [() => L("空笔记与超大笔记", "Empty and oversized"), () => L("没有内容的笔记，和字数异常多的笔记", "Notes with no content, and unusually long ones")],
+  unusedFiles: [() => L("未引用的附件", "Unused attachments"), () => L("没有任何笔记链接或嵌入的附件", "Attachments no note links to or embeds")],
+  dupes: [() => L("重复内容", "Duplicates"), () => L("不同笔记里重复出现的段落", "Passages repeated across notes")],
   reports: [() => L("写作回顾", "Writing review"), () => L("周报和月报", "Weekly and monthly reports")],
   topLinked: [() => L("最常被链接", "Most linked"), () => L("哪些笔记是你的核心", "Which notes are your hubs")],
   rhythm: [() => L("写作节奏", "Writing rhythm"), () => L("一般星期几写", "Which weekdays you write")],
@@ -74,7 +81,6 @@ const WIDGET_TEXT: Record<WidgetId, [() => string, () => string]> = {
 };
 const widgetName = (id: WidgetId) => WIDGET_TEXT[id][0]();
 const widgetDesc = (id: WidgetId) => WIDGET_TEXT[id][1]();
-const sizeName = (s: WidgetSize) => ({ s: L("小", "Small"), m: L("中", "Medium"), l: L("大", "Large"), xl: L("整行", "Full width") })[s];
 
 /** "2026-10-24" → 星期几（0 是周日） */
 const dayIndex = (key: string) => {
@@ -136,6 +142,9 @@ export class DashboardView extends ItemView {
   private enterOrder = 0;
   private motionTimers: number[] = [];
   private tapGuardCleanup: (() => void) | null = null;
+  /** 每张卡上次画的时候“显示什么”（见 density.ts），变了才重画 */
+  private densityKeys = new Map<string, string>();
+  private lastWidth = 0;
 
   constructor(leaf: WorkspaceLeaf, plugin: NotePulsePlugin) {
     super(leaf);
@@ -167,7 +176,8 @@ export class DashboardView extends ItemView {
 
     const actions = header.createDiv({ cls: "vp-header-actions" });
     this.statusEl = actions.createSpan({ cls: "vp-status" });
-    this.editBtn = this.iconButton(actions, "pencil", L("编辑看板", "Edit dashboard"), () => this.toggleEditing());
+    // 手机上只看不改：电脑上的布局会自动同步过来
+    if (!Platform.isMobile) this.editBtn = this.iconButton(actions, "pencil", L("编辑看板", "Edit dashboard"), () => this.toggleEditing());
     this.refreshBtn = this.iconButton(actions, "refresh-cw", L("刷新数据", "Refresh data"), () => void this.plugin.requestRefresh(true));
     this.iconButton(actions, "settings", L("看板设置", "Dashboard settings"), () => this.plugin.openSettings());
 
@@ -186,6 +196,22 @@ export class DashboardView extends ItemView {
     });
 
     if (Platform.isMobile) this.installTapGuard(root);
+
+    // 窗口宽度变了：卡片的实际像素大小跟着变，该换内容的换内容，列表重新截一遍
+    this.lastWidth = root.clientWidth;
+    if (typeof ResizeObserver !== "undefined") {
+      const ro = new ResizeObserver(() => {
+        if (Math.abs(root.clientWidth - this.lastWidth) < 2) return;
+        this.lastWidth = root.clientWidth;
+        if (this.resizeFrame) return;
+        this.resizeFrame = window.requestAnimationFrame(() => {
+          this.resizeFrame = 0;
+          this.refit();
+        });
+      });
+      ro.observe(root);
+      this.register(() => ro.disconnect());
+    }
 
     this.introPlayed = false;
     this.introUntil = 0;
@@ -275,6 +301,8 @@ export class DashboardView extends ItemView {
     this.motionTimers = [];
     this.tapGuardCleanup?.();
     this.tapGuardCleanup = null;
+    if (this.resizeFrame) window.cancelAnimationFrame(this.resizeFrame);
+    this.resizeFrame = 0;
     this.disconnectObservers();
     this.helpPop?.remove();
     this.helpPop = null;
@@ -376,6 +404,9 @@ export class DashboardView extends ItemView {
     this.disconnectObservers();
     this.parts.clear();
     this.renderers.clear();
+    this.fitters.clear();
+    this.densityKeys.clear();
+    this.narrow = this.contentEl.clientWidth > 0 && this.contentEl.clientWidth < 760;
     this.refreshBtn?.removeClass("is-spinning");
     const d = new Date(stats.generatedAt);
     this.renderedDay = dayKey(Date.now());
@@ -399,127 +430,135 @@ export class DashboardView extends ItemView {
     this.bodyHost = body;
     this.define("hints", body, (h) => this.renderHints(h, stats));
     this.define("headline", body, (h) => this.renderHeadline(h, stats, ck));
+    if (this.editing && !this.narrow) this.renderEditBar(body);
     const grid = body.createDiv({ cls: "vp-grid" });
     this.gridEl = grid;
-    grid.toggleClass("is-editing", this.editing);
-    for (const item of this.plugin.settings.layout.items) {
+    grid.toggleClass("is-editing", this.editing && !this.narrow);
+    grid.toggleClass("is-narrow", this.narrow);
+    // 按阅读顺序画：窄面板里卡片就是按这个顺序排成一列
+    for (const item of readingOrder(this.plugin.settings.layout)) {
       const fn = this.widgetRenderer(item.id, stats, ck);
       if (fn) this.define(item.id, grid, fn);
     }
-    if (this.editing) this.renderAddPanel(body);
-    else if (this.plugin.settings.layout.items.length === 0) {
+    if (this.plugin.settings.layout.items.length === 0) {
       const e = body.createDiv({ cls: "vp-card vp-fullempty" });
-      this.empty(e, "layout-dashboard", L("看板上没有卡片。点右上角的铅笔添加。", "The dashboard has no cards. Use the pencil at the top right to add some."));
+      this.empty(
+        e,
+        "layout-dashboard",
+        Platform.isMobile ? L("看板上没有卡片。在电脑上用右上角的铅笔添加。", "The dashboard has no cards. Add some on a computer with the pencil at the top right.") : L("看板上没有卡片。点右上角的铅笔添加。", "The dashboard has no cards. Use the pencil at the top right to add some.")
+      );
+    }
+  }
+
+  /** 卡片的实际大小变了（窗口缩放、拖动调大小）：内容该变的重画，列表重新截 */
+  private refit(ids?: string[]) {
+    if (!this.stats || !this.gridEl || this.contentEl.clientWidth === 0) return;
+    const narrow = this.contentEl.clientWidth < 760;
+    if (narrow !== this.narrow) {
+      if (narrow && this.editing) this.toggleEditing();
+      else this.render(this.stats);
+      return;
+    }
+    for (const it of this.plugin.settings.layout.items) {
+      if (ids && !ids.includes(it.id)) continue;
+      if (densityKey(it.id, this.box(it.id)) !== this.densityKeys.get(it.id)) this.rerender(it.id, "resize");
+      else this.fitters.get(it.id)?.();
     }
   }
 
   /** 看板栅格（编辑模式要在上面挂类） */
   private gridEl: HTMLElement | null = null;
   private editBtn: HTMLElement | null = null;
-  /** 编辑看板：卡片上出现尺寸、隐藏、移动，底部出现“添加卡片” */
+  /** 编辑看板：页首出现编辑栏，卡片上出现移除按钮 */
   private editing = false;
+  /** “添加卡片”的面板是否打开 */
+  private addOpen = false;
+  /** 看板容器窄于 760px（手机、平板竖屏、分屏的窄面板）：卡片排成一列，只看不改 */
+  private narrow = false;
+  private resizeFrame = 0;
 
   private toggleEditing() {
+    if (!this.editing && this.narrow) {
+      new Notice(L("把面板放宽到 760px 以上再编辑", "Make this pane wider than 760 px to edit the dashboard"));
+      return;
+    }
     this.editing = !this.editing;
+    this.addOpen = false;
     this.editBtn?.toggleClass("is-active", this.editing);
     this.editBtn?.setAttr("aria-pressed", String(this.editing));
     if (this.stats) this.render(this.stats);
   }
 
   /** 改布局：立刻保存（随 data.json 同步），用已有统计重画 */
-  private applyLayout(next: WidgetLayout, focusId?: string) {
+  private applyLayout(next: WidgetLayout, opts: { focusId?: string; reveal?: string } = {}) {
     if (sameLayout(next, this.plugin.settings.layout)) return;
     this.plugin.settings.layout = next;
     void this.plugin.saveViewSetting();
-    // 卡片从原来的位置滑到新位置（换尺寸、挪动、拖放），新加的淡入
+    // 卡片从原来的位置滑到新位置，新加的淡入
     const before = this.motionOn() && this.gridEl ? snapshotRects(this.gridEl) : null;
     if (this.stats) this.render(this.stats);
     if (before && this.gridEl) playLayout(this.gridEl, before);
-    if (focusId) this.contentEl.querySelector<HTMLElement>(`[data-fid="${focusId}"]`)?.focus({ preventScroll: true });
+    if (opts.focusId) this.contentEl.querySelector<HTMLElement>(`[data-fid="${opts.focusId}"]`)?.focus({ preventScroll: true });
+    if (opts.reveal) this.revealCard(opts.reveal);
   }
 
-  /** 编辑模式下每张卡片右上角的工具条：尺寸、前移、后移、隐藏；整张卡可以拖动换位置 */
+  /** 滚到这张卡并闪一下 */
+  private revealCard(id: string) {
+    const el = this.parts.get(id);
+    if (!el) return;
+    el.scrollIntoView({ block: "center", behavior: this.motionOn() ? "smooth" : "auto" });
+    this.flagFor(el, "is-flash", 1400);
+  }
+
+  /** 编辑模式下每张卡片右上角的“移除”按钮 */
   private editTools(el: HTMLElement, id: WidgetId) {
-    const info = widgetInfo(id);
-    if (!info) return;
-    const layout = this.plugin.settings.layout;
-    const size = layout.items.find((i) => i.id === id)?.size;
-    const idx = layout.items.findIndex((i) => i.id === id);
     const name = widgetName(id);
     el.addClass("is-editing");
-    const bar = el.createDiv({ cls: "vp-w-tools", attr: { role: "toolbar", "aria-label": L(`${name}：编辑`, `Edit ${name}`) } });
-    el.prepend(bar);
-    bar.createSpan({ cls: "vp-w-name", text: Platform.isMobile ? L("用箭头换位置", "Use the arrows to move") : L("拖动或用箭头换位置", "Drag or use the arrows to move") });
-    if (info.sizes.length > 1) {
-      const seg = bar.createDiv({ cls: "vp-seg", attr: { role: "radiogroup", "aria-label": L("尺寸", "Size") } });
-      for (const sz of ["s", "m", "l", "xl"] as WidgetSize[]) {
-        if (!info.sizes.includes(sz)) continue;
-        const b = seg.createEl("button", {
-          cls: "vp-seg-btn" + (sz === size ? " is-active" : ""),
-          text: sz.toUpperCase(),
-          attr: { type: "button", role: "radio", "aria-checked": String(sz === size), "aria-label": `${sizeName(sz)}`, "data-fid": `edit:${id}:${sz}` },
-        });
-        b.addEventListener("click", () => this.applyLayout(setSize(this.plugin.settings.layout, id, sz), `edit:${id}:${sz}`));
-      }
-    }
-    const btn = (icon: string, label: string, fid: string, disabled: boolean, fn: () => void) => {
-      const b = bar.createEl("button", { cls: "vp-icon-btn is-small", attr: { type: "button", "aria-label": label, "data-fid": fid } });
-      setIcon(b, icon);
-      if (disabled) b.setAttr("disabled", "true");
-      b.addEventListener("click", fn);
-    };
-    btn("chevron-up", L("往前挪", "Move earlier"), `edit:${id}:up`, idx <= 0, () => this.applyLayout(moveWidget(this.plugin.settings.layout, id, -1), `edit:${id}:up`));
-    btn("chevron-down", L("往后挪", "Move later"), `edit:${id}:down`, idx >= layout.items.length - 1, () => this.applyLayout(moveWidget(this.plugin.settings.layout, id, 1), `edit:${id}:down`));
-    btn("x", L("从看板上移除", "Remove from dashboard"), `edit:${id}:hide`, false, () => this.applyLayout(removeWidget(this.plugin.settings.layout, id)));
-    // 拖动换位置（鼠标）；键盘和触屏用上面的前移 / 后移（触屏没有 HTML5 拖放，加了 draggable 反而会挡住滚动）
-    if (Platform.isMobile) return;
-    el.setAttr("draggable", "true");
-    el.addEventListener("dragstart", (e) => {
-      if ((e.target as HTMLElement).closest?.(".vp-w-tools")) return;
-      e.dataTransfer?.setData("text/plain", id);
-      if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
-      el.addClass("is-dragging");
-    });
-    el.addEventListener("dragend", () => el.removeClass("is-dragging"));
-    el.addEventListener("dragover", (e) => {
-      e.preventDefault();
-      el.addClass("is-drop");
-    });
-    el.addEventListener("dragleave", () => el.removeClass("is-drop"));
-    el.addEventListener("drop", (e) => {
-      e.preventDefault();
-      el.removeClass("is-drop");
-      const from = e.dataTransfer?.getData("text/plain") as WidgetId | undefined;
-      if (from && from !== id) this.applyLayout(placeWidget(this.plugin.settings.layout, from, id));
-    });
+    const x = el.createEl("button", { cls: "vp-w-remove", attr: { type: "button", "aria-label": L(`从看板上移除 ${name}`, `Remove ${name} from the dashboard`), "data-fid": `edit:${id}:hide` } });
+    setIcon(x, "x");
+    x.addEventListener("click", () => this.applyLayout(removeWidget(this.plugin.settings.layout, id)));
   }
 
-  /** 编辑模式：看板最下面的“添加卡片”和“恢复默认布局” */
+  /** 编辑栏：恢复默认布局、添加卡片、完成；添加面板打开时列在编辑栏下面 */
+  private renderEditBar(parent: HTMLElement) {
+    const bar = parent.createDiv({ cls: "vp-editbar", attr: { role: "toolbar", "aria-label": L("编辑看板", "Edit dashboard") } });
+    bar.createDiv({ cls: "vp-editbar-hint", text: L("拖动卡片换位置，拖右下角调大小", "Drag a card to move it, drag its corner to resize") });
+    const acts = bar.createDiv({ cls: "vp-editbar-actions" });
+    const btn = (icon: string, text: string, fn: () => void, primary = false) => {
+      const b = acts.createEl("button", { cls: "vp-btn is-compact" + (primary ? " is-primary" : ""), attr: { type: "button" } });
+      if (icon) setIcon(b.createSpan({ cls: "vp-btn-icon", attr: { "aria-hidden": "true" } }), icon);
+      b.createSpan({ text });
+      b.addEventListener("click", fn);
+      return b;
+    };
+    btn("rotate-ccw", L("恢复默认布局", "Restore default"), () => this.applyLayout(defaultLayout()));
+    const add = btn("plus", L("添加卡片", "Add a card"), () => {
+      this.addOpen = !this.addOpen;
+      if (this.stats) this.render(this.stats);
+    });
+    add.setAttr("aria-expanded", String(this.addOpen));
+    btn("check", L("完成", "Done"), () => this.toggleEditing(), true);
+    if (this.addOpen) this.renderAddPanel(parent);
+  }
+
+  /** 添加面板：列出被移除的卡片，点一下加到最后一行第一个放得下的位置 */
   private renderAddPanel(parent: HTMLElement) {
     const panel = parent.createDiv({ cls: "vp-card vp-add-panel" });
-    const head = panel.createDiv({ cls: "vp-card-head" });
-    const t = head.createDiv({ cls: "vp-card-title" });
-    setIcon(t.createSpan({ cls: "vp-card-icon", attr: { "aria-hidden": "true" } }), "plus");
-    t.createSpan({ text: L("添加卡片", "Add a card") });
-    const reset = head.createEl("button", { cls: "vp-link", text: L("恢复默认布局", "Restore default layout"), attr: { type: "button" } });
-    reset.addEventListener("click", () => this.applyLayout(defaultLayout()));
     const hidden = hiddenWidgets(this.plugin.settings.layout);
     if (hidden.length === 0) {
       panel.createDiv({ cls: "vp-kpi-caption", text: L("所有卡片都在看板上了。点卡片右上角的 × 可以移除。", "Every card is on the dashboard. Use × on a card to remove it.") });
+      return;
     }
     const list = panel.createDiv({ cls: "vp-add-list" });
     for (const w of hidden) {
       const b = list.createEl("button", { cls: "vp-add-item", attr: { type: "button", "data-fid": `add:${w.id}` } });
       b.createDiv({ cls: "vp-add-name", text: widgetName(w.id) });
-      b.createDiv({ cls: "vp-add-desc", text: `${widgetDesc(w.id)} · ${w.sizes.map((x) => x.toUpperCase()).join(" / ")}` });
-      b.addEventListener("click", () => this.applyLayout(addWidget(this.plugin.settings.layout, w.id)));
+      b.createDiv({ cls: "vp-add-desc", text: `${widgetDesc(w.id)} · ${w.w} × ${w.h}` });
+      b.addEventListener("click", () => this.applyLayout(addWidget(this.plugin.settings.layout, w.id), { reveal: w.id }));
     }
-    const done = panel.createDiv({ cls: "vp-card-foot" });
-    const fin = done.createEl("button", { cls: "vp-btn is-primary", text: L("完成", "Done"), attr: { type: "button" } });
-    fin.addEventListener("click", () => this.toggleEditing());
   }
 
-  /** 每张卡片的渲染函数；尺寸由 mount 挂到卡片根元素上（is-s / is-m / is-l / is-xl） */
+  /** 每张卡片的渲染函数；位置和大小由 mount 挂到卡片根元素上（--vp-x / --vp-y / --vp-w / --vp-h） */
   private widgetRenderer(id: WidgetId, stats: VaultStats, ck: Checkin): ((host: HTMLElement) => void) | null {
     switch (id) {
       case "hero":
@@ -537,8 +576,18 @@ export class DashboardView extends ItemView {
         return (h) => this.renderTrend(h, stats);
       case "tags":
         return (h) => this.renderTags(h, stats);
-      case "checkup":
-        return (h) => this.renderCheckup(h, stats);
+      case "brokenLinks":
+        return (h) => this.renderBrokenLinks(h, stats);
+      case "orphans":
+        return (h) => this.renderOrphans(h, stats);
+      case "sameName":
+        return (h) => this.renderSameName(h, stats);
+      case "emptyBig":
+        return (h) => this.renderEmptyBig(h, stats);
+      case "unusedFiles":
+        return (h) => this.renderUnused(h, stats);
+      case "dupes":
+        return (h) => this.renderDupes(h);
       case "reports":
         return (h) => this.renderReports(h);
       case "topLinked":
@@ -558,9 +607,31 @@ export class DashboardView extends ItemView {
     }
   }
 
-  /** 这张卡片当前的尺寸 */
-  private sizeOf(id: string): WidgetSize | null {
-    return this.plugin.settings.layout.items.find((i) => i.id === id)?.size ?? null;
+  /** 这张卡片在布局里的位置和大小 */
+  private itemOf(id: string): WidgetLayoutItem | null {
+    return this.plugin.settings.layout.items.find((i) => i.id === id) ?? null;
+  }
+
+  /** 看板栅格现在有多宽（量不到时，比如标签页在后台，退回用面板宽度减去左右边距） */
+  private gridWidth(): number {
+    return this.gridEl?.clientWidth || Math.max(0, this.contentEl.clientWidth - 48) || 1200;
+  }
+
+  /**
+   * 这张卡片的实际大小（像素）：列数、行数和看板宽度算出来的，不用去量 DOM。
+   * 窄面板里卡片宽度是整行（或半行）、高度跟内容走，h 只是电脑上存的行数换算成像素，当作参考。
+   */
+  private box(id: string): Box {
+    const it = this.itemOf(id);
+    const cols = it?.w ?? 4;
+    const rows = it?.h ?? 4;
+    const gw = this.gridWidth();
+    if (this.narrow) {
+      const half = cols <= 3;
+      return { cols, rows, w: Math.round(half ? (gw - GAP) / 2 : gw), h: rowsToPx(rows), narrow: true };
+    }
+    const colW = (gw - GAP * (COLS - 1)) / COLS;
+    return { cols, rows, w: Math.round(cols * colW + (cols - 1) * GAP), h: rowsToPx(rows), narrow: false };
   }
 
   /** 登记并渲染一个区块；每个渲染函数必须恰好生成一个根元素 */
@@ -576,8 +647,9 @@ export class DashboardView extends ItemView {
     const intro = this.motionMode === "intro";
     const enter = intro ? Math.min(0.6, this.enterOrder / 14) : 0;
     this.enterDelay = enter * MOTION.stagger - this.introElapsed;
-    const mountSize = this.sizeOf(key);
-    this.mountingWidget = mountSize ? { id: key, size: mountSize } : null;
+    const item = this.itemOf(key);
+    this.mountingWidget = item;
+    if (item) this.densityKeys.set(key, densityKey(key, this.box(key)));
     try {
       fn(parent);
     } finally {
@@ -587,11 +659,12 @@ export class DashboardView extends ItemView {
     const el = parent.lastElementChild as HTMLElement | null;
     if (!el) return;
     this.parts.set(key, el);
-    if (mountSize) {
+    if (item) {
       // cardRoot 已经加过；这里兜底（万一渲染函数没用 cardRoot）
-      el.addClass("vp-w", `is-${mountSize}`);
-      el.setAttr("data-widget", key);
-      if (this.editing) this.editTools(el, key as WidgetId);
+      this.placeCard(el, item);
+      if (this.editing && !this.narrow) this.editTools(el, key as WidgetId);
+      // 列表按卡片现在的高度截一遍
+      this.fitters.get(key)?.();
     }
     if (intro) {
       markStagger(el);
@@ -784,14 +857,23 @@ export class DashboardView extends ItemView {
   private cardRoot(parent: HTMLElement, cls: string, attr?: Record<string, string>): HTMLElement {
     const el = parent.createDiv({ cls: `vp-card ${cls}`, attr });
     if (this.mountingWidget) {
-      el.addClass("vp-w", `is-${this.mountingWidget.size}`);
-      el.setAttr("data-widget", this.mountingWidget.id);
+      this.placeCard(el, this.mountingWidget);
+      // 2 行高的卡片：内边距收小，标题缩成一行小字
+      if (isTight(this.mountingWidget.h)) el.addClass("is-tight");
     }
     return el;
   }
 
+  /** 位置和大小写成 CSS 变量，由 styles.css 摆到栅格里；窄面板里这些变量不起作用（卡片排成一列） */
+  private placeCard(el: HTMLElement, it: WidgetLayoutItem) {
+    el.addClass("vp-w");
+    el.toggleClass("is-small", it.w <= 3);
+    el.setAttr("data-widget", it.id);
+    el.setCssProps({ "--vp-x": String(it.x), "--vp-y": String(it.y), "--vp-w": String(it.w), "--vp-h": String(it.h) });
+  }
+
   /** mount 期间正在渲染的小组件 */
-  private mountingWidget: { id: string; size: WidgetSize } | null = null;
+  private mountingWidget: WidgetLayoutItem | null = null;
 
   private card(parent: HTMLElement, cls: string, title: string, icon: string, help?: string): { el: HTMLElement; head: HTMLElement; body: HTMLElement } {
     const el = this.cardRoot(parent, cls);
@@ -851,14 +933,21 @@ export class DashboardView extends ItemView {
     return row;
   }
 
-  /** 宽度变化时重绘（图表按真实像素绘制，文字不会被缩放） */
-  private responsive(el: HTMLElement, draw: (width: number) => void) {
-    let last = -1;
+  /**
+   * 大小变化时重绘（图表按真实像素绘制，文字不会被缩放）。
+   * watchHeight：高度也由卡片定死时（热力图、每周写作的图），高度变了也重绘；窄面板里高度跟内容走，给个固定值。
+   */
+  private responsive(el: HTMLElement, draw: (width: number, height: number) => void, watchHeight?: { narrowH: number }) {
+    let lastW = -1;
+    let lastH = -1;
     const run = () => {
       const w = Math.floor(el.clientWidth);
-      if (w <= 0 || Math.abs(w - last) < 4) return;
-      last = w;
-      draw(w);
+      const h = watchHeight ? (this.narrow ? watchHeight.narrowH : Math.floor(el.clientHeight)) : 0;
+      if (w <= 0 || (watchHeight && h <= 0)) return;
+      if (Math.abs(w - lastW) < 4 && Math.abs(h - lastH) < 4) return;
+      lastW = w;
+      lastH = h;
+      draw(w, h);
     };
     run();
     if (typeof ResizeObserver !== "undefined") {
@@ -1017,6 +1106,8 @@ export class DashboardView extends ItemView {
     );
     if (h.dueToday > 0) bits.push(L(`${h.dueToday} 项任务今天到期`, `${count(h.dueToday, "tasks")} due today`));
     if (h.overdue > 0) bits.push(L(`${h.overdue} 项已逾期`, `${h.overdue} overdue`));
+    const tidy = this.tidyCount(s);
+    if (tidy > 0) bits.push(L(`库里有 ${fmtFull(tidy)} 项可整理`, `${fmtFull(tidy)} to tidy up in the vault`));
     el.createDiv({ cls: "vp-headline-sub", text: bits.join(" · ") });
   }
 
@@ -1026,6 +1117,7 @@ export class DashboardView extends ItemView {
     const settings = this.plugin.settings;
     const goal = settings.dailyWordGoal;
     const now = new Date(s.generatedAt);
+    const dn = heroDensity(this.box("hero"));
     const hero = this.cardRoot(grid, "vp-hero");
     const todayDone = ck.isActive(ck.todayKey);
 
@@ -1044,11 +1136,11 @@ export class DashboardView extends ItemView {
     setIcon(pill.createSpan({ cls: "vp-pill-icon" }), todayDone ? "check" : "clock");
     pill.createSpan({ text: todayDone ? L("已打卡", "Done") : L("还没打卡", "Not yet") });
 
-    const main = hero.createDiv({ cls: "vp-hero-main" });
+    const main = hero.createDiv({ cls: "vp-hero-main" + (dn.wide ? " is-wide" : "") + (dn.stacked ? " is-stacked" : "") });
 
     // 今日字数 / 目标 圆环
     const ratio = goal > 0 ? ck.todayWords / goal : ck.todayWords > 0 ? 1 : 0;
-    const center = drawRing(main, ratio, 132, 10, "vp-hero-ring");
+    const center = drawRing(main, ratio, dn.ring, dn.ring >= 120 ? 10 : 8, "vp-hero-ring" + (dn.ring < 112 ? " is-small" : ""));
     const ringWrap = center.parentElement as HTMLElement;
     this.tweenRing("hero:ring", ringWrap, ratio);
     ringWrap.setAttr("role", "img");
@@ -1070,14 +1162,12 @@ export class DashboardView extends ItemView {
     const todayDiary = s.dailyNotes[ck.todayKey];
     if (todayDiary) this.clickable(diary, L("打开今天的日记", "Open today's daily note"), (e) => void this.plugin.openFile(todayDiary, undefined, e));
 
-    // M：只有今日字数和连续打卡；L / XL 再加本周七天和今天写过的笔记
-    if (this.sizeOf("hero") === "m") return;
-
-    // 本周
-    main.appendChild(this.renderWeek(s, goal, now));
+    // 窄或矮的时候只有今日字数和连续打卡；宽了加本周七天，再高加今日新建、今日改动和今天写过的笔记
+    if (dn.week) main.appendChild(this.renderWeek(s, goal, now));
+    if (!dn.foot) return;
 
     // 今天动过的笔记（来自每天修改过的笔记列表；不估算单篇字数）
-    const foot = hero.createDiv({ cls: "vp-hero-foot" });
+    const foot = hero.createDiv({ cls: "vp-hero-foot" + (dn.chips ? "" : " is-short") });
     const todayCreated = s.dayCreated[ck.todayKey] || 0;
     const todayFiles = s.dayModified[ck.todayKey] || [];
     const stat = (key: string, label: string, value: number, unit: string) => {
@@ -1087,13 +1177,15 @@ export class DashboardView extends ItemView {
     };
     stat("hero:created", L("今日新建", "Created"), todayCreated, unit("notes", todayCreated));
     stat("hero:modified", L("今日改动", "Edited"), todayFiles.length, unit("notes", todayFiles.length));
-    const recent = foot.createDiv({ cls: "vp-hero-recent" });
-    recent.createDiv({ cls: "vp-label", text: L("今天写过", "Worked on today") });
-    const chips = recent.createDiv({ cls: "vp-chips" });
-    if (todayFiles.length === 0) chips.createSpan({ cls: "vp-chip-empty", text: L("今天还没有改动的笔记", "No notes edited today yet") });
-    for (const f of [...todayFiles].sort((a, b) => b.stat.mtime - a.stat.mtime).slice(0, 3)) {
-      const c = chips.createSpan({ cls: "vp-chip", text: f.basename, attr: { title: f.path } });
-      this.clickable(c, L(`打开 ${f.basename}`, `Open ${f.basename}`), (e) => void this.plugin.openFile(f, undefined, e));
+    if (dn.chips) {
+      const recent = foot.createDiv({ cls: "vp-hero-recent" });
+      recent.createDiv({ cls: "vp-label", text: L("今天写过", "Worked on today") });
+      const chips = recent.createDiv({ cls: "vp-chips" });
+      if (todayFiles.length === 0) chips.createSpan({ cls: "vp-chip-empty", text: L("今天还没有改动的笔记", "No notes edited today yet") });
+      for (const f of [...todayFiles].sort((a, b) => b.stat.mtime - a.stat.mtime).slice(0, 3)) {
+        const c = chips.createSpan({ cls: "vp-chip", text: f.basename, attr: { title: f.path } });
+        this.clickable(c, L(`打开 ${f.basename}`, `Open ${f.basename}`), (e) => void this.plugin.openFile(f, undefined, e));
+      }
     }
   }
 
@@ -1194,8 +1286,9 @@ export class DashboardView extends ItemView {
     }
     const range = (a: Date, b: Date) => (dayKey(a) === dayKey(b) ? `${a.getMonth() + 1}/${a.getDate()}` : `${a.getMonth() + 1}/${a.getDate()} – ${b.getMonth() + 1}/${b.getDate()}`);
 
+    const dn = kpiDensity(this.box(which));
     const kpi = (icon: string, label: string, help: string) => {
-      const c = this.cardRoot(wrap, "vp-kpi", { role: "group" });
+      const c = this.cardRoot(wrap, "vp-kpi" + (dn.small ? " is-small" : ""), { role: "group" });
       srLabel(c, label);
       const top = c.createDiv({ cls: "vp-kpi-top" });
       setIcon(top.createSpan({ cls: "vp-card-icon", attr: { "aria-hidden": "true" } }), icon);
@@ -1203,7 +1296,7 @@ export class DashboardView extends ItemView {
       this.help(top, help);
       const row = c.createDiv({ cls: "vp-kpi-row" });
       const num = row.createDiv({ cls: "vp-kpi-num" });
-      const side = row.createDiv({ cls: "vp-kpi-side" });
+      const side = row.createDiv({ cls: "vp-kpi-side" + (dn.side ? "" : " vp-hide") });
       return { c, num, side };
     };
     /** 主数字和右侧说明；悬停趋势线时换成那一周的读数，离开时恢复 */
@@ -1251,7 +1344,7 @@ export class DashboardView extends ItemView {
           up: true,
         })
       );
-      drawSparkline(a.c.createDiv({ cls: "vp-kpi-viz" }), notes.map((p) => p.value), {
+      if (dn.viz) drawSparkline(a.c.createDiv({ cls: "vp-kpi-viz" }), notes.map((p) => p.value), {
         onPoint: aOn,
         label: (i) =>
           L(
@@ -1289,7 +1382,7 @@ export class DashboardView extends ItemView {
           return { value: p.value, unit: p.unit, date: range(words[i].start, words[i].end), note: L(`当周 +${fmtNum(words[i].extra)}`, `+${fmtNum(words[i].extra)} that week`), up: true };
         }
       );
-      drawSparkline(b.c.createDiv({ cls: "vp-kpi-viz" }), words.map((p) => p.value), {
+      if (dn.viz) drawSparkline(b.c.createDiv({ cls: "vp-kpi-viz" }), words.map((p) => p.value), {
         onPoint: bOn,
         label: (i) =>
           L(
@@ -1311,7 +1404,7 @@ export class DashboardView extends ItemView {
       const rateEl = bigNumber(c.num, t.total ? String(rate) : "—", t.total ? "%" : "");
       if (t.total) this.tweenNum("kpi:rate", rateEl, rate, "%");
       c.side.createSpan({ cls: "vp-kpi-caption", text: `${fmtFull(t.done)} / ${fmtFull(t.total)}` });
-      this.meter(c.c.createDiv({ cls: "vp-kpi-viz" }), t.total ? t.done / t.total : 0, "");
+      if (dn.viz) this.meter(c.c.createDiv({ cls: "vp-kpi-viz" }), t.total ? t.done / t.total : 0, "");
     }
 
     if (which === "month") {
@@ -1339,7 +1432,7 @@ export class DashboardView extends ItemView {
           note: count(fmtFull(weeks[i].extra), "words"),
         })
       );
-      drawSparkline(d.c.createDiv({ cls: "vp-kpi-viz" }), weeks.map((p) => p.value), {
+      if (dn.viz) drawSparkline(d.c.createDiv({ cls: "vp-kpi-viz" }), weeks.map((p) => p.value), {
         onPoint: dOn,
         label: (i) =>
           L(
@@ -1393,9 +1486,9 @@ export class DashboardView extends ItemView {
     const wrap = body.createDiv({ cls: "vp-heatmap-wrap" });
     const tip = new Tooltip(wrap);
     const svgHost = wrap.createDiv({ cls: "vp-heatmap-host" });
-    this.responsive(wrap, (w) => {
+    this.responsive(wrap, (w, h) => {
       svgHost.empty();
-      const weeks = this.drawHeatmap(svgHost, s, ck, w, tip);
+      const weeks = this.drawHeatmap(svgHost, s, ck, w, h, tip);
       const today = startOfDay(Date.now());
       const from = addDays(today, -((today.getDay() + 6) % 7) - (weeks - 1) * 7);
       let total = 0,
@@ -1420,7 +1513,7 @@ export class DashboardView extends ItemView {
       item(L("日均", "Daily avg"), fmtFull(Math.round(total / Math.max(1, days))), unit("words"));
       const busy = busiestWeekday(s, from, today);
       if (busy) item(L("最活跃", "Busiest"), busy);
-    });
+    }, { narrowH: 150 });
 
     const foot = body.createDiv({ cls: "vp-heat-foot" });
     const note: string[] = [];
@@ -1468,17 +1561,20 @@ export class DashboardView extends ItemView {
   }
 
   /** 按可用宽度决定显示多少周，返回周数 */
-  private drawHeatmap(host: HTMLElement, s: VaultStats, ck: Checkin, width: number, tip: Tooltip): number {
+  private drawHeatmap(host: HTMLElement, s: VaultStats, ck: Checkin, width: number, height: number, tip: Tooltip): number {
     const goal = this.plugin.settings.dailyWordGoal;
     const today = startOfDay(Date.now());
     const left = 22,
       top = 20,
       gap = 4;
-    const targetCell = 14;
-    const weeks = Math.max(8, Math.min(53, Math.floor((width - left + gap) / (targetCell + gap))));
-    const cell = Math.min(20, Math.floor((width - left + gap) / weeks - gap));
+    // 格子大小由高度定（7 行放进卡片），周数由宽度定；宽屏上周数到顶时格子横向略拉宽
+    const dn = heatDensity({ w: width, h: height });
+    const weeks = dn.weeks;
+    const cell = dn.cell;
+    const step = dn.stepX;
+    const cellW = step - gap;
     const gridStart = addDays(today, -((today.getDay() + 6) % 7) - (weeks - 1) * 7);
-    const W = left + weeks * (cell + gap) - gap,
+    const W = left + weeks * step - gap,
       H = top + 7 * (cell + gap) - gap;
     const svg = svgEl("svg", { width: W, height: H, viewBox: `0 0 ${W} ${H}`, class: "vp-heatmap" }, host);
 
@@ -1534,7 +1630,7 @@ export class DashboardView extends ItemView {
       const m = addDays(weekStart, 6).getMonth();
       if (m !== lastMonth) {
         lastMonth = m;
-        const x = left + w * (cell + gap);
+        const x = left + w * step;
         if (x - lastLabelX > 30 && x < W - 16) {
           const mt = svgEl("text", { x, y: 11, class: "vp-heat-label" }, svg);
           mt.textContent = monthShort(m);
@@ -1547,14 +1643,14 @@ export class DashboardView extends ItemView {
         const k = dayKey(day);
         const words = s.dayWords[k] || 0;
         const lvl = levelOf(words, k);
-        const x = left + w * (cell + gap),
+        const x = left + w * step,
           y = top + r * (cell + gap);
         const rect = svgEl(
           "rect",
           {
             x,
             y,
-            width: cell,
+            width: cellW,
             height: cell,
             rx: Math.max(2, Math.round(cell / 4)),
             class: `vp-heat-cell vp-l${lvl}${k === this.selectedDay ? " is-selected" : ""}${k === ck.todayKey ? " is-today" : ""}`,
@@ -1662,17 +1758,20 @@ export class DashboardView extends ItemView {
       L("时间范围", "Period")
     );
 
+    const dn = trendDensity(this.box("trend"));
     const u = isWords ? unit("words") : unit("notes");
     const rangeName = this.range === 30 ? L("30 天", "30 days") : this.range === 182 ? L("半年", "6 months") : L("一年", "1 year");
-    const summary = body.createDiv({ cls: "vp-trend-summary" });
-    const stat = (key: string, label: string, value: number) => {
-      const x = summary.createDiv({ cls: "vp-trend-side" });
-      this.tweenNum(`trend:${this.metric}:${key}`, bigNumber(x, value, u, "vp-num vp-num-sm"), value, u);
-      x.createDiv({ cls: "vp-label", text: label });
-    };
-    stat("total", L(`${rangeName}合计`, `Total, ${rangeName}`), m.total);
-    stat("avg", L(`${per}均`, daily ? "Per day" : "Per week"), m.average);
-    if (m.best) stat("best", L(`最高一${per}`, daily ? "Best day" : "Best week"), m.best.value);
+    if (dn.summary) {
+      const summary = body.createDiv({ cls: "vp-trend-summary" });
+      const stat = (key: string, label: string, value: number) => {
+        const x = summary.createDiv({ cls: "vp-trend-side" });
+        this.tweenNum(`trend:${this.metric}:${key}`, bigNumber(x, value, u, "vp-num vp-num-sm"), value, u);
+        x.createDiv({ cls: "vp-label", text: label });
+      };
+      stat("total", L(`${rangeName}合计`, `Total, ${rangeName}`), m.total);
+      stat("avg", L(`${per}均`, daily ? "Per day" : "Per week"), m.average);
+      if (m.best) stat("best", L(`最高一${per}`, daily ? "Best day" : "Best week"), m.best.value);
+    }
 
     const fmtDay = (d: Date) => `${d.getMonth() + 1}/${d.getDate()}`;
     const points: SeriesPoint[] = m.buckets.map((bk) => {
@@ -1696,12 +1795,18 @@ export class DashboardView extends ItemView {
         ),
         chartWrap
       );
-      this.responsive(chartWrap, (w) => {
-        host.empty();
-        drawTrendChart(host, points, { width: w, height: 220, kind: "bar", tooltip: tip, highlightLast: true });
-      });
+      // 图的高度等于它在卡片里分到的高度（卡片拉高，图就变高）
+      this.responsive(
+        chartWrap,
+        (w, h) => {
+          host.empty();
+          if (h < 60) return; // 卡片太矮，装不下图
+          drawTrendChart(host, points, { width: w, height: Math.max(64, h), kind: "bar", tooltip: tip, highlightLast: true });
+        },
+        { narrowH: 220 }
+      );
     }
-    this.renderOutlierRow(body, s);
+    if (dn.annot) this.renderOutlierRow(body, s);
   }
 
   /** 趋势卡下方：一键开关；说明文字都收进旁边的问号里 */
@@ -1741,12 +1846,72 @@ export class DashboardView extends ItemView {
     this.help(row, lines.join("\n"));
   }
 
+  /* ---------- 列表卡片：按卡片实际高度放几行 ---------- */
+
+  /** 展开了的列表卡片（列表在卡片里滚动，卡片高度不变） */
+  private expanded = new Set<string>();
+  /** 每张列表卡片的“按现在的高度重新截一遍”，卡片大小变化时调用 */
+  private fitters = new Map<string, () => void>();
+
+  /**
+   * 列表类卡片：所有行都画出来，再按卡片实际高度截到放得下的行数，放不下时底部出现“还有 N 个 ›”。
+   * 点开后列表在卡片里滚动，卡片高度不变；再点“收起”回去。所以展开永远不会把页面拉长。
+   * host 是装着这些行的容器（高度由卡片定死），units 是可以被隐藏的行（按从上到下的顺序），foot 是卡片底部的链接行。
+   */
+  private fitList(id: string, host: HTMLElement, foot: HTMLElement, units: HTMLElement[]) {
+    host.addClass("vp-fit");
+    if (this.narrow) host.setCssProps({ "--vp-fit-max": `${Math.max(120, bodyH(this.box(id)))}px` });
+    const btn = foot.createEl("button", { cls: "vp-link vp-fit-more", attr: { type: "button", "data-fid": `${id}:more` } });
+    const label = btn.createSpan();
+    const icon = btn.createSpan({ cls: "vp-link-icon", attr: { "aria-hidden": "true" } });
+    btn.hidden = true;
+    const run = () => {
+      const open = this.expanded.has(id);
+      for (const u of units) u.removeClass("vp-hide");
+      host.toggleClass("vp-scroll", open);
+      btn.hidden = !open;
+      if (open) {
+        label.setText(COLLAPSE());
+        setIcon(icon, "chevron-up");
+        host.setAttr("tabindex", "0");
+        host.setAttr("role", "region");
+        host.setAttr("aria-label", L("展开的列表", "Expanded list"));
+        foot.removeClass("vp-hide");
+        return;
+      }
+      host.removeAttribute("tabindex");
+      host.removeAttribute("role");
+      host.removeAttribute("aria-label");
+      if (host.scrollHeight > host.clientHeight + 1) {
+        btn.hidden = false; // 底部多出一行链接，列表可用的高度随之变小，要在这之后再量
+        // 用 offsetTop 而不是 getBoundingClientRect：入场动画里卡片带缩放，后者量出来会差一点
+        const limit = host.clientHeight + 0.5;
+        let keep = 0;
+        for (const u of units) {
+          if (u.offsetTop + u.offsetHeight > limit) break;
+          keep++;
+        }
+        keep = Math.max(1, keep);
+        units.forEach((u, i) => u.toggleClass("vp-hide", i >= keep));
+        const more = units.length - keep;
+        label.setText(L(`还有 ${fmtFull(more)} 个`, `${fmtFull(more)} more`));
+        setIcon(icon, "chevron-right");
+        btn.hidden = more <= 0;
+      }
+      foot.toggleClass("vp-hide", Array.from(foot.children).every((c) => (c as HTMLElement).hidden));
+    };
+    btn.addEventListener("click", () => {
+      if (this.expanded.has(id)) this.expanded.delete(id);
+      else this.expanded.add(id);
+      run();
+    });
+    this.fitters.set(id, run);
+  }
+
   /* ---------- 6. 接下来：任务 ---------- */
 
-  private taskExpanded = false;
-
   private renderTasks(grid: HTMLElement, s: VaultStats) {
-    const { el, head, body } = this.card(
+    const { head, body } = this.card(
       grid,
       "vp-tasks-card",
       L("接下来", "Next up"),
@@ -1759,7 +1924,7 @@ export class DashboardView extends ItemView {
     const t = s.tasks;
     this.segmented<TaskTab>(head, [["due", L("到期", "Due")], ["folder", L("按文件夹", "By folder")]], this.taskTab, (v) => {
       this.taskTab = v;
-      this.taskExpanded = false;
+      this.expanded.delete("tasks");
       this.rerender("tasks");
     });
     if (t.total === 0) {
@@ -1767,58 +1932,42 @@ export class DashboardView extends ItemView {
       return;
     }
     const todayKey = dayKey(Date.now());
-    // L 比 M 多放几行；展开后都是 50
-    const big = this.sizeOf("tasks") === "l";
-    const limit = this.taskExpanded ? 50 : big ? 8 : 4;
-    const odLimit = this.taskExpanded ? 50 : big ? 4 : 2;
-
+    const host = body.createDiv();
+    const units: HTMLElement[] = [];
+    const foot = body.createDiv({ cls: "vp-card-foot" });
     if (this.taskTab === "due") {
-      const area = this.listArea(el, body, this.taskExpanded);
       if (t.overdue.length) {
-        const od = area.createDiv({ cls: "vp-overdue" });
+        const od = host.createDiv({ cls: "vp-overdue" });
         od.createDiv({ cls: "vp-overdue-title", text: L(`已逾期 ${t.overdue.length}`, `Overdue ${t.overdue.length}`) });
         const list = od.createDiv({ cls: "vp-rows" });
-        for (const it of t.overdue.slice(0, odLimit)) this.taskRow(list, it, true);
+        for (const it of t.overdue.slice(0, 50)) units.push(this.taskRow(list, it, true));
       }
-      const list = area.createDiv({ cls: "vp-rows" });
+      const list = host.createDiv({ cls: "vp-rows" });
       if (t.dueSoon.length === 0 && !t.overdue.length) this.empty(list, "party-popper", L("7 天内没有到期的任务", "Nothing due in the next 7 days"));
-      for (const it of t.dueSoon.slice(0, limit)) this.taskRow(list, it, false, it.due === todayKey);
-      const hidden = Math.max(0, t.dueSoon.length - limit) + Math.max(0, t.overdue.length - odLimit);
-      const more = body.createDiv({ cls: "vp-card-foot" });
-      if (hidden > 0 || this.taskExpanded) {
-        this.moreLink(more, this.taskExpanded ? COLLAPSE() : L(`展开另外 ${hidden} 项`, `Show ${hidden} more`), () => {
-          this.taskExpanded = !this.taskExpanded;
-          this.rerender("tasks", "resize");
-        });
-      }
-      this.moreLink(more, L(`全部 ${fmtFull(t.pending)} 项待办`, `All ${count(fmtFull(t.pending), "tasks")}`), () => this.plugin.openSearch("task-todo:\"\""));
+      for (const it of t.dueSoon.slice(0, 50)) units.push(this.taskRow(list, it, false, it.due === todayKey));
+      this.fitList("tasks", host, foot, units);
+      this.moreLink(foot, L(`全部 ${fmtFull(t.pending)} 项待办`, `All ${count(fmtFull(t.pending), "tasks")}`), () => this.plugin.openSearch("task-todo:\"\""));
     } else {
       const groups: GroupStat[] = t.byFolder.filter((g) => g.pending > 0);
-      const list = this.listArea(el, body, this.taskExpanded).createDiv({ cls: "vp-rows" });
+      const list = host.createDiv({ cls: "vp-rows" });
       if (groups.length === 0) {
         this.empty(list, "party-popper", L("所有任务都完成了", "All tasks are done"));
         return;
       }
-      const shownGroups = big ? 12 : 6;
-      for (const g of groups.slice(0, this.taskExpanded ? 50 : shownGroups)) {
+      for (const g of groups.slice(0, 50)) {
         const row = list.createDiv({ cls: "vp-row vp-group-row" });
         row.createSpan({ cls: "vp-row-name", text: folderName(g.key) });
         const m = row.createDiv({ cls: "vp-meter is-inline" });
         m.createDiv({ cls: "vp-meter-fill" }).setCssProps({ "--vp-meter-width": `${(g.done / Math.max(1, g.total)) * 100}%` });
         row.createSpan({ cls: "vp-row-meta vp-tabular", text: L(`待办 ${g.pending}`, `${g.pending} open`) });
         if (g.key !== ROOT_FOLDER) this.clickable(row, L(`${g.key}，待办 ${g.pending}`, `${g.key}, ${g.pending} open`), () => this.plugin.revealFolder(g.key));
+        units.push(row);
       }
-      if (groups.length > shownGroups) {
-        const more = groups.length - shownGroups;
-        this.moreLink(body.createDiv({ cls: "vp-card-foot" }), this.taskExpanded ? COLLAPSE() : L(`展开另外 ${more} 个文件夹`, `Show ${more} more ${plural(more, "folder")}`), () => {
-          this.taskExpanded = !this.taskExpanded;
-          this.rerender("tasks", "resize");
-        });
-      }
+      this.fitList("tasks", host, foot, units);
     }
   }
 
-  private taskRow(list: HTMLElement, it: TaskInfo, overdue: boolean, today = false) {
+  private taskRow(list: HTMLElement, it: TaskInfo, overdue: boolean, today = false): HTMLElement {
     const row = list.createDiv({ cls: "vp-row vp-task-row" + (overdue ? " is-overdue" : "") + (today ? " is-today" : "") });
     row.createSpan({ cls: "vp-task-box", attr: { "aria-hidden": "true" } });
     const due = it.due ? it.due.slice(5).replace("-", "/").replace(/^0/, "") : "";
@@ -1827,16 +1976,7 @@ export class DashboardView extends ItemView {
     row.createSpan({ cls: "vp-row-name", text: text || L("（空任务）", "(empty task)"), attr: { title: `${text}\n${it.file.path}` } });
     row.createSpan({ cls: "vp-row-meta", text: it.file.basename });
     this.clickable(row, `${text || L("空任务", "Empty task")}${L("，", ", ")}${it.file.basename}${overdue ? L("，已逾期", ", overdue") : ""}`, (e) => void this.plugin.openFile(it.file, it.line, e));
-  }
-
-  /**
-   * 展开后的列表放进限高的滚动区：卡片最多长到大约 8 行，整页不会被拉长，
-   * “收起”就在滚动区下面，不用滚过整张列表去找。
-   */
-  private listArea(card: HTMLElement, body: HTMLElement, expanded: boolean): HTMLElement {
-    if (!expanded) return body;
-    card.addClass("is-expanded");
-    return body.createDiv({ cls: "vp-scroll", attr: { tabindex: "0", role: "region", "aria-label": L("展开的列表", "Expanded list") } });
+    return row;
   }
 
   /** 卡片底部的文字链接（展开 / 查看全部） */
@@ -1850,11 +1990,9 @@ export class DashboardView extends ItemView {
 
   /* ---------- 7. 标签 / 文件夹 ---------- */
 
-  private tagsExpanded = false;
-
   private renderTags(grid: HTMLElement, s: VaultStats) {
     const isTags = this.tagTab === "tags";
-    const { el, head, body } = this.card(
+    const { head, body } = this.card(
       grid,
       "vp-tags-card",
       isTags ? L("常用标签", "Top tags") : L("文件夹", "Folders"),
@@ -1868,16 +2006,15 @@ export class DashboardView extends ItemView {
     );
     this.segmented<TagTab>(head, [["tags", L("标签", "Tags")], ["folders", L("文件夹", "Folders")]], this.tagTab, (v) => {
       this.tagTab = v;
-      this.tagsExpanded = false;
+      this.expanded.delete("tags");
       this.rerender("tags");
     });
-    const limit = this.tagsExpanded ? 30 : this.sizeOf("tags") === "l" ? 12 : 6;
     let items: BarItem[];
     if (isTags) {
       const since = weekStart(new Date(s.generatedAt)).getTime();
       const fresh = new Map<string, number>();
       for (const f of s.files) if (f.created >= since) for (const t of f.tags) fresh.set(t, (fresh.get(t) || 0) + 1);
-      items = s.tags.slice(0, limit).map(([tag, n]) => ({
+      items = s.tags.slice(0, 50).map(([tag, n]) => ({
         label: tag,
         value: n,
         valueText: fmtFull(n),
@@ -1885,78 +2022,48 @@ export class DashboardView extends ItemView {
         onClick: () => this.plugin.openSearch(`tag:${tag}`),
       }));
     } else {
-      items = s.folders.slice(0, limit).map((f) => ({
+      items = s.folders.slice(0, 50).map((f) => ({
         label: folderName(f.folder),
         value: f.notes,
         valueText: `${count(fmtFull(f.notes), "notes")} · ${fmtNum(f.words)} ${unit("words")}`,
         onClick: f.folder === ROOT_FOLDER ? undefined : () => this.plugin.revealFolder(f.folder),
       }));
     }
-    drawBarList(
-      this.listArea(el, body, this.tagsExpanded),
-      items,
-      isTags ? L("还没有标签。给笔记加上 #标签，这里就会热闹起来", "No tags yet. Add #tags to your notes and they show up here.") : L("仓库里还没有文件夹", "No folders in the vault yet"),
-      (el) => setIcon(el.createDiv({ cls: "vp-empty-icon" }), isTags ? "tag" : "folder")
-    );
-    const total = isTags ? s.tags.length : s.folders.length;
-    if (total > (this.sizeOf("tags") === "l" ? 12 : 6)) {
-      this.moreLink(body.createDiv({ cls: "vp-card-foot" }), this.tagsExpanded ? COLLAPSE() : L(`全部 ${total} 个${isTags ? "标签" : "文件夹"}`, `All ${count(total, isTags ? "tags" : "folders")}`), () => {
-        this.tagsExpanded = !this.tagsExpanded;
-        this.rerender("tags", "resize");
-      });
-    }
+    this.barListCard("tags", body, items, isTags ? L("还没有标签。给笔记加上 #标签，这里就会热闹起来", "No tags yet. Add #tags to your notes and they show up here.") : L("仓库里还没有文件夹", "No folders in the vault yet"), isTags ? "tag" : "folder");
   }
 
-  /* ---------- 8. 库体检 ---------- */
+  /** 条形排行列表卡片：画出所有条，按卡片高度截断 */
+  private barListCard(id: string, body: HTMLElement, items: BarItem[], emptyText: string, emptyIcon: string) {
+    const host = body.createDiv();
+    drawBarList(host, items, emptyText, (el) => setIcon(el.createDiv({ cls: "vp-empty-icon" }), emptyIcon));
+    const foot = body.createDiv({ cls: "vp-card-foot" });
+    this.fitList(id, host, foot, Array.from(host.querySelectorAll<HTMLElement>(".vp-barrow")));
+  }
 
-  /** 库体检里展开的那一栏：一次只展开一栏（手风琴），展开别的栏会收起这一栏 */
-  private checkupOpen: string | null = null;
+  /* ---------- 8. 库体检：6 张卡 ---------- */
 
-  private renderCheckup(grid: HTMLElement, s: VaultStats) {
+  /** 库里一共有多少项可以整理（页首总结句用） */
+  private tidyCount(s: VaultStats): number {
     const c = checkupModel(s);
     const dd = this.plugin.dedupe;
     const dupOn = this.plugin.settings.dedupeEnabled && this.plugin.settings.dedupeCard;
-    const dup = dupOn && dd.analysis ? dedupeOverview(dd.analysis, dd.ignoredSet()) : null;
-    const { el: cardEl, head, body } = this.card(
-      grid,
-      "vp-checkup-card",
-      L("库体检", "Vault checkup"),
-      "heart-pulse",
-      L(
-        "随看板一起刷新。断链和孤立笔记来自 Obsidian 的链接索引；重复内容来自最近一次扫描。会改动笔记的操作都先确认，删除的笔记进回收站。",
-        "Refreshes with the dashboard. Broken links and orphans come from Obsidian's link index; duplicates from the last scan. Anything that changes notes asks first, and deleted notes go to the trash."
-      )
-    );
-    const live = head.createDiv({ cls: "vp-live" });
-    live.createSpan({ cls: "vp-live-dot", attr: { "aria-hidden": "true" } });
-    const at = new Date(s.generatedAt);
-    live.createSpan({ text: L(`实时 · ${pad2(at.getHours())}:${pad2(at.getMinutes())} 更新`, `Live · updated ${pad2(at.getHours())}:${pad2(at.getMinutes())}`) });
-    const extra = c.sameName.length + c.unusedAttachments.length;
-    const total = c.unresolved.length + c.orphans.length + c.empty.length + c.big.length + extra + (dup ? dup.groups.length : 0);
-    const todo = fmtFull(c.unresolvedCount + c.orphans.length + c.empty.length + c.big.length + extra + (dup ? dup.groups.length : 0));
-    head.createDiv({ cls: "vp-card-aside", text: total ? L(`共 ${todo} 项可整理`, `${todo} to tidy up`) : L("一切正常", "All good") });
+    const dup = dupOn && dd.analysis ? dedupeOverview(dd.analysis, dd.ignoredSet()).groups.length : 0;
+    return c.unresolvedCount + c.orphans.length + c.empty.length + c.big.length + c.sameName.length + c.unusedAttachments.length + dup;
+  }
 
-    const cols = body.createDiv({ cls: "vp-checkup" });
-    const col = (key: string, title: string, count: number, sev: "warn" | "", empty: string) => {
-      const el = cols.createDiv({ cls: "vp-checkup-col" });
-      const h = el.createDiv({ cls: "vp-checkup-head" });
-      h.createSpan({ cls: "vp-checkup-title", text: title });
-      h.createSpan({ cls: "vp-count" + (count && sev ? " is-warn" : ""), text: fmtFull(count) });
-      const open = this.checkupOpen === key;
-      if (open) {
-        el.addClass("is-open");
-        cardEl.addClass("is-expanded");
-      }
-      const list = el.createDiv({ cls: "vp-rows" + (open ? " vp-scroll" : "") });
-      if (open) {
-        list.setAttr("tabindex", "0");
-        list.setAttr("role", "region");
-        list.setAttr("aria-label", L(`${title}，展开的列表`, `${title}, expanded list`));
-      }
-      if (count === 0) list.createDiv({ cls: "vp-checkup-ok", text: empty });
-      return { el, list, limit: open ? 50 : 3, open };
-    };
-    const item = (list: HTMLElement, name: string, label: string, onOpen: (() => void) | null, actText: string, act: () => void) => {
+  /**
+   * 体检卡的共同骨架：标题旁一个数量（有问题时用警示色），下面是列表，放不下的行折叠成“还有 N 个”。
+   * 返回的 add 往列表里加一行，done 在加完之后调用。
+   */
+  private checkupCard(grid: HTMLElement, id: WidgetId, icon: string, help: string, total: number, warn: boolean, okText: string) {
+    const { head, body } = this.card(grid, "vp-checkup-card", widgetName(id), icon, help);
+    head.createSpan({ cls: "vp-count" + (total && warn ? " is-warn" : ""), text: fmtFull(total) });
+    const host = body.createDiv();
+    const list = host.createDiv({ cls: "vp-rows" });
+    if (total === 0) list.createDiv({ cls: "vp-checkup-ok", text: okText });
+    const foot = body.createDiv({ cls: "vp-card-foot" });
+    const units: HTMLElement[] = [];
+    const add = (name: string, label: string, onOpen: (() => void) | null, actText: string, act: () => void) => {
       const row = list.createDiv({ cls: "vp-row vp-checkup-row" });
       const n = row.createSpan({ cls: "vp-row-name", text: name, attr: { title: name } });
       if (onOpen) this.clickable(n, L(`打开 ${label}`, `Open ${label}`), () => onOpen());
@@ -1965,80 +2072,89 @@ export class DashboardView extends ItemView {
         e.stopPropagation();
         act();
       });
+      units.push(row);
     };
-    /** shown：列表里实际有多少条可以展开（断链只保留出现最多的 10 个名字，比总处数少） */
-    const foot = (k: { el: HTMLElement; open: boolean }, key: string, shown: number, kind: UnitKind) => {
-      if (shown <= 3) return;
-      this.moreLink(k.el.createDiv({ cls: "vp-card-foot" }), k.open ? COLLAPSE() : L(`展开 ${fmtFull(shown)} ${unit(kind)}`, `Show all ${fmtFull(shown)}`), () => {
-        this.checkupOpen = k.open ? null : key;
-        this.rerender("checkup", "resize");
-      });
-    };
+    return { body, host, foot, add, done: () => this.fitList(id, host, foot, units) };
+  }
 
-    // 断链：能唯一确定指向哪篇的排在前面，一键改过去；其余照旧可以新建笔记（用 Obsidian 自己的规则）
-    const u = col("unresolved", L("断链", "Broken links"), c.unresolvedCount, "warn", L("没有断开的链接", "No broken links"));
-    for (const x of c.unresolved.slice(0, u.limit)) {
+  /** 断链：能唯一确定指向哪篇的排在前面，一键改过去；其余照旧可以新建笔记（用 Obsidian 自己的规则） */
+  private renderBrokenLinks(grid: HTMLElement, s: VaultStats) {
+    const c = checkupModel(s);
+    const k = this.checkupCard(
+      grid,
+      "brokenLinks",
+      "unlink",
+      L("指向不存在的笔记的链接。能唯一确定该指向哪篇时（笔记被移动过，或只差空格、大小写、分隔符），可以一键改过去，改完能撤销。", "Links to notes that don't exist. When exactly one note could be meant (it was moved, or differs only in spaces, case or separators), one click repoints the links, and you can undo it."),
+      c.unresolvedCount,
+      true,
+      L("没有断开的链接", "No broken links")
+    );
+    for (const x of c.unresolved) {
       const shown = x.name.replace(/\\$/, "");
       const search = () => this.plugin.openSearch(`"[[${shown}"`);
       if (x.fix) {
         const fix = x.fix;
         const to = baseName(fix.target);
-        item(u.list, `[[${shown}]] → ${to}`, shown, search, L("修复", "Fix"), () => this.confirmLinkFix(shown, x.name, fix.target, x.from, x.count));
+        k.add(`[[${shown}]] → ${to}`, shown, search, L("修复", "Fix"), () => this.confirmLinkFix(shown, x.name, fix.target, x.from, x.count));
       } else {
-        item(u.list, L(`[[${shown}]] · ${x.count} 处`, `[[${shown}]] · ${x.count}×`), shown, search, L("创建笔记", "Create note"), () => {
+        k.add(L(`[[${shown}]] · ${x.count} 处`, `[[${shown}]] · ${x.count}×`), shown, search, L("创建笔记", "Create note"), () => {
           void this.app.workspace.openLinkText(shown, x.source ?? "", "tab");
         });
       }
     }
-    foot(u, "unresolved", c.unresolved.length, "links");
+    k.done();
+  }
 
-    // 孤立笔记
-    const o = col("orphans", L("孤立笔记", "Orphans"), c.orphans.length, "", L("每篇笔记都连上了", "Every note is linked"));
-    for (const f of c.orphans.slice(0, o.limit)) {
-      item(o.list, f.basename, f.basename, () => void this.plugin.openFile(f), L("打开", "Open"), () => void this.plugin.openFile(f));
+  private renderOrphans(grid: HTMLElement, s: VaultStats) {
+    const c = checkupModel(s);
+    const k = this.checkupCard(
+      grid,
+      "orphans",
+      "circle-dashed",
+      L("没有任何链接进出的笔记，来自 Obsidian 的链接索引。采集文件夹和设置里忽略的文件夹不检查。", "Notes with no links in or out, from Obsidian's link index. Clipping folders and folders ignored in settings are not checked."),
+      c.orphans.length,
+      false,
+      L("每篇笔记都连上了", "Every note is linked")
+    );
+    for (const f of c.orphans.slice(0, 50)) k.add(f.basename, f.basename, () => void this.plugin.openFile(f), L("打开", "Open"), () => void this.plugin.openFile(f));
+    k.done();
+  }
+
+  private renderSameName(grid: HTMLElement, s: VaultStats) {
+    const c = checkupModel(s);
+    const k = this.checkupCard(
+      grid,
+      "sameName",
+      "copy",
+      L("名字相同的笔记。[[链接]] 只写名字时 Obsidian 会挑其中一篇，容易指错。", "Notes that share a name. A [[link]] with just the name makes Obsidian pick one of them, which is easy to get wrong."),
+      c.sameName.length,
+      false,
+      L("没有同名笔记", "No notes share a name")
+    );
+    for (const g of c.sameName.slice(0, 50)) {
+      const name = baseName(g[0]);
+      const first = this.app.vault.getAbstractFileByPath(g[0]);
+      k.add(L(`${name} · ${g.length} 篇`, `${name} · ${g.length}`), name, first instanceof TFile ? () => void this.plugin.openFile(first) : null, L("查看", "Show"), () => this.plugin.openSearch(`file:"${name}"`));
     }
-    foot(o, "orphans", c.orphans.length, "notes");
+    k.done();
+  }
 
-    // 重复内容
-    if (dupOn) {
-      const n = dup ? dup.groups.length : 0;
-      const d = col(
-        "dupes",
-        L("重复内容", "Duplicates"),
-        n,
-        "warn",
-        dd.scanning ? L("正在扫描…", "Scanning…") : dd.analysis ? L("没有重复内容", "No duplicates") : L("还没扫描过", "Not scanned yet")
-      );
-      if (!dd.analysis && !dd.scanning) {
-        item(d.list, L("扫描只读，不会改动笔记", "Read-only, changes nothing"), "", null, L("开始扫描", "Scan"), () => void dd.openReport(true));
-      }
-      if (dup) {
-        for (const g of dup.groups.slice(0, d.limit)) {
-          const first = g.occs[0];
-          const base = first?.path.split("/").pop()?.replace(/\.md$/, "");
-          const name = base
-            ? L(`${base} 等 ${g.occs.length} 篇`, `${base} and ${g.occs.length - 1} more`)
-            : count(g.occs.length, "notes");
-          item(d.list, name, name, () => void dd.openReport(false), L("保留最早", "Keep oldest"), () => dd.startCleanup([groupItem(g, 0)], "mark"));
-        }
-      }
-      if (n > 3) this.moreLink(d.el.createDiv({ cls: "vp-card-foot" }), L(`全部 ${fmtFull(n)} 段`, `All ${count(fmtFull(n), "passages")}`), () => void dd.openReport(false));
-      if (dd.stale && dd.analysis) d.el.createDiv({ cls: "vp-checkup-note", text: L("笔记有改动，建议重新扫描", "Notes changed since the scan. Scan again.") });
-    }
-
-    // 空笔记与超大笔记
+  private renderEmptyBig(grid: HTMLElement, s: VaultStats) {
+    const c = checkupModel(s);
     const eb = c.empty.length + c.big.length;
-    const e = col("emptybig", L("空笔记与超大笔记", "Empty and oversized"), eb, "", L("没有空笔记或超大笔记", "No empty or oversized notes"));
-    let shown = 0;
-    for (const f of c.empty) {
-      if (shown++ >= e.limit) break;
-      item(e.list, `${f.file.basename} · ${count(0, "words")}`, f.file.basename, () => void this.plugin.openFile(f.file), L("删除", "Delete"), () => this.trashNote(f.file));
-    }
-    for (const f of c.big) {
-      if (shown++ >= e.limit) break;
+    const k = this.checkupCard(
+      grid,
+      "emptyBig",
+      "file-warning",
+      L("没有任何内容和链接的空笔记，和字数超过上限、会让趋势失真的超大笔记。删除的笔记进回收站。", "Notes with no content or links, and oversized notes over the word limit that distort the trends. Deleted notes go to the trash."),
+      eb,
+      false,
+      L("没有空笔记或超大笔记", "No empty or oversized notes")
+    );
+    for (const f of c.empty.slice(0, 50)) k.add(`${f.file.basename} · ${count(0, "words")}`, f.file.basename, () => void this.plugin.openFile(f.file), L("删除", "Delete"), () => this.trashNote(f.file));
+    for (const f of c.big.slice(0, 50)) {
       const folder = f.folder === ROOT_FOLDER ? null : f.folder;
-      item(
-        e.list,
+      k.add(
         `${f.file.basename} · ${fmtNum(f.words)} ${unit("words")}`,
         f.file.basename,
         () => void this.plugin.openFile(f.file),
@@ -2046,30 +2162,56 @@ export class DashboardView extends ItemView {
         () => (folder ? void this.plugin.setClippingFolder(folder) : void this.plugin.openFile(f.file))
       );
     }
-    foot(e, "emptybig", eb, "notes");
+    k.done();
+  }
 
-    // 同名笔记：[[链接]] 只写名字时 Obsidian 会挑其中一篇，容易指错
-    const sn = col("samename", L("同名笔记", "Same name"), c.sameName.length, "", L("没有同名笔记", "No notes share a name"));
-    for (const g of c.sameName.slice(0, sn.limit)) {
-      const name = baseName(g[0]);
-      const first = this.app.vault.getAbstractFileByPath(g[0]);
-      item(
-        sn.list,
-        L(`${name} · ${g.length} 篇`, `${name} · ${g.length}`),
-        name,
-        first instanceof TFile ? () => void this.plugin.openFile(first) : null,
-        L("查看", "Show"),
-        () => this.plugin.openSearch(`file:"${name}"`)
-      );
-    }
-    foot(sn, "samename", c.sameName.length, "notes");
+  /** 未引用的附件：没有任何笔记链接或嵌入它 */
+  private renderUnused(grid: HTMLElement, s: VaultStats) {
+    const c = checkupModel(s);
+    const k = this.checkupCard(
+      grid,
+      "unusedFiles",
+      "paperclip",
+      L("没有任何笔记链接或嵌入的附件，大的排在前面。删除前确认，进回收站。", "Attachments no note links to or embeds, largest first. Asks before deleting, and deleted files go to the trash."),
+      c.unusedAttachments.length,
+      false,
+      L("附件都有笔记在用", "Every attachment is used")
+    );
+    for (const f of c.unusedAttachments.slice(0, 50)) k.add(`${f.name} · ${fmtSize(f.stat.size)}`, f.name, () => void this.plugin.openFile(f), L("删除", "Delete"), () => this.trashAttachment(f));
+    k.done();
+  }
 
-    // 未引用的附件：没有任何笔记链接或嵌入它
-    const ua = col("unused", L("未引用的附件", "Unused attachments"), c.unusedAttachments.length, "", L("附件都有笔记在用", "Every attachment is used"));
-    for (const f of c.unusedAttachments.slice(0, ua.limit)) {
-      item(ua.list, `${f.name} · ${fmtSize(f.stat.size)}`, f.name, () => void this.plugin.openFile(f), L("删除", "Delete"), () => this.trashAttachment(f));
+  private renderDupes(grid: HTMLElement) {
+    const dd = this.plugin.dedupe;
+    const set = this.plugin.settings;
+    const dupOn = set.dedupeEnabled && set.dedupeCard;
+    const dup = dupOn && dd.analysis ? dedupeOverview(dd.analysis, dd.ignoredSet()) : null;
+    const n = dup ? dup.groups.length : 0;
+    const k = this.checkupCard(
+      grid,
+      "dupes",
+      "files",
+      L("不同笔记里重复出现的段落，来自最近一次扫描（扫描只读，不会改动笔记）。", "Passages repeated across notes, from the last scan (scanning is read-only and changes nothing)."),
+      n,
+      true,
+      dupOn ? (dd.scanning ? L("正在扫描…", "Scanning…") : dd.analysis ? L("没有重复内容", "No duplicates") : L("还没扫描过", "Not scanned yet")) : L("重复内容清理没有打开", "Duplicate cleanup is off")
+    );
+    if (!dupOn) {
+      k.add(L("在设置里打开“重复内容清理”和它的看板卡片", "Turn on Duplicate cleanup and its dashboard card in settings"), "", null, L("打开设置", "Settings"), () => this.plugin.openSettings());
+    } else if (!dd.analysis && !dd.scanning) {
+      k.add(L("扫描只读，不会改动笔记", "Read-only, changes nothing"), "", null, L("开始扫描", "Scan"), () => void dd.openReport(true));
     }
-    foot(ua, "unused", c.unusedAttachments.length, "notes");
+    if (dup) {
+      for (const g of dup.groups.slice(0, 50)) {
+        const first = g.occs[0];
+        const base = first?.path.split("/").pop()?.replace(/\.md$/, "");
+        const name = base ? L(`${base} 等 ${g.occs.length} 篇`, `${base} and ${g.occs.length - 1} more`) : count(g.occs.length, "notes");
+        k.add(name, name, () => void dd.openReport(false), L("保留最早", "Keep oldest"), () => dd.startCleanup([groupItem(g, 0)], "mark"));
+      }
+    }
+    k.done();
+    if (n > 0) this.moreLink(k.foot, L(`全部 ${fmtFull(n)} 段`, `All ${count(fmtFull(n), "passages")}`), () => void dd.openReport(false));
+    if (dupOn && dd.stale && dd.analysis) k.body.createDiv({ cls: "vp-checkup-note", text: L("笔记有改动，建议重新扫描", "Notes changed since the scan. Scan again.") });
   }
 
   /** 断链修复：先说清楚会改哪几篇，确认后改；改完可以撤销 */
@@ -2133,11 +2275,6 @@ export class DashboardView extends ItemView {
 
   /* ---------- 10. 2.0 新卡片 ---------- */
 
-  /** 列表类卡片按尺寸放几行：M 3 行、L 6 行 */
-  private rowsFor(id: string): number {
-    return this.sizeOf(id) === "l" ? 6 : 3;
-  }
-
   /** 最常被链接：哪些笔记是核心（links.topLinked） */
   private renderTopLinked(grid: HTMLElement, s: VaultStats) {
     const { body } = this.card(
@@ -2147,19 +2284,19 @@ export class DashboardView extends ItemView {
       "network",
       L("被其它笔记链接次数最多的笔记，通常就是你的索引页和核心笔记。点击打开。", "Notes linked from other notes the most, usually your index pages and core notes. Click to open.")
     );
-    const items: BarItem[] = s.links.topLinked.slice(0, this.rowsFor("topLinked")).map(({ file, count: n }) => ({
+    const items: BarItem[] = s.links.topLinked.slice(0, 30).map(({ file, count: n }) => ({
       label: file.basename,
       title: file.path,
       value: n,
       valueText: L(`${fmtFull(n)} 处链接`, `${fmtFull(n)} ${plural(n, "link")}`),
       onClick: (e) => void this.plugin.openFile(file, undefined, e),
     }));
-    drawBarList(body, items, L("还没有笔记被链接过", "No note is linked yet"), (el) => setIcon(el.createDiv({ cls: "vp-empty-icon" }), "network"));
+    this.barListCard("topLinked", body, items, L("还没有笔记被链接过", "No note is linked yet"), "network");
   }
 
   /** 写作节奏：近 12 周每个星期几平均写多少字；单一系列，只突出最常写的一天 */
   private renderRhythm(grid: HTMLElement, s: VaultStats) {
-    const size = this.sizeOf("rhythm");
+    const dn = rhythmDensity(this.box("rhythm"));
     const r = weekdayRhythm(s, new Date(s.generatedAt), 12);
     const { body } = this.card(
       grid,
@@ -2174,20 +2311,25 @@ export class DashboardView extends ItemView {
       return;
     }
     const best = r.reduce((a, b) => (b.average > a.average ? b : a));
-    const top = body.createDiv({ cls: "vp-kpi-row" });
-    bigNumber(top.createDiv({ cls: "vp-kpi-num" }), weekdayName(best.day), undefined);
-    top.createSpan({ cls: "vp-kpi-caption", text: L(`平均 ${fmtFull(best.average)} 字`, `${fmtFull(best.average)} words avg`) });
-    const bars = body.createDiv({ cls: "vp-rhythm" + (size === "s" ? " is-mini" : ""), attr: { role: "img" } });
+    if (dn.top) {
+      const top = body.createDiv({ cls: "vp-kpi-row" });
+      bigNumber(top.createDiv({ cls: "vp-kpi-num" }), weekdayName(best.day), undefined);
+      top.createSpan({ cls: "vp-kpi-caption", text: L(`平均 ${fmtFull(best.average)} 字`, `${fmtFull(best.average)} words avg`) });
+    }
+    const bars = body.createDiv({ cls: "vp-rhythm", attr: { role: "img" } });
     srLabel(bars, r.map((x) => `${weekdayName(x.day)} ${fmtFull(x.average)}`).join(L("，", ", ")));
     for (const x of r) {
       const c = bars.createDiv({ cls: "vp-rhythm-col" + (x === best ? " is-best" : ""), attr: { title: `${weekdayName(x.day)} · ${count(fmtFull(x.average), "words")}` } });
-      c.createDiv({ cls: "vp-rhythm-bar" }).setCssProps({ "--vp-rhythm-h": `${Math.max(4, (x.average / max) * 100)}%` });
-      if (size !== "s") c.createDiv({ cls: "vp-rhythm-label", text: weekdayShort(x.day) });
+      if (dn.values) c.createDiv({ cls: "vp-rhythm-value", text: fmtNum(x.average) });
+      const lane = c.createDiv({ cls: "vp-rhythm-lane" });
+      lane.createDiv({ cls: "vp-rhythm-bar" }).setCssProps({ "--vp-rhythm-h": `${Math.max(4, (x.average / max) * 100)}%` });
+      c.createDiv({ cls: "vp-rhythm-label", text: weekdayShort(x.day) });
     }
   }
 
   /** 笔记活跃度：近 30 天新建和修改，两个数字 + 一条分段条（两段的环读不准，不用） */
   private renderActivity(grid: HTMLElement, s: VaultStats) {
+    const dn = activityDensity(this.box("activity"));
     const a = noteActivity(s, new Date(s.generatedAt));
     const { body } = this.card(
       grid,
@@ -2204,13 +2346,15 @@ export class DashboardView extends ItemView {
     };
     one("is-a", L("新建", "New"), a.created, "act:new");
     one("is-b", L("改旧的", "Edited"), a.edited, "act:edit");
-    const total = a.created + a.edited;
-    const bar = body.createDiv({ cls: "vp-split", attr: { role: "img" } });
-    srLabel(bar, L(`新建 ${a.created} 篇，修改 ${a.edited} 篇`, `${a.created} new, ${a.edited} edited`));
-    if (total === 0) bar.addClass("is-empty");
-    bar.createDiv({ cls: "vp-split-a" }).setCssProps({ "--vp-split-w": `${total ? (a.created / total) * 100 : 0}%` });
-    bar.createDiv({ cls: "vp-split-b" }).setCssProps({ "--vp-split-w": `${total ? (a.edited / total) * 100 : 0}%` });
-    body.createDiv({ cls: "vp-kpi-caption", text: L("近 30 天", "Last 30 days") });
+    if (dn.bar) {
+      const total = a.created + a.edited;
+      const bar = body.createDiv({ cls: "vp-split", attr: { role: "img" } });
+      srLabel(bar, L(`新建 ${a.created} 篇，修改 ${a.edited} 篇`, `${a.created} new, ${a.edited} edited`));
+      if (total === 0) bar.addClass("is-empty");
+      bar.createDiv({ cls: "vp-split-a" }).setCssProps({ "--vp-split-w": `${total ? (a.created / total) * 100 : 0}%` });
+      bar.createDiv({ cls: "vp-split-b" }).setCssProps({ "--vp-split-w": `${total ? (a.edited / total) * 100 : 0}%` });
+    }
+    if (dn.caption) body.createDiv({ cls: "vp-kpi-caption", text: L("近 30 天", "Last 30 days") });
   }
 
   /** 任务最多的笔记：任务压在哪几篇（tasks.byNote，按待办数排） */
@@ -2222,12 +2366,11 @@ export class DashboardView extends ItemView {
       "list-checks",
       L("待办最多的几篇笔记，条是这篇里已完成的比例。“接下来”按截止日期，这张按笔记。点击打开。", "Notes with the most open tasks; the bar shows how much of each is done. Next up sorts by due date, this card by note. Click to open.")
     );
-    const groups = s.tasks.byNote.filter((g) => g.pending > 0).slice(0, this.rowsFor("taskNotes"));
-    const list = body.createDiv({ cls: "vp-rows" });
-    if (groups.length === 0) {
-      this.empty(list, "party-popper", L("没有待办", "No open tasks"));
-      return;
-    }
+    const groups = s.tasks.byNote.filter((g) => g.pending > 0).slice(0, 30);
+    const host = body.createDiv();
+    const list = host.createDiv({ cls: "vp-rows" });
+    const units: HTMLElement[] = [];
+    if (groups.length === 0) this.empty(list, "party-popper", L("没有待办", "No open tasks"));
     for (const g of groups) {
       const row = list.createDiv({ cls: "vp-row vp-group-row" });
       row.createSpan({ cls: "vp-row-name", text: g.key, attr: { title: g.file?.path ?? g.key } });
@@ -2236,11 +2379,14 @@ export class DashboardView extends ItemView {
       row.createSpan({ cls: "vp-row-meta vp-tabular is-fit", text: L(`待办 ${g.pending}`, `${g.pending} open`) });
       const f = g.file;
       if (f) this.clickable(row, L(`${g.key}，待办 ${g.pending}`, `${g.key}, ${g.pending} open`), (e) => void this.plugin.openFile(f, undefined, e));
+      units.push(row);
     }
+    this.fitList("taskNotes", host, body.createDiv({ cls: "vp-card-foot" }), units);
   }
 
   /** 链接密度：一个数字的卡片（一个数就是图，不画仪表盘） */
   private renderDensity(grid: HTMLElement, s: VaultStats) {
+    const dn = densityDensity(this.box("density"));
     const d = linkDensity(s);
     const { body } = this.card(
       grid,
@@ -2252,12 +2398,18 @@ export class DashboardView extends ItemView {
     const row = body.createDiv({ cls: "vp-kpi-row" });
     // 一位小数：用字符串传，bigNumber 收到数字会取整；也不做数字滚动（滚动按整数走）
     bigNumber(row.createDiv({ cls: "vp-kpi-num" }), d.perNote.toFixed(1), L("个/篇", "per note"));
+    if (!dn.caption) return;
     body.createDiv({ cls: "vp-kpi-caption", text: L(`${d.connected}% 的笔记连着别的笔记`, `${d.connected}% of notes are linked`) });
+    if (dn.share) {
+      this.meter(body, d.connected / 100, "");
+      const orphans = s.links.orphans.length;
+      body.createDiv({ cls: "vp-kpi-caption", text: L(`${fmtFull(orphans)} 篇孤立笔记`, `${count(fmtFull(orphans), "notes")} with no links`) });
+    }
   }
 
   /** 文件夹构成：堆叠横条，前 4 个文件夹各一色，其余并成“其他”；必须带图例 */
   private renderFolders(grid: HTMLElement, s: VaultStats) {
-    const size = this.sizeOf("folders");
+    const dn = foldersDensity(this.box("folders"));
     const parts = folderShares(s, 4);
     const { body } = this.card(
       grid,
@@ -2277,12 +2429,12 @@ export class DashboardView extends ItemView {
       const seg = bar.createDiv({ cls: `vp-stack-seg ${p.other ? "is-other" : `is-c${i + 1}`}`, attr: { title: `${name(p)} · ${count(p.notes, "notes")}` } });
       seg.setCssProps({ "--vp-stack-w": `${p.share * 100}%` });
     });
-    const legend = body.createDiv({ cls: "vp-legend" + (size === "l" ? " is-list" : "") });
+    const legend = body.createDiv({ cls: "vp-legend" + (dn.list ? " is-list" : "") });
     parts.forEach((p, i) => {
       const it = legend.createDiv({ cls: "vp-legend-item" });
       it.createSpan({ cls: `vp-swatch ${p.other ? "is-other" : `is-c${i + 1}`}`, attr: { "aria-hidden": "true" } });
       it.createSpan({ cls: "vp-legend-name", text: name(p) });
-      it.createSpan({ cls: "vp-legend-val", text: `${Math.round(p.share * 100)}%${size === "l" ? ` · ${count(fmtFull(p.notes), "notes")}` : ""}` });
+      it.createSpan({ cls: "vp-legend-val", text: `${Math.round(p.share * 100)}%${dn.list ? ` · ${count(fmtFull(p.notes), "notes")}` : ""}` });
       if (!p.other && p.folder !== ROOT_FOLDER) this.clickable(it, L(`在文件列表里定位 ${p.folder}`, `Reveal ${p.folder} in the file list`), () => this.plugin.revealFolder(p.folder));
     });
   }

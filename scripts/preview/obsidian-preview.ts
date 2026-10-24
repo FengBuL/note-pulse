@@ -52,6 +52,7 @@ export class ItemView {
     this.contentEl = leaf.host.createDiv({ cls: "view-content" });
   }
   registerInterval() {}
+  register() {}
   registerDomEvent(el: EventTarget, type: string, fn: EventListener, o?: AddEventListenerOptions) {
     el.addEventListener(type, fn, o);
   }

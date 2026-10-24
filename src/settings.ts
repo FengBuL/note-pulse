@@ -10,7 +10,7 @@ export type OutlierMode = "exclude" | "off";
 export type WeekStyle = "dots" | "bars";
 
 /** 设置结构版本：用于一次性迁移旧设置 */
-export const SETTINGS_VERSION = 5;
+export const SETTINGS_VERSION = 6;
 
 export interface DashboardSettings {
   settingsVersion: number;
@@ -367,8 +367,8 @@ export class DashboardSettingTab extends PluginSettingTab {
           {
             name: L("看板布局", "Dashboard layout"),
             desc: L(
-              "点看板右上角的铅笔编辑：换卡片尺寸、调整顺序、移除或添加卡片。布局随库同步，几台设备看到的看板一样；窄屏会自动把卡片排成一列或两列。",
-              "Use the pencil at the top right of the dashboard to change card sizes, reorder, remove or add cards. The layout syncs with the vault, so every device shows the same dashboard; narrow screens stack cards automatically."
+              "点看板右上角的铅笔编辑：拖动卡片换位置，拖右下角调宽和高，移除或添加卡片。布局随库同步，几台设备看到的看板一样；手机和窄面板里卡片排成一列，只看不改。",
+              "Use the pencil at the top right of the dashboard to drag cards around, drag a corner to resize, and remove or add cards. The layout syncs with the vault, so every device shows the same dashboard; phones and narrow panes stack the cards in one column and are view-only."
             ),
             render: (setting) =>
               setting.addButton((b) =>
