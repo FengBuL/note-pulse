@@ -207,6 +207,12 @@ To release, run `npm version <patch|minor|major>` (updates `manifest.json` and `
 
 ## Changelog
 
+### 2.1.1
+
+- Fix Obsidian community CSS review warnings.
+- Remove duplicate `max-height` on the report preview window.
+- Drop `:has` selectors (this-week dots with a percent now use a class; appearance unchanged).
+
 ### 2.1.0
 
 - Free placement for cards: a card lands exactly under the pointer; no auto-pack upward; empty cells stay empty when you move, remove or shrink a card.
@@ -453,6 +459,12 @@ views:
 - 插件只在本地读取笔记，不联网，不收集任何数据。
 
 ### 更新日志
+
+**2.1.1**
+
+- 修复 Obsidian 社区插件 CSS 审查警告。
+- 去掉报告预览窗口重复的 `max-height`。
+- 去掉 `:has`（本周圆点里带百分比的天改用类名，外观不变）。
 
 **2.1.0**
 
