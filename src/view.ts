@@ -24,9 +24,10 @@ import {
   weeklyWords,
 } from "./dashboard-logic";
 import { GroupStat, Hint, TaskInfo, VaultStats, addDays, dayKey, isCheckinDay, pad2, startOfDay } from "./stats";
+import { Agenda, MAX_ITEM_CHARS, addAgendaItem, itemsOn, monthGrid, removeAgendaItem, shiftMonth, toggleAgendaItem } from "./agenda";
 import { COLS, GAP, GridItem, rowsToPx } from "./grid";
 import { GestureHost, GridGesture, setPlace } from "./grid-edit";
-import { Box, activityDensity, bodyH, densityDensity, densityKey, foldersDensity, heatDensity, heroDensity, isTight, kpiDensity, rhythmDensity, trendDensity } from "./density";
+import { Box, HeroDensity, activityDensity, calendarDensity, innerW, bodyH, densityDensity, densityKey, foldersDensity, heatDensity, heroDensity, isTight, kpiDensity, rhythmDensity, trendDensity } from "./density";
 import { WidgetId, WidgetLayout, WidgetLayoutItem, addWidget, defaultLayout, hiddenWidgets, limitsOf, readingOrder, removeWidget, sameLayout, withItems } from "./widgets";
 import { MOTION, SegRect, animateHeight, countUp, drawLines, markStagger, playLayout, reducedMotion, segRect, slideSeg, snapshotRects } from "./motion";
 import {
@@ -45,7 +46,7 @@ import {
   svgEl,
 } from "./charts";
 import { baseName } from "./checkup-logic";
-import { L, count, fullDate, monthDay, monthShort, plural, unit, weekdayName, weekdayShort } from "./i18n";
+import { L, count, weekdayLetter, yearMonth, fullDate, monthDay, monthShort, plural, unit, weekdayName, weekdayShort } from "./i18n";
 
 let reportDetailsId = 0;
 
@@ -79,6 +80,7 @@ const WIDGET_TEXT: Record<WidgetId, [() => string, () => string]> = {
   taskNotes: [() => L("任务最多的笔记", "Notes with most tasks"), () => L("任务压在哪几篇", "Where tasks pile up")],
   density: [() => L("链接密度", "Link density"), () => L("库连得紧不紧", "How connected the vault is")],
   folders: [() => L("文件夹构成", "Folder mix"), () => L("内容都在哪些文件夹", "Where your notes live")],
+  calendar: [() => L("日历", "Calendar"), () => L("月历和每天的日程，可以自己记", "A month view with a daily agenda you can write in")],
 };
 const widgetName = (id: WidgetId) => WIDGET_TEXT[id][0]();
 const widgetDesc = (id: WidgetId) => WIDGET_TEXT[id][1]();
@@ -119,7 +121,6 @@ export class DashboardView extends ItemView {
   private dayExpanded = false;
   private bodyEl!: HTMLElement;
   private statusEl!: HTMLElement;
-  private subtitleEl!: HTMLElement;
   private refreshBtn!: HTMLElement;
   private stats: VaultStats | null = null;
   private renderedDay = "";
@@ -174,11 +175,6 @@ export class DashboardView extends ItemView {
     const shell = root.createDiv({ cls: "vp-shell" });
 
     const header = shell.createDiv({ cls: "vp-header" });
-    const titleWrap = header.createDiv({ cls: "vp-header-text" });
-    titleWrap.createEl("h1", { cls: "vp-title", text: "Note Pulse" });
-    this.subtitleEl = titleWrap.createDiv({ cls: "vp-subtitle" });
-    this.updateSubtitle();
-
     const actions = header.createDiv({ cls: "vp-header-actions" });
     this.statusEl = actions.createSpan({ cls: "vp-status" });
     // 手机上只看不改：电脑上的布局会自动同步过来
@@ -338,12 +334,6 @@ export class DashboardView extends ItemView {
     }
   }
 
-  private updateSubtitle() {
-    const d = new Date();
-    const vault = this.app.vault.getName();
-    this.subtitleEl.setText(L(`${vault} · ${fullDate(d)} 星期${weekdayShort(d.getDay())}`, `${vault} · ${weekdayShort(d.getDay())}, ${fullDate(d)}`));
-  }
-
   private iconButton(parent: HTMLElement, icon: string, label: string, onClick: () => void): HTMLElement {
     const b = parent.createEl("button", { cls: "vp-icon-btn", attr: { "aria-label": label } });
     setIcon(b, icon);
@@ -433,7 +423,6 @@ export class DashboardView extends ItemView {
     this.renderedDay = dayKey(Date.now());
     this.statusEl.setText(L(`更新于 ${pad2(d.getHours())}:${pad2(d.getMinutes())}`, `Updated ${pad2(d.getHours())}:${pad2(d.getMinutes())}`));
     this.statusEl.setAttr("aria-label", L(`统计耗时 ${stats.durationMs} ms`, `Counted in ${stats.durationMs} ms`));
-    this.updateSubtitle();
 
     const body = this.bodyEl;
     body.empty();
@@ -713,6 +702,8 @@ export class DashboardView extends ItemView {
         return (h) => this.renderDensity(h, stats);
       case "folders":
         return (h) => this.renderFolders(h, stats);
+      case "calendar":
+        return (h) => this.renderCalendar(h, stats);
       default:
         return null;
     }
@@ -1270,7 +1261,7 @@ export class DashboardView extends ItemView {
 
     // 今日字数 / 目标 圆环
     const ratio = goal > 0 ? ck.todayWords / goal : ck.todayWords > 0 ? 1 : 0;
-    const center = drawRing(main, ratio, dn.ring, dn.ring >= 120 ? 10 : 8, "vp-hero-ring" + (dn.ring < 112 ? " is-small" : ""));
+    const center = drawRing(main, ratio, dn.ring, dn.ring >= 140 ? 12 : dn.ring >= 120 ? 10 : 8, "vp-hero-ring" + (dn.ring < 112 ? " is-small" : dn.ring >= 140 ? " is-large" : ""));
     const ringWrap = center.parentElement as HTMLElement;
     this.tweenRing("hero:ring", ringWrap, ratio);
     ringWrap.setAttr("role", "img");
@@ -1293,8 +1284,7 @@ export class DashboardView extends ItemView {
     if (todayDiary) this.clickable(diary, L("打开今天的日记", "Open today's daily note"), (e) => void this.plugin.openFile(todayDiary, undefined, e));
 
     // 窄或矮的时候只有今日字数和连续打卡；宽了加本周七天，再高加今日新建、今日改动和今天写过的笔记
-    if (dn.week) main.appendChild(this.renderWeek(s, goal, now));
-    if (!dn.foot) return;
+    if (dn.week) main.appendChild(this.renderWeek(s, goal, now, dn));
 
     // 今天动过的笔记（来自每天修改过的笔记列表；不估算单篇字数）
     const foot = hero.createDiv({ cls: "vp-hero-foot" + (dn.chips ? "" : " is-short") });
@@ -1320,12 +1310,14 @@ export class DashboardView extends ItemView {
   }
 
   /** 本周七天：圆点或柱状，用户在卡片上切换，选择记在设置里 */
-  private renderWeek(s: VaultStats, goal: number, now: Date): HTMLElement {
+  private renderWeek(s: VaultStats, goal: number, now: Date, dn: HeroDensity): HTMLElement {
     const settings = this.plugin.settings;
     const style = settings.weekStyle;
     const days = weekDays(s, goal, now);
     const weekWords = days.reduce((a, d) => a + d.words, 0);
     const box = createDiv({ cls: `vp-week-box is-${style}` });
+    // 圆点、柱子的大小随卡片变（density.ts 按卡片高度算出来的）
+    box.setCssProps({ "--vp-week-dot": `${dn.dot}px`, "--vp-week-lane": `${dn.lane}px`, "--vp-week-bar": `${dn.bar}px` });
     const top = box.createDiv({ cls: "vp-week-top" });
     const sum = top.createDiv({ cls: "vp-week-sum" });
     sum.createSpan({ cls: "vp-label", text: L("本周 ", "This week ") });
@@ -1372,7 +1364,7 @@ export class DashboardView extends ItemView {
       row.setCssProps({ "--vp-week-goal": `${(goal / max) * 100}%` });
     }
 
-    if (settings.weeklyWordGoal > 0) {
+    if (settings.weeklyWordGoal > 0 && dn.weekDetail) {
       const pct = Math.min(100, (weekWords / settings.weeklyWordGoal) * 100);
       const meter = box.createDiv({
         cls: "vp-meter vp-week-meter",
@@ -1387,6 +1379,7 @@ export class DashboardView extends ItemView {
       });
       meter.createDiv({ cls: "vp-meter-fill" }).setCssProps({ "--vp-meter-width": `${pct}%` });
     }
+    if (!dn.weekDetail) return box;
     const legend = box.createDiv({ cls: "vp-week-legend" });
     if (style === "dots") legend.setText(L("✓ 达标 · 百分比为未达标的进度 · 虚线为还没到的日子", "✓ goal met · % progress · dashed: still to come"));
     else
@@ -2013,7 +2006,10 @@ export class DashboardView extends ItemView {
       host.removeAttribute("role");
       host.removeAttribute("aria-label");
       if (host.scrollHeight > host.clientHeight + 1) {
-        btn.hidden = false; // 底部多出一行链接，列表可用的高度随之变小，要在这之后再量
+        // 底部多出一行链接，列表可用的高度随之变小，要在这之后再量；文字和图标先放上，不然链接的高度量出来偏小
+        label.setText(L(`还有 ${fmtFull(units.length)} 个`, `${fmtFull(units.length)} more`));
+        setIcon(icon, "chevron-right");
+        btn.hidden = false;
         // 用 offsetTop 而不是 getBoundingClientRect：入场动画里卡片带缩放，后者量出来会差一点
         const limit = host.clientHeight + 0.5;
         let keep = 0;
@@ -2021,7 +2017,6 @@ export class DashboardView extends ItemView {
           if (u.offsetTop + u.offsetHeight > limit) break;
           keep++;
         }
-        keep = Math.max(1, keep);
         units.forEach((u, i) => u.toggleClass("vp-hide", i >= keep));
         const more = units.length - keep;
         label.setText(L(`还有 ${fmtFull(more)} 个`, `${fmtFull(more)} more`));
@@ -2566,6 +2561,137 @@ export class DashboardView extends ItemView {
       it.createSpan({ cls: "vp-legend-name", text: name(p) });
       it.createSpan({ cls: "vp-legend-val", text: `${Math.round(p.share * 100)}%${dn.list ? ` · ${count(fmtFull(p.notes), "notes")}` : ""}` });
       if (!p.other && p.folder !== ROOT_FOLDER) this.clickable(it, L(`在文件列表里定位 ${p.folder}`, `Reveal ${p.folder} in the file list`), () => this.plugin.revealFolder(p.folder));
+    });
+  }
+
+  /* ---------- 日历：选一天看日程、记日程 ---------- */
+
+  /** 正在看的月份和选中的那天（只在这次打开期间记着） */
+  private calYear = new Date().getFullYear();
+  private calMonth = new Date().getMonth();
+  private calSelected: string | null = null;
+
+  private renderCalendar(grid: HTMLElement, s: VaultStats) {
+    const box = this.box("calendar");
+    const dn = calendarDensity(box);
+    const todayKey = dayKey(Date.now());
+    const sel = this.calSelected ?? todayKey;
+    const agenda = this.plugin.settings.agenda;
+    const { head, body } = this.card(
+      grid,
+      "vp-cal-card",
+      yearMonth(this.calYear, this.calMonth),
+      "calendar-days",
+      L(
+        "点一天看那天的日程，在下面的输入框里写下要做的事，回车保存；日程存在插件数据里，随库同步。有底色的日子写过东西，小圆点表示有日程（空心是都做完了）。",
+        "Pick a day to see its agenda and type what you need to do below; press Enter to save. The agenda is stored in the plugin data and syncs with the vault. Tinted days have writing, a dot means there are items (hollow once all are done)."
+      )
+    );
+    const go = (delta: number) => {
+      const m = shiftMonth(this.calYear, this.calMonth, delta);
+      this.calYear = m.year;
+      this.calMonth = m.month;
+      this.rerender("calendar", "resize");
+    };
+    const nav = head.createDiv({ cls: "vp-cal-nav" });
+    const showToday = this.calSelected !== null && this.calSelected !== todayKey ? true : new Date().getFullYear() !== this.calYear || new Date().getMonth() !== this.calMonth;
+    if (showToday) {
+      const t = nav.createEl("button", { cls: "vp-link", text: L("今天", "Today"), attr: { type: "button", "data-fid": "cal:today" } });
+      t.addEventListener("click", () => {
+        const now = new Date();
+        this.calYear = now.getFullYear();
+        this.calMonth = now.getMonth();
+        this.calSelected = null;
+        this.rerender("calendar", "resize");
+      });
+    }
+    for (const [icon, label, delta] of [["chevron-left", L("上个月", "Previous month"), -1], ["chevron-right", L("下个月", "Next month"), 1]] as const) {
+      const b = nav.createEl("button", { cls: "vp-icon-btn is-small", attr: { type: "button", "aria-label": label, "data-fid": `cal:${delta}` } });
+      setIcon(b, icon);
+      b.addEventListener("click", () => go(delta));
+    }
+
+    const wrap = body.createDiv({ cls: `vp-cal is-${dn.mode}` });
+    const month = wrap.createDiv({ cls: "vp-cal-month" });
+    const narrowCells = innerW(box) < 300 || dn.mode === "below";
+    const weekdays = month.createDiv({ cls: "vp-cal-weekdays", attr: { "aria-hidden": "true" } });
+    for (const d of [1, 2, 3, 4, 5, 6, 0]) weekdays.createSpan({ text: narrowCells ? weekdayLetter(d) : weekdayShort(d) });
+    const days = month.createDiv({ cls: "vp-cal-days", attr: { role: "group", "aria-label": yearMonth(this.calYear, this.calMonth) } });
+    days.setCssProps({ "--vp-cal-cell": `${dn.cell}px` });
+    for (const c of monthGrid(this.calYear, this.calMonth)) {
+      const items = itemsOn(agenda, c.key);
+      const open = items.filter((i) => !i.done).length;
+      const [yy, mm, dd] = c.key.split("-").map(Number);
+      const date = new Date(yy, mm - 1, dd);
+      const words = s.dayWords[c.key] || 0;
+      const b = days.createEl("button", {
+        cls: "vp-cal-day" + (c.inMonth ? "" : " is-out") + (c.key === todayKey ? " is-today" : "") + (c.key === sel ? " is-selected" : "") + (words > 0 ? " has-words" : ""),
+        attr: {
+          type: "button",
+          "aria-pressed": String(c.key === sel),
+          "aria-label": `${fullDate(date)} ${weekdayName(date.getDay())}${items.length ? L(`，${items.length} 条日程`, `, ${items.length} ${plural(items.length, "item")}`) : ""}${words > 0 ? L(`，写了 ${fmtFull(words)} 字`, `, ${count(fmtFull(words), "words")}`) : ""}`,
+          "data-fid": `cal:day:${c.key}`,
+          title: items.length ? items.map((i) => `${i.done ? "✓ " : "· "}${i.text}`).join("\n") : "",
+        },
+      });
+      if (c.key === todayKey) b.setAttr("aria-current", "date");
+      b.createSpan({ cls: "vp-cal-num", text: String(c.day) });
+      if (items.length) b.createSpan({ cls: "vp-cal-dot" + (open === 0 ? " is-done" : ""), attr: { "aria-hidden": "true" } });
+      b.addEventListener("click", () => {
+        this.calSelected = c.key;
+        if (!c.inMonth) {
+          this.calYear = yy;
+          this.calMonth = mm - 1;
+        }
+        this.rerender("calendar", "resize");
+      });
+    }
+    if (dn.mode === "none") return;
+
+    // 选中那天的日程
+    const [sy, sm, sd] = sel.split("-").map(Number);
+    const selDate = new Date(sy, sm - 1, sd);
+    const panel = wrap.createDiv({ cls: "vp-cal-agenda" });
+    const ph = panel.createDiv({ cls: "vp-cal-agenda-head" });
+    ph.createSpan({ cls: "vp-cal-agenda-title", text: `${monthDay(selDate)} ${weekdayName(selDate.getDay())}` });
+    if (sel === todayKey) ph.createSpan({ cls: "vp-pill is-muted", text: L("今天", "Today") });
+    const words = s.dayWords[sel] || 0;
+    const diary = s.dailyNotes[sel];
+    if (words > 0 || diary) {
+      const meta = ph.createSpan({ cls: "vp-cal-agenda-meta" });
+      if (words > 0) meta.createSpan({ text: L(`写了 ${fmtFull(words)} 字`, `${count(fmtFull(words), "words")}`) });
+      if (diary) {
+        const a = meta.createEl("button", { cls: "vp-link", text: L("打开日记", "Open daily note"), attr: { type: "button" } });
+        a.addEventListener("click", (e) => void this.plugin.openFile(diary, undefined, e));
+      }
+    }
+    const list = panel.createDiv({ cls: "vp-cal-items", attr: { role: "list" } });
+    const items = itemsOn(agenda, sel);
+    const save = (next: Agenda) => {
+      this.plugin.settings.agenda = next;
+      void this.plugin.saveViewSetting();
+      this.rerender("calendar", "resize");
+    };
+    if (items.length === 0) list.createDiv({ cls: "vp-cal-empty", text: L("这一天还没有日程", "Nothing planned for this day") });
+    for (const it of items) {
+      const row = list.createDiv({ cls: "vp-cal-item" + (it.done ? " is-done" : ""), attr: { role: "listitem" } });
+      const box = row.createEl("button", { cls: "vp-cal-check", attr: { type: "button", role: "checkbox", "aria-checked": String(it.done), "aria-label": it.text, "data-fid": `cal:check:${it.id}` } });
+      if (it.done) setIcon(box, "check");
+      box.addEventListener("click", () => save(toggleAgendaItem(this.plugin.settings.agenda, sel, it.id)));
+      row.createSpan({ cls: "vp-cal-text", text: it.text, attr: { title: it.text } });
+      const del = row.createEl("button", { cls: "vp-icon-btn is-small", attr: { type: "button", "aria-label": L("删除这条日程", "Delete this item"), "data-fid": `cal:del:${it.id}` } });
+      setIcon(del, "x");
+      del.addEventListener("click", () => save(removeAgendaItem(this.plugin.settings.agenda, sel, it.id)));
+    }
+    const input = panel.createEl("input", {
+      cls: "vp-cal-input",
+      attr: { type: "text", maxlength: String(MAX_ITEM_CHARS), placeholder: L("添加日程，回车保存", "Add an item, press Enter"), "aria-label": L("添加日程", "Add an agenda item"), "data-fid": "cal:input" },
+    });
+    input.addEventListener("keydown", (e) => {
+      if (e.key !== "Enter" || e.isComposing) return;
+      e.preventDefault();
+      const next = addAgendaItem(this.plugin.settings.agenda, sel, input.value, `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`);
+      if (next !== this.plugin.settings.agenda) save(next);
     });
   }
 

@@ -18,6 +18,7 @@ export type WidgetId =
   | "taskNotes"
   | "density"
   | "folders"
+  | "calendar"
   | "brokenLinks"
   | "orphans"
   | "sameName"
@@ -50,7 +51,7 @@ const spec = (id: WidgetId, minW: number, maxW: number, minH: number, maxH: numb
  * 宽高范围的依据是：在这个范围里内容能跟着有意义地变化，超出范围只会多出空白或被截断。
  */
 export const WIDGETS: WidgetInfo[] = [
-  spec("hero", 5, 12, 4, 8, 8, 6),
+  spec("hero", 5, 12, 5, 8, 8, 6),
   spec("tasks", 3, 12, 3, 12, 4, 6),
   spec("notes", 2, 6, 2, 4, 3, 3),
   spec("words", 2, 6, 2, 4, 3, 3),
@@ -72,6 +73,7 @@ export const WIDGETS: WidgetInfo[] = [
   spec("taskNotes", 3, 12, 3, 12, 4, 3, true),
   spec("density", 2, 6, 2, 4, 4, 3, true),
   spec("folders", 3, 12, 2, 5, 4, 3, true),
+  spec("calendar", 3, 12, 4, 10, 4, 7, true),
 ];
 
 const INFO = new Map(WIDGETS.map((w) => [w.id, w]));
@@ -98,45 +100,47 @@ export interface WidgetLayout {
 }
 
 /**
- * 默认布局（12 列，单位是格子）：前面和 1.8 一样，其后 6 张新卡片、库体检拆出的 6 张卡，最后写作回顾。
+ * 默认布局（12 列，单位是格子）：前面和 1.8 一样，其后日历和 6 张新卡片、库体检拆出的 6 张卡，最后写作回顾。
+ * 每一行的卡片等高，右边不留洞。
  *
  *   y0   今日写作 8×6                     | 接下来 4×6
  *   y6   笔记 3×3 | 总字数 3×3 | 任务完成率 3×3 | 本月写作 3×3
  *   y9   写作热力图 12×5
  *   y14  每周写作 8×7                     | 常用标签 4×7
- *   y21  写作节奏 4×4 | 笔记活跃度 4×4 | 最常被链接 4×4
- *   y25  文件夹构成 4×3 | 任务最多的笔记 4×3 | 链接密度 4×3
- *   y28  断链 4×5 | 孤立笔记 4×5 | 同名笔记 4×5
- *   y33  空笔记与超大笔记 4×4 | 未引用的附件 4×4 | 重复内容 4×4
- *   y37  写作回顾 12×4
+ *   y21  日历 4×7 | 写作节奏 4×4 + 链接密度 4×3 | 笔记活跃度 4×4 + 文件夹构成 4×3
+ *   y28  最常被链接 4×5 | 任务最多的笔记 4×5 | 断链 4×5
+ *   y33  孤立笔记 4×5 | 同名笔记 4×5 | 空笔记与超大笔记 4×5
+ *   y38  未引用的附件 6×4 | 重复内容 6×4
+ *   y42  写作回顾 12×4
  */
-const DEFAULT_ORDER: [WidgetId, number, number][] = [
-  ["hero", 8, 6],
-  ["tasks", 4, 6],
-  ["notes", 3, 3],
-  ["words", 3, 3],
-  ["taskRate", 3, 3],
-  ["month", 3, 3],
-  ["heat", 12, 5],
-  ["trend", 8, 7],
-  ["tags", 4, 7],
-  ["rhythm", 4, 4],
-  ["activity", 4, 4],
-  ["topLinked", 4, 4],
-  ["folders", 4, 3],
-  ["taskNotes", 4, 3],
-  ["density", 4, 3],
-  ["brokenLinks", 4, 5],
-  ["orphans", 4, 5],
-  ["sameName", 4, 5],
-  ["emptyBig", 4, 4],
-  ["unusedFiles", 4, 4],
-  ["dupes", 4, 4],
-  ["reports", 12, 4],
+const DEFAULT_ITEMS: [WidgetId, number, number, number, number][] = [
+  ["hero", 0, 0, 8, 6],
+  ["tasks", 8, 0, 4, 6],
+  ["notes", 0, 6, 3, 3],
+  ["words", 3, 6, 3, 3],
+  ["taskRate", 6, 6, 3, 3],
+  ["month", 9, 6, 3, 3],
+  ["heat", 0, 9, 12, 5],
+  ["trend", 0, 14, 8, 7],
+  ["tags", 8, 14, 4, 7],
+  ["calendar", 0, 21, 4, 7],
+  ["rhythm", 4, 21, 4, 4],
+  ["density", 4, 25, 4, 3],
+  ["activity", 8, 21, 4, 4],
+  ["folders", 8, 25, 4, 3],
+  ["topLinked", 0, 28, 4, 5],
+  ["taskNotes", 4, 28, 4, 5],
+  ["brokenLinks", 8, 28, 4, 5],
+  ["orphans", 0, 33, 4, 5],
+  ["sameName", 4, 33, 4, 5],
+  ["emptyBig", 8, 33, 4, 5],
+  ["unusedFiles", 0, 38, 6, 4],
+  ["dupes", 6, 38, 6, 4],
+  ["reports", 0, 42, 12, 4],
 ];
 
 export function defaultLayout(): WidgetLayout {
-  return { version: 2, items: flowItems(DEFAULT_ORDER.map(([id, w, h]) => ({ id, w, h }))) as WidgetLayoutItem[] };
+  return { version: 2, items: compact(DEFAULT_ITEMS.map(([id, x, y, w, h]) => ({ id, x, y, w, h }))) as WidgetLayoutItem[] };
 }
 
 /** 2.0 开发中的档位布局（只在开发者本机存在过）：档位 → 占几列 */

@@ -44,3 +44,5 @@ void view.onOpen().then(() => {
 };
 // 测试用：当前保存的布局
 (window as unknown as { previewSaved: () => unknown }).previewSaved = () => JSON.parse(JSON.stringify(settings.layout.items));
+// 测试用：当前设置
+(window as unknown as { previewSettings: () => typeof settings }).previewSettings = () => settings;

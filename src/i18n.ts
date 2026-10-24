@@ -60,6 +60,13 @@ export function monthShort(m: number): string {
   return zh ? `${m + 1}月` : EN_MONTHS[m];
 }
 
+const EN_MONTHS_LONG = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
+/** 年月（日历标题）：中文“2026年10月”，英文 "October 2026"（m 为 0–11） */
+export function yearMonth(y: number, m: number): string {
+  return zh ? `${y}年${m + 1}月` : `${EN_MONTHS_LONG[m]} ${y}`;
+}
+
 /** 月日：中文“10月24日”，英文 "Oct 24" */
 export function monthDay(d: Date): string {
   return zh ? `${d.getMonth() + 1}月${d.getDate()}日` : `${EN_MONTHS[d.getMonth()]} ${d.getDate()}`;

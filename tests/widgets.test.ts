@@ -24,19 +24,20 @@ test("默认布局：和方案第 10 节一致，全部卡片都在看板上", (
     heat: "0,9 12x5",
     trend: "0,14 8x7",
     tags: "8,14 4x7",
-    rhythm: "0,21 4x4",
-    activity: "4,21 4x4",
-    topLinked: "8,21 4x4",
-    folders: "0,25 4x3",
-    taskNotes: "4,25 4x3",
-    density: "8,25 4x3",
-    brokenLinks: "0,28 4x5",
-    orphans: "4,28 4x5",
-    sameName: "8,28 4x5",
-    emptyBig: "0,33 4x4",
-    unusedFiles: "4,33 4x4",
-    dupes: "8,33 4x4",
-    reports: "0,37 12x4",
+    calendar: "0,21 4x7",
+    rhythm: "4,21 4x4",
+    density: "4,25 4x3",
+    activity: "8,21 4x4",
+    folders: "8,25 4x3",
+    topLinked: "0,28 4x5",
+    taskNotes: "4,28 4x5",
+    brokenLinks: "8,28 4x5",
+    orphans: "0,33 4x5",
+    sameName: "4,33 4x5",
+    emptyBig: "8,33 4x5",
+    unusedFiles: "0,38 6x4",
+    dupes: "6,38 6x4",
+    reports: "0,42 12x4",
   };
   for (const [id, pos] of Object.entries(expected)) assert.equal(at(d, id), pos, id);
 });
@@ -121,12 +122,12 @@ test("编辑：添加用这张卡的默认大小，放在最后一行第一个�
   let l = removeWidget(defaultLayout(), "dupes");
   assert.deepEqual(hiddenWidgets(l).map((w) => w.id), ["dupes"]);
   l = addWidget(l, "dupes");
-  assert.equal(at(l, "dupes"), "0,41 4x4", "从最后一行往下找：最后一行是满的，另起一行");
+  assert.equal(at(l, "dupes"), "0,46 4x4", "从最后一行往下找：最后一行是满的，另起一行");
   assert.ok(sameLayout(addWidget(l, "dupes"), l), "已经在的不重复加");
   l = removeWidget(l, "reports");
   assert.equal(hiddenWidgets(l).length, 1);
   l = addWidget(l, "reports");
-  assert.equal(at(l, "reports"), "0,41 12x4", "整行的卡放不进最后一行，另起一行");
+  assert.equal(at(l, "reports"), "0,46 12x4", "整行的卡放不进最后一行，另起一行");
   const gone = removeWidget(defaultLayout(), "hero");
   assert.equal(at(gone, "notes"), "0,0 3x3", "移除后下面的卡补上来");
   for (const a of gone.items) for (const b of gone.items) if (a !== b) assert.ok(!overlap(a, b));

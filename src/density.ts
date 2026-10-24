@@ -39,37 +39,48 @@ export interface HeroDensity {
   week: boolean;
   /** 七天放在圆环和连续打卡的下面（卡片窄但够高） */
   stacked: boolean;
-  /** 底部的今日新建、今日改动、今天写过 */
-  foot: boolean;
+  /** 底部那行里“今天写过”的笔记（需要一点宽度）；今日新建、今日改动始终在 */
   chips: boolean;
   /** 圆环直径 */
   ring: number;
+  /** 本周七天：圆点直径、柱子的高度和宽度，随卡片大小变；卡片高了再加图例和周目标进度条 */
+  dot: number;
+  lane: number;
+  bar: number;
+  weekDetail: boolean;
 }
 
-const WEEK_H = 150;
-const FOOT_H = 84;
-const RING_FULL = 132;
+/** 底部一行（今日新建 / 今日改动 / 今天写过）：上边距 16 + 内边距 12 + 内容约 40。卡片再矮它也不消失 */
+const FOOT_H = 70;
+const RING_MIN = 72;
+const RING_MAX = 168;
+/** 本周七天的盒子：内边距 24、顶上一行 28、圆点 / 柱子和星期标签之间 12、星期标签 18；图例和进度条共约 44 */
+const WEEK_CHROME = 24 + 28 + 12 + 18;
+const WEEK_DETAIL = 44;
 
 export function heroDensity(b: Box): HeroDensity {
   // 窄面板里卡片高度跟内容走：什么都显示，七天放在下面
-  if (b.narrow) return { wide: false, week: true, stacked: true, foot: true, chips: true, ring: 112 };
+  if (b.narrow) return { wide: false, week: true, stacked: true, chips: true, ring: 112, dot: 30, lane: 44, bar: 16, weekDetail: true };
   const w = innerW(b);
-  const h = bodyH(b);
+  const main = Math.max(0, bodyH(b) - FOOT_H);
   const wide = w >= 560;
-  let week = false;
-  let stacked = false;
-  let used = RING_FULL;
-  if (wide) {
-    week = h >= WEEK_H;
-    used = Math.max(RING_FULL, week ? WEEK_H : 0);
-  } else if (h >= RING_FULL + 20 + WEEK_H) {
-    week = true;
-    stacked = true;
-    used = RING_FULL + 20 + WEEK_H;
-  }
-  const foot = h - used >= FOOT_H;
-  const ring = clamp(Math.floor((h - (foot ? FOOT_H : 0) - (stacked ? 20 + WEEK_H : 0)) / 4) * 4, 80, RING_FULL);
-  return { wide, week, stacked, foot, chips: foot && w >= 420, ring };
+  const stacked = !wide && main >= 88 + 14 + 100;
+  const week = wide || stacked;
+  const weekH = wide ? main : main - 88 - 14;
+  const weekDetail = week && weekH >= WEEK_CHROME + WEEK_DETAIL + 40;
+  const room = Math.max(0, weekH - WEEK_CHROME - (weekDetail ? WEEK_DETAIL : 0));
+  const ring = stacked ? 88 : clamp(Math.floor(main / 4) * 4, RING_MIN, RING_MAX);
+  return {
+    wide,
+    week,
+    stacked,
+    chips: w >= 420,
+    ring,
+    dot: clamp(Math.floor(room), 24, 56),
+    lane: clamp(Math.floor(room), 36, 220),
+    bar: clamp(Math.round(room * 0.4), 16, 30),
+    weekDetail,
+  };
 }
 
 export interface KpiDensity {
@@ -128,6 +139,26 @@ export function foldersDensity(b: Box): FoldersDensity {
   return { list: b.narrow || b.rows >= 4 };
 }
 
+export interface CalendarDensity {
+  /** none：只有月历；below：月历下面是选中那天的日程；side：月历左边、日程右边 */
+  mode: "none" | "below" | "side";
+  /** 月历每一格的高度 */
+  cell: number;
+}
+
+/** 星期标题行 20，月历和日程之间 8，日程区最少 104（标题一行、两条日程、输入框） */
+const CAL_WEEKDAYS = 20;
+const CAL_AGENDA = 104;
+
+export function calendarDensity(b: Box): CalendarDensity {
+  if (b.narrow) return { mode: "below", cell: 34 };
+  const w = innerW(b);
+  const h = bodyH(b);
+  if (w >= 560 && h >= 150) return { mode: "side", cell: clamp(Math.floor((h - CAL_WEEKDAYS) / 6), 20, 44) };
+  if (h - CAL_WEEKDAYS - 8 - 6 * 22 >= CAL_AGENDA) return { mode: "below", cell: clamp(Math.floor((h - CAL_WEEKDAYS - 8 - CAL_AGENDA) / 6), 22, 32) };
+  return { mode: "none", cell: clamp(Math.floor((h - CAL_WEEKDAYS) / 6), 14, 36) };
+}
+
 export interface HeatDensity {
   /** 格子大小（高度方向）和宽度方向每周占的宽度 */
   cell: number;
@@ -184,6 +215,8 @@ export function densityKey(id: string, b: Box): string {
       return JSON.stringify([foldersDensity(b), isTight(b.rows)]);
     case "trend":
       return JSON.stringify(trendDensity(b));
+    case "calendar":
+      return JSON.stringify(calendarDensity(b));
     default:
       return isTight(b.rows) ? "tight" : "";
   }
