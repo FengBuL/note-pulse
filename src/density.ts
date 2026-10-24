@@ -144,6 +144,51 @@ export function foldersDensity(b: Box): FoldersDensity {
   return { list: b.narrow || b.rows >= 4 };
 }
 
+/** 合并卡的标签条占的高度（28 + 6） */
+export const HUB_CHROME = 34;
+
+/** 合并卡里面板能用的区域：扣掉标签条，行数按剩下的高度重新算 */
+export function hubBox(b: Box): Box {
+  const h = Math.max(0, b.h - HUB_CHROME);
+  return { ...b, h, rows: Math.max(1, Math.floor((h + 16) / 56)) };
+}
+
+export interface OverviewDensity {
+  /** 每行几格、一共显示几格（卡片不够大时只显示放得下的） */
+  cols: number;
+  shown: number;
+  /** 每格里的迷你走势线 */
+  viz: boolean;
+  tileW: number;
+  tileH: number;
+}
+
+const TILE_MIN_W = 150;
+const TILE_MIN_H = 56;
+const TILE_VIZ_H = 96;
+const TILE_GAP = 12;
+
+/** 数据概览：四格（笔记、总字数、任务完成率、本月写作）按卡片大小排；这张卡没有标题行，格子自己带名字 */
+export function overviewDensity(b: Box): OverviewDensity {
+  const w = innerW(b);
+  const availH = Math.max(0, b.h - PAD_Y);
+  const cols = clamp(Math.floor((w + TILE_GAP) / (TILE_MIN_W + TILE_GAP)), 1, 4);
+  const rowsNeeded = Math.ceil(4 / cols);
+  if (b.narrow) return { cols: Math.min(cols, 2), shown: 4, viz: true, tileW: Math.floor((w - TILE_GAP) / 2), tileH: 110 };
+  const rowsFit = Math.max(1, Math.floor((availH + TILE_GAP) / (TILE_MIN_H + TILE_GAP)));
+  const rows = Math.min(rowsNeeded, rowsFit);
+  const tileH = Math.floor((availH - (rows - 1) * TILE_GAP) / rows);
+  return { cols, shown: Math.min(4, cols * rows), viz: tileH >= TILE_VIZ_H, tileW: Math.floor((w - (cols - 1) * TILE_GAP) / cols), tileH };
+}
+
+/** 目标进度：三个环的直径（一排三个，下面各一行字） */
+export function goalRingSize(b: Box): number {
+  if (b.narrow) return 96;
+  const byW = clamp(Math.floor(innerW(b) / 3 - 14), 56, 150);
+  const byH = clamp(Math.floor(bodyH(b) - 44), 56, 150);
+  return Math.min(byW, byH);
+}
+
 export interface CalendarDensity {
   /** none：只有月历；below：月历下面是选中那天的日程；side：月历左边、日程右边 */
   mode: "none" | "below" | "side";
@@ -222,6 +267,17 @@ export function densityKey(id: string, b: Box): string {
       return JSON.stringify(trendDensity(b));
     case "calendar":
       return JSON.stringify(calendarDensity(b));
+    case "trendHub":
+      return JSON.stringify(trendDensity(b));
+    case "overview":
+      return JSON.stringify(overviewDensity(b));
+    case "goals":
+      return String(goalRingSize(b));
+    case "structure":
+    case "habits": {
+      const h = hubBox(b);
+      return JSON.stringify([foldersDensity(h), rhythmDensity(h), activityDensity(h), densityDensity(h)]);
+    }
     default:
       return isTight(b.rows) ? "tight" : "";
   }

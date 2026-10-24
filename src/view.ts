@@ -15,7 +15,6 @@ import {
   weekdayRhythm,
   headline,
   monthWriting,
-  trendModel,
   weekDays,
   weekStart,
   weeklyCheckins,
@@ -24,10 +23,13 @@ import {
 } from "./dashboard-logic";
 import { GroupStat, Hint, TaskInfo, VaultStats, addDays, dayKey, isCheckinDay, pad2, startOfDay } from "./stats";
 import { Agenda, MAX_ITEM_CHARS, addAgendaItem, itemsOn, monthGrid, removeAgendaItem, shiftMonth, toggleAgendaItem } from "./agenda";
+import { ChartStyles, LENGTH_STYLES, LengthStyle, MIX_STYLES, MixStyle, RHYTHM_STYLES, RhythmStyle, TAG_STYLES, TREND_STYLES, TagStyle, TrendStyle } from "./chart-styles";
+import type { WeekStyle } from "./settings";
+import { HUB_METRICS, HubMetric, goalRings, hubSeries, lengthBuckets, monthCompare, recentNotes, relativeTime } from "./hub-logic";
 import { DayContext, achievementText, achievements, alertText, computeAlerts, greetingTitle, pruneCelebrated } from "./moments";
-import { COLS, GAP, GridItem, rowsToPx } from "./grid";
+import { COLS, GAP, GridItem, ROW_H, rowsToPx } from "./grid";
 import { GestureHost, GridGesture, setPlace } from "./grid-edit";
-import { Box, HeroDensity, activityDensity, calendarDensity, innerW, bodyH, densityDensity, densityKey, foldersDensity, heatDensity, heroDensity, isTight, kpiDensity, rhythmDensity, trendDensity } from "./density";
+import { Box, HUB_CHROME, HeroDensity, KpiDensity, activityDensity, goalRingSize, overviewDensity, calendarDensity, innerW, bodyH, densityDensity, densityKey, foldersDensity, heatDensity, heroDensity, isTight, kpiDensity, rhythmDensity, trendDensity } from "./density";
 import { WidgetId, WidgetLayout, WidgetLayoutItem, addWidget, defaultLayout, hiddenWidgets, limitsOf, readingOrder, removeWidget, sameLayout, withItems } from "./widgets";
 import { MOTION, SegRect, animateHeight, countUp, drawLines, markStagger, playLayout, reducedMotion, segRect, slideSeg, snapshotRects } from "./motion";
 import {
@@ -39,6 +41,8 @@ import {
   drawRing,
   drawSparkline,
   drawTrendChart,
+  drawWeekLine,
+  drawDonut,
   fmtFull,
   fmtNum,
   splitNum,
@@ -46,7 +50,7 @@ import {
   svgEl,
 } from "./charts";
 import { baseName } from "./checkup-logic";
-import { L, count, weekdayLetter, yearMonth, fullDate, monthDay, monthShort, plural, unit, weekdayName, weekdayShort } from "./i18n";
+import { L, UnitKind, count, weekdayLetter, yearMonth, fullDate, monthDay, monthShort, plural, unit, weekdayName, weekdayShort } from "./i18n";
 
 let reportDetailsId = 0;
 
@@ -81,7 +85,18 @@ const WIDGET_TEXT: Record<WidgetId, [() => string, () => string]> = {
   density: [() => L("链接密度", "Link density"), () => L("库连得紧不紧", "How connected the vault is")],
   folders: [() => L("文件夹构成", "Folder mix"), () => L("内容都在哪些文件夹", "Where your notes live")],
   calendar: [() => L("日历", "Calendar"), () => L("月历和每天的日程，可以自己记", "A month view with a daily agenda you can write in")],
+  trendHub: [() => L("写作趋势", "Writing trends"), () => L("一张卡里切指标（字数、新建、累计、打卡）、范围和图的样子（柱状、折线、曲线、面积）", "Switch metric, period and chart style (bar, line, curve, area) in one card")],
+  overview: [() => L("数据概览", "Overview"), () => L("笔记、总字数、任务完成率、本月写作四个数合在一张卡里", "Notes, words, tasks done and this month in one card")],
+  checkupHub: [() => L("库体检", "Vault checkup"), () => L("断链、孤立笔记、同名笔记、空笔记与超大笔记、未引用的附件、重复内容，一张卡里切换", "Broken links, orphans, same name, empty/oversized, unused attachments and duplicates in one card")],
+  structure: [() => L("笔记结构", "Vault structure"), () => L("标签、文件夹、文件夹构成、最常被链接、链接密度，一张卡里切换", "Tags, folders, folder mix, most linked and link density in one card")],
+  habits: [() => L("写作习惯", "Writing habits"), () => L("写作节奏和笔记活跃度，一张卡里切换", "Writing rhythm and note activity in one card")],
+  tasksHub: [() => L("任务", "Tasks"), () => L("到期、按文件夹、按笔记，一张卡里切换", "By due date, folder or note in one card")],
+  recent: [() => L("最近编辑", "Recently edited"), () => L("最近改动过的笔记", "The notes you edited most recently")],
+  goals: [() => L("目标进度", "Goals"), () => L("今天、本周、本月的目标进度环", "Progress rings for today, this week and this month")],
+  monthCompare: [() => L("本月对比上月", "This month vs last"), () => L("字数、新建笔记、打卡天数和上月同期对比", "Words, new notes and streak days against last month")],
+  lengths: [() => L("笔记长度分布", "Note length"), () => L("你的笔记大多是几百字还是几千字", "Whether your notes run to hundreds or thousands of words")],
 };
+const trendStyleName = (v: TrendStyle) => ({ bar: L("柱状", "Bar"), line: L("折线", "Line"), curve: L("曲线", "Curve"), area: L("面积", "Area") })[v];
 const widgetName = (id: WidgetId) => WIDGET_TEXT[id][0]();
 const widgetDesc = (id: WidgetId) => WIDGET_TEXT[id][1]();
 
@@ -730,6 +745,26 @@ export class DashboardView extends ItemView {
         return (h) => this.renderFolders(h, stats);
       case "calendar":
         return (h) => this.renderCalendar(h, stats);
+      case "trendHub":
+        return (h) => this.renderTrendHub(h, stats);
+      case "overview":
+        return (h) => this.renderOverview(h, stats);
+      case "checkupHub":
+        return (h) => this.renderCheckupHub(h, stats);
+      case "structure":
+        return (h) => this.renderStructure(h, stats);
+      case "habits":
+        return (h) => this.renderHabits(h, stats);
+      case "tasksHub":
+        return (h) => this.renderTasksHub(h, stats);
+      case "recent":
+        return (h) => this.renderRecent(h, stats);
+      case "goals":
+        return (h) => this.renderGoals(h, stats);
+      case "monthCompare":
+        return (h) => this.renderMonthCompare(h, stats);
+      case "lengths":
+        return (h) => this.renderLengths(h, stats);
       default:
         return null;
     }
@@ -749,17 +784,20 @@ export class DashboardView extends ItemView {
    * 这张卡片的实际大小（像素）：列数、行数和看板宽度算出来的，不用去量 DOM。
    * 窄面板里卡片宽度是整行（或半行）、高度跟内容走，h 只是电脑上存的行数换算成像素，当作参考。
    */
-  private box(id: string): Box {
+  private box(id: string, chrome = 0): Box {
     const it = this.itemOf(id);
     const cols = it?.w ?? 4;
-    const rows = it?.h ?? 4;
+    const stored = it?.h ?? 4;
+    const h = rowsToPx(stored) - chrome;
+    // 扣掉了标签条（合并卡）以后，行数按剩下的高度重新算
+    const rows = chrome > 0 ? Math.max(1, Math.floor((h + GAP) / (ROW_H + GAP))) : stored;
     const gw = this.gridWidth();
     if (this.narrow) {
       const half = cols <= 3;
-      return { cols, rows, w: Math.round(half ? (gw - GAP) / 2 : gw), h: rowsToPx(rows), narrow: true };
+      return { cols, rows, w: Math.round(half ? (gw - GAP) / 2 : gw), h, narrow: true };
     }
     const colW = (gw - GAP * (COLS - 1)) / COLS;
-    return { cols, rows, w: Math.round(cols * colW + (cols - 1) * GAP), h: rowsToPx(rows), narrow: false };
+    return { cols, rows, w: Math.round(cols * colW + (cols - 1) * GAP), h, narrow: false };
   }
 
   /** 登记并渲染一个区块；每个渲染函数必须恰好生成一个根元素 */
@@ -1472,6 +1510,8 @@ export class DashboardView extends ItemView {
       sum,
       style === "dots"
         ? L("✓ 达标；百分比是还没达标那天的进度；虚线圆是还没到的日子。", "✓ goal met; the % is progress on days below the goal; a dashed circle is a day still to come.")
+        : style === "line"
+          ? L(`七天的字数连成一条线，圆点上写着当天的字数；${goal > 0 ? `虚线是每日目标 ${fmtFull(goal)} 字。` : ""}${squash ? "有一天比目标高很多，所以整体按开方显示。" : ""}`, `The seven days joined by a line, with each day's words above its dot.${goal > 0 ? ` The dashed line is the daily goal of ${fmtFull(goal)}.` : ""}${squash ? " One day is far above the goal, so heights use a square-root scale." : ""}`)
         : goal > 0
           ? L(
               `柱子高度和当天写的字数成正比，上面写着具体字数；实色是达标的日子，虚线是每日目标 ${fmtFull(goal)} 字。${squash ? "有一天比目标高很多，所以整体按开方显示，免得其它天被压成一条线。" : ""}`,
@@ -1479,9 +1519,9 @@ export class DashboardView extends ItemView {
             )
           : L("柱子高度和当天写的字数成正比，上面写着具体字数。", "Bar height follows the words written that day, with the number above each bar.")
     );
-    this.segmented<"dots" | "bars">(
+    this.segmented<WeekStyle>(
       top,
-      [["dots", L("圆点", "Dots")], ["bars", L("柱状", "Bars")]],
+      [["dots", L("圆点", "Dots")], ["bars", L("柱状", "Bars")], ["line", L("折线", "Line")]],
       style,
       (v) => {
         settings.weekStyle = v;
@@ -1491,8 +1531,27 @@ export class DashboardView extends ItemView {
       L("本周显示方式", "This week display")
     );
 
-    const row = box.createDiv({ cls: "vp-week" });
-    for (const d of days) {
+    const row = box.createDiv({ cls: "vp-week" + (style === "line" ? " is-line" : "") });
+    // 折线：上面一块画线和圆点，下面一排星期标签
+    const plot = style === "line" ? row.createDiv({ cls: "vp-weekline" }) : null;
+    const labels = style === "line" ? row.createDiv({ cls: "vp-weekline-labels" }) : null;
+    if (plot) {
+      drawWeekLine(plot, days.map((d) => (d.future ? 0 : frac(d.words))), { area: true, goal: goal > 0 ? frac(goal) : undefined, done: days.map((d) => d.done), future: days.map((d) => d.future) });
+    }
+    for (const [i, d] of days.entries()) {
+      if (plot && labels) {
+        const w = count(fmtFull(d.words), "words");
+        if (!d.future) {
+          const pt = plot.createDiv({
+            cls: "vp-weekline-pt" + (d.done ? " is-active" : "") + (d.isToday ? " is-today" : ""),
+            attr: { role: "img", "aria-label": `${weekdayName(dayIndex(d.key))} ${d.done ? L(`已打卡，${fmtFull(d.words)} 字`, `goal met, ${w}`) : d.words > 0 ? L(`${fmtFull(d.words)} 字，未达标`, `${w}, below goal`) : L("没有写", "nothing written")}` },
+          });
+          pt.setCssProps({ "--vp-wl-x": `${((i + 0.5) / 7) * 100}%`, "--vp-week-f": String(Math.min(1, frac(d.words))) });
+          if (d.words > 0) pt.createSpan({ cls: "vp-week-val" + (d.done ? " is-done" : ""), text: fmtNum(d.words), attr: { "aria-hidden": "true" } });
+        }
+        labels.createDiv({ cls: "vp-week-label" + (d.isToday ? " is-today" : ""), text: d.isToday ? L("今", "Today") : d.label });
+        continue;
+      }
       const c = row.createDiv({ cls: "vp-week-day" + (d.done ? " is-active" : "") + (d.isToday ? " is-today" : "") + (d.future ? " is-future" : "") });
       const w = count(fmtFull(d.words), "words");
       const desc = d.future
@@ -1542,7 +1601,7 @@ export class DashboardView extends ItemView {
   /* ---------- 3. 数据卡 ---------- */
 
   /** 四张数据卡（2.0 起各自是一张卡片，可以分别换尺寸、隐藏、排序） */
-  private renderKpi(grid: HTMLElement, s: VaultStats, which: "notes" | "words" | "taskRate" | "month") {
+  private renderKpi(grid: HTMLElement, s: VaultStats, which: "notes" | "words" | "taskRate" | "month", tile?: KpiDensity) {
     const wrap = grid;
     const now = new Date(s.generatedAt);
     const goal = this.plugin.settings.dailyWordGoal;
@@ -1557,9 +1616,10 @@ export class DashboardView extends ItemView {
     }
     const range = (a: Date, b: Date) => (dayKey(a) === dayKey(b) ? `${a.getMonth() + 1}/${a.getDate()}` : `${a.getMonth() + 1}/${a.getDate()} – ${b.getMonth() + 1}/${b.getDate()}`);
 
-    const dn = kpiDensity(this.box(which));
+    // tile：画在合并卡“数据概览”的一格里（不是单独的卡片），密度由概览卡按格子大小给
+    const dn = tile ?? kpiDensity(this.box(which));
     const kpi = (icon: string, label: string, help: string) => {
-      const c = this.cardRoot(wrap, "vp-kpi" + (dn.small ? " is-small" : ""), { role: "group" });
+      const c = tile ? wrap.createDiv({ cls: "vp-kpi vp-tile" + (dn.small ? " is-small" : ""), attr: { role: "group" } }) : this.cardRoot(wrap, "vp-kpi" + (dn.small ? " is-small" : ""), { role: "group" });
       srLabel(c, label);
       const top = c.createDiv({ cls: "vp-kpi-top" });
       setIcon(top.createSpan({ cls: "vp-card-icon", attr: { "aria-hidden": "true" } }), icon);
@@ -1712,6 +1772,17 @@ export class DashboardView extends ItemView {
           ),
       });
     }
+  }
+
+  /** 数据概览：笔记、总字数、任务完成率、本月写作四格合在一张卡里，格数按卡片大小定 */
+  private renderOverview(grid: HTMLElement, s: VaultStats) {
+    const dn = overviewDensity(this.box("overview"));
+    const card = this.cardRoot(grid, "vp-overview", { role: "group" });
+    srLabel(card, L("数据概览", "Overview"));
+    const tiles = card.createDiv({ cls: "vp-tiles" });
+    tiles.setCssProps({ "--vp-ov-cols": String(dn.cols) });
+    const kd: KpiDensity = { viz: dn.viz, small: dn.tileW < 120, side: dn.tileW >= 150 };
+    for (const which of (["notes", "words", "taskRate", "month"] as const).slice(0, dn.shown)) this.renderKpi(tiles, s, which, kd);
   }
 
   private meter(parent: HTMLElement, ratio: number, cls: string, label?: string) {
@@ -1993,66 +2064,147 @@ export class DashboardView extends ItemView {
 
   /* ---------- 5. 每周写作 ---------- */
 
+  /* ---------- 写作趋势：同一份代码画“每周写作”和合并后的“写作趋势” ---------- */
+
+  /** 合并卡“写作趋势”选的指标和范围（单独的“每周写作”卡用 this.metric / this.range） */
+  private hubMetric: HubMetric = "words";
+  private hubRange: TrendRange = 182;
+
+  /** 把图表样式存进设置（随库同步），然后重画这张卡 */
+  private setChartStyle<K extends keyof ChartStyles>(key: K, value: ChartStyles[K], cardId: string) {
+    const set = this.plugin.settings;
+    set.chartStyles = { ...set.chartStyles, [key]: value };
+    void this.plugin.saveViewSetting();
+    this.rerender(cardId);
+  }
+
+  /** 一个小下拉框（选项多的时候比分段控件省地方） */
+  private dropdown<T extends string>(parent: HTMLElement, options: [T, string][], current: T, onChange: (v: T) => void, label: string) {
+    const sel = parent.createEl("select", { cls: "dropdown vp-select", attr: { "aria-label": label, "data-fid": `${this.currentPart}:select:${label}` } });
+    for (const [v, text] of options) {
+      const o = sel.createEl("option", { text, value: v });
+      if (v === current) o.selected = true;
+    }
+    sel.addEventListener("change", () => onChange(sel.value as T));
+    return sel;
+  }
+
   private renderTrend(grid: HTMLElement, s: VaultStats) {
-    const goal = this.plugin.settings.dailyWordGoal;
-    const isWords = this.metric === "words";
-    const m = trendModel(s, this.range, this.metric, goal, new Date(s.generatedAt));
-    const daily = m.gran === "day";
+    this.renderTrendLike(grid, s, "trend");
+  }
+
+  private renderTrendHub(grid: HTMLElement, s: VaultStats) {
+    this.renderTrendLike(grid, s, "trendHub");
+  }
+
+  private renderTrendLike(grid: HTMLElement, s: VaultStats, id: "trend" | "trendHub") {
+    const hub = id === "trendHub";
+    const set = this.plugin.settings;
+    const goal = set.dailyWordGoal;
+    const metric: HubMetric = hub ? this.hubMetric : this.metric;
+    const range = hub ? this.hubRange : this.range;
+    const style = set.chartStyles.trend;
+    const series = hubSeries(s, metric, range, goal, new Date(s.generatedAt));
+    const daily = series.gran === "day";
     const per = daily ? "天" : "周";
-    const trendHelp = isWords
-      ? L(
+    const isWords = metric === "words" || metric === "totalWords";
+    const u = metric === "checkins" ? unit("days") : isWords ? unit("words") : unit("notes");
+    const unitKind: UnitKind = metric === "checkins" ? "days" : isWords ? "words" : "notes";
+    const rangeName = range === 30 ? L("30 天", "30 days") : range === 182 ? L("半年", "6 months") : L("一年", "1 year");
+    const metricName: Record<HubMetric, string> = {
+      words: L("每日 / 每周写作字数", "Words written"),
+      notes: L("新建笔记", "New notes"),
+      totalNotes: L("笔记总数", "Total notes"),
+      totalWords: L("总字数", "Total words"),
+      checkins: L("每周打卡天数", "Streak days per week"),
+    };
+    const help: Record<HubMetric, string> = {
+      words: L(
         `每${per}写作的字数，与热力图同一来源（排除超大和采集笔记）。最右边一根是本${daily ? "日" : "周"}，用实色标出。`,
         `Words written per ${daily ? "day" : "week"}, from the same source as the heatmap (oversized and clipped notes left out). The rightmost bar, in solid color, is ${daily ? "today" : "this week"}.`
-      )
-      : L(`每${per}新建的笔记数（不含采集文件夹）。`, `Notes created per ${daily ? "day" : "week"} (clipping folders left out).`);
-    const title = isWords ? L(`每${per}写作`, daily ? "Daily writing" : "Weekly writing") : L(`每${per}新建笔记`, daily ? "New notes per day" : "New notes per week");
-    const { head, body } = this.card(grid, "vp-trend-card", title, "trending-up", trendHelp);
+      ),
+      notes: L(`每${per}新建的笔记数（不含采集文件夹）。`, `Notes created per ${daily ? "day" : "week"} (clipping folders left out).`),
+      totalNotes: L("每周结束时一共有多少篇笔记（不含采集文件夹），按创建日期算。曲线往上走得越陡，那段时间新建得越多。", "How many notes there were at the end of each week (clipping folders left out), by created date. The steeper the line, the more notes were created."),
+      totalWords: L("每周结束时累计的写作字数（按笔记创建日期、用笔记当前字数计）。", "Running total of words written at the end of each week (by created date, using each note's current length)."),
+      checkins: L("每周有几天达到打卡（达到每日目标，或写了当天的日记）。", "Days per week that counted as a streak day (daily goal met, or a daily note written)."),
+    };
+    const title = hub
+      ? L("写作趋势", "Writing trends")
+      : metric === "words"
+        ? L(`每${per}写作`, daily ? "Daily writing" : "Weekly writing")
+        : L(`每${per}新建笔记`, daily ? "New notes per day" : "New notes per week");
+    const { head, body } = this.card(grid, "vp-trend-card", title, "trending-up", hub ? L("一张卡里切换指标、时间范围和图的样子：柱状、折线、曲线、面积。", "Switch the metric, the period and the chart style (bar, line, curve, area) in one card.") + "\n" + help[metric] : help[metric]);
     const ctrls = head.createDiv({ cls: "vp-ctrls" });
-    this.segmented<TrendMetric>(
-      ctrls,
-      [["words", L("字数", "Words")], ["notes", L("新建笔记", "New notes")]],
-      this.metric,
-      (v) => {
-        this.metric = v;
-        this.rerender("trend");
-      },
-      L("指标", "Metric")
-    );
+    if (hub) {
+      this.dropdown<HubMetric>(
+        ctrls,
+        HUB_METRICS.map((m) => [m, { words: L("写作字数", "Words written"), notes: L("新建笔记", "New notes"), totalNotes: L("笔记总数", "Total notes"), totalWords: L("总字数", "Total words"), checkins: L("打卡天数", "Streak days") }[m]]),
+        metric,
+        (v) => {
+          this.hubMetric = v;
+          this.rerender(id);
+        },
+        L("指标", "Metric")
+      );
+    } else {
+      this.segmented<TrendMetric>(
+        ctrls,
+        [["words", L("字数", "Words")], ["notes", L("新建笔记", "New notes")]],
+        this.metric,
+        (v) => {
+          this.metric = v;
+          this.rerender(id);
+        },
+        L("指标", "Metric")
+      );
+    }
     this.segmented<TrendRange>(
       ctrls,
       [[30, L("30 天", "30 days")], [182, L("半年", "6 months")], [365, L("一年", "1 year")]],
-      this.range,
+      range,
       (v) => {
-        this.range = v;
-        this.rerender("trend");
+        if (hub) this.hubRange = v;
+        else this.range = v;
+        this.rerender(id);
       },
       L("时间范围", "Period")
     );
+    this.segmented<TrendStyle>(ctrls, TREND_STYLES.map((v) => [v, trendStyleName(v)]), style, (v) => this.setChartStyle("trend", v, id), L("图的样式", "Chart style"));
 
-    const dn = trendDensity(this.box("trend"));
-    const u = isWords ? unit("words") : unit("notes");
-    const rangeName = this.range === 30 ? L("30 天", "30 days") : this.range === 182 ? L("半年", "6 months") : L("一年", "1 year");
+    const dn = trendDensity(this.box(id));
     if (dn.summary) {
       const summary = body.createDiv({ cls: "vp-trend-summary" });
       const stat = (key: string, label: string, value: number) => {
         const x = summary.createDiv({ cls: "vp-trend-side" });
-        this.tweenNum(`trend:${this.metric}:${key}`, bigNumber(x, value, u, "vp-num vp-num-sm"), value, u);
+        this.tweenNum(`${id}:${metric}:${key}`, bigNumber(x, value, u, "vp-num vp-num-sm"), value, u);
         x.createDiv({ cls: "vp-label", text: label });
       };
-      stat("total", L(`${rangeName}合计`, `Total, ${rangeName}`), m.total);
-      stat("avg", L(`${per}均`, daily ? "Per day" : "Per week"), m.average);
-      if (m.best) stat("best", L(`最高一${per}`, daily ? "Best day" : "Best week"), m.best.value);
+      if (series.cumulative) {
+        stat("total", L(`${rangeName}新增`, `Added, ${rangeName}`), series.total);
+        stat("avg", L("每周平均新增", "Added per week"), series.average);
+        if (series.best) stat("best", L("新增最多一周", "Best week"), series.best.gain);
+      } else {
+        stat("total", L(`${rangeName}合计`, `Total, ${rangeName}`), series.total);
+        stat("avg", L(`${per}均`, daily ? "Per day" : "Per week"), series.average);
+        if (series.best) stat("best", L(`最高一${per}`, daily ? "Best day" : "Best week"), series.best.gain);
+      }
     }
 
     const fmtDay = (d: Date) => `${d.getMonth() + 1}/${d.getDate()}`;
-    const points: SeriesPoint[] = m.buckets.map((bk) => {
-      const title = m.gran === "day" ? monthDay(bk.start) : `${fmtDay(bk.start)} – ${fmtDay(bk.end)}`;
-      const rows = [{ label: isWords ? L("写作", "Written") : L("新建笔记", "New notes"), value: count(fmtFull(bk.value), isWords ? "words" : "notes"), dot: "is-accent" }];
-      if (m.gran === "week") rows.push({ label: L("打卡", "Streak days"), value: count(bk.checkins, "days"), dot: "" });
-      return { label: fmtDay(bk.start), value: bk.value, tipTitle: title, tipRows: rows };
+    const points: SeriesPoint[] = series.buckets.map((bk) => {
+      const tipTitle = series.gran === "day" ? monthDay(bk.start) : `${fmtDay(bk.start)} – ${fmtDay(bk.end)}`;
+      const rows: { label: string; value: string; dot: string }[] = [];
+      if (series.cumulative) {
+        rows.push({ label: L("累计", "Total"), value: count(fmtFull(bk.value), unitKind), dot: "is-accent" });
+        rows.push({ label: L("当周新增", "Added"), value: `+${fmtFull(bk.gain)}`, dot: "" });
+      } else {
+        rows.push({ label: metricName[metric], value: count(fmtFull(bk.value), unitKind), dot: "is-accent" });
+        if (series.gran === "week" && metric !== "checkins") rows.push({ label: L("打卡", "Streak days"), value: count(bk.checkins, "days"), dot: "" });
+      }
+      return { label: fmtDay(bk.start), value: bk.value, tipTitle, tipRows: rows };
     });
     if (points.every((p) => p.value === 0)) {
-      this.empty(body.createDiv({ cls: "vp-chart-empty" }), "line-chart", isWords ? L("这段时间还没有写作记录", "No writing recorded in this period") : L("这段时间还没有新建笔记", "No notes created in this period"));
+      this.empty(body.createDiv({ cls: "vp-chart-empty" }), "line-chart", L("这段时间还没有数据", "No data in this period"));
     } else {
       const chartWrap = body.createDiv({ cls: "vp-chart-wrap" });
       const tip = new Tooltip(chartWrap);
@@ -2060,10 +2212,7 @@ export class DashboardView extends ItemView {
       host.setAttr("role", "img");
       srLabel(
         host,
-        L(
-          `${rangeName}${isWords ? "写作字数" : "新建笔记"}柱状图，合计 ${fmtFull(m.total)} ${u}`,
-          `Bar chart of ${isWords ? "words written" : "new notes"}, ${rangeName}, ${fmtFull(m.total)} ${u} in total`
-        ),
+        L(`${rangeName}${metricName[metric]}${trendStyleName(style)}图，${series.cumulative ? "新增" : "合计"} ${fmtFull(series.total)} ${u}`, `${trendStyleName(style)} chart of ${metricName[metric].toLowerCase()}, ${rangeName}, ${fmtFull(series.total)} ${u} ${series.cumulative ? "added" : "in total"}`),
         chartWrap
       );
       // 图的高度等于它在卡片里分到的高度（卡片拉高，图就变高）
@@ -2072,12 +2221,12 @@ export class DashboardView extends ItemView {
         (w, h) => {
           host.empty();
           if (h < 60) return; // 卡片太矮，装不下图
-          drawTrendChart(host, points, { width: w, height: Math.max(64, h), kind: "bar", tooltip: tip, highlightLast: true });
+          drawTrendChart(host, points, { width: w, height: Math.max(64, h), kind: style, tooltip: tip, highlightLast: true, zeroBased: !series.cumulative });
         },
         { narrowH: 220 }
       );
     }
-    if (dn.annot) this.renderOutlierRow(body, s);
+    if (dn.annot && (metric === "words" || metric === "notes")) this.renderOutlierRow(body, s);
   }
 
   /** 趋势卡下方：一键开关；说明文字都收进旁边的问号里 */
@@ -2194,12 +2343,17 @@ export class DashboardView extends ItemView {
         "Open tasks in your notes with a due date (📅 or [due::]). Overdue ones are listed first, then those due in the next 7 days. Click a task to jump to its line."
       )
     );
-    const t = s.tasks;
     this.segmented<TaskTab>(head, [["due", L("到期", "Due")], ["folder", L("按文件夹", "By folder")]], this.taskTab, (v) => {
       this.taskTab = v;
       this.expanded.delete("tasks");
       this.rerender("tasks");
     });
+    this.tasksPanel(body, "tasks", s, this.taskTab);
+  }
+
+  /** 任务列表的三种看法：按到期（逾期单独列）、按文件夹、按笔记。“接下来”“任务最多的笔记”和合并卡“任务”共用 */
+  private tasksPanel(body: HTMLElement, id: string, s: VaultStats, tab: "due" | "folder" | "notes") {
+    const t = s.tasks;
     if (t.total === 0) {
       this.empty(body, "list-checks", L("还没有任务。在笔记里写 - [ ] 就会出现在这里", "No tasks yet. Write - [ ] in a note and it shows up here."));
       return;
@@ -2208,7 +2362,7 @@ export class DashboardView extends ItemView {
     const host = body.createDiv();
     const units: HTMLElement[] = [];
     const foot = body.createDiv({ cls: "vp-card-foot" });
-    if (this.taskTab === "due") {
+    if (tab === "due") {
       if (t.overdue.length) {
         const od = host.createDiv({ cls: "vp-overdue" });
         od.createDiv({ cls: "vp-overdue-title", text: L(`已逾期 ${t.overdue.length}`, `Overdue ${t.overdue.length}`) });
@@ -2218,11 +2372,13 @@ export class DashboardView extends ItemView {
       const list = host.createDiv({ cls: "vp-rows" });
       if (t.dueSoon.length === 0 && !t.overdue.length) this.empty(list, "party-popper", L("7 天内没有到期的任务", "Nothing due in the next 7 days"));
       for (const it of t.dueSoon.slice(0, 50)) units.push(this.taskRow(list, it, false, it.due === todayKey));
-      this.fitList("tasks", host, foot, units);
+      this.fitList(id, host, foot, units);
       this.moreLink(foot, L(`全部 ${fmtFull(t.pending)} 项待办`, `All ${count(fmtFull(t.pending), "tasks")}`), () => this.plugin.openSearch("task-todo:\"\""));
-    } else {
+      return;
+    }
+    const list = host.createDiv({ cls: "vp-rows" });
+    if (tab === "folder") {
       const groups: GroupStat[] = t.byFolder.filter((g) => g.pending > 0);
-      const list = host.createDiv({ cls: "vp-rows" });
       if (groups.length === 0) {
         this.empty(list, "party-popper", L("所有任务都完成了", "All tasks are done"));
         return;
@@ -2236,8 +2392,21 @@ export class DashboardView extends ItemView {
         if (g.key !== ROOT_FOLDER) this.clickable(row, L(`${g.key}，待办 ${g.pending}`, `${g.key}, ${g.pending} open`), () => this.plugin.revealFolder(g.key));
         units.push(row);
       }
-      this.fitList("tasks", host, foot, units);
+    } else {
+      const groups = t.byNote.filter((g) => g.pending > 0).slice(0, 30);
+      if (groups.length === 0) this.empty(list, "party-popper", L("没有待办", "No open tasks"));
+      for (const g of groups) {
+        const row = list.createDiv({ cls: "vp-row vp-group-row" });
+        row.createSpan({ cls: "vp-row-name", text: g.key, attr: { title: g.file?.path ?? g.key } });
+        const m = row.createDiv({ cls: "vp-meter is-inline" });
+        m.createDiv({ cls: "vp-meter-fill" }).setCssProps({ "--vp-meter-width": `${(g.done / Math.max(1, g.total)) * 100}%` });
+        row.createSpan({ cls: "vp-row-meta vp-tabular is-fit", text: L(`待办 ${g.pending}`, `${g.pending} open`) });
+        const f = g.file;
+        if (f) this.clickable(row, L(`${g.key}，待办 ${g.pending}`, `${g.key}, ${g.pending} open`), (e) => void this.plugin.openFile(f, undefined, e));
+        units.push(row);
+      }
     }
+    this.fitList(id, host, foot, units);
   }
 
   private taskRow(list: HTMLElement, it: TaskInfo, overdue: boolean, today = false): HTMLElement {
@@ -2272,16 +2441,32 @@ export class DashboardView extends ItemView {
       isTags ? "tag" : "folder",
       isTags
         ? L(
-          "按使用的笔记数排列。“本周 +n”是本周新建的笔记里用到这个标签的篇数。点击标签在搜索里查看。",
-          "Sorted by the number of notes using each tag. \"+n this week\" is how many notes created this week use it. Click a tag to search for it."
+          "按使用的笔记数排列。“本周 +n”是本周新建的笔记里用到这个标签的篇数。点击标签在搜索里查看。可以换成标签云。",
+          "Sorted by the number of notes using each tag. \"+n this week\" is how many notes created this week use it. Click a tag to search for it. You can switch to a tag cloud."
         )
         : L("按顶层文件夹统计笔记数和字数，点击可在文件列表里定位。", "Notes and words per top-level folder. Click to reveal the folder in the file list.")
     );
-    this.segmented<TagTab>(head, [["tags", L("标签", "Tags")], ["folders", L("文件夹", "Folders")]], this.tagTab, (v) => {
+    const ctrls = head.createDiv({ cls: "vp-ctrls" });
+    this.segmented<TagTab>(ctrls, [["tags", L("标签", "Tags")], ["folders", L("文件夹", "Folders")]], this.tagTab, (v) => {
       this.tagTab = v;
       this.expanded.delete("tags");
       this.rerender("tags");
     });
+    if (isTags) this.tagStyleSwitch(ctrls, "tags");
+    this.tagsPanel(body, "tags", s, this.tagTab);
+  }
+
+  private tagStyleSwitch(parent: HTMLElement, cardId: string) {
+    this.segmented<TagStyle>(parent, TAG_STYLES.map((v) => [v, v === "bars" ? L("条形", "Bars") : L("标签云", "Cloud")]), this.plugin.settings.chartStyles.tags, (v) => this.setChartStyle("tags", v, cardId), L("标签的样子", "Tag style"));
+  }
+
+  /** 标签排行或文件夹排行（独立的“常用标签”和合并卡“结构”共用） */
+  private tagsPanel(body: HTMLElement, id: string, s: VaultStats, tab: TagTab) {
+    const isTags = tab === "tags";
+    if (isTags && this.plugin.settings.chartStyles.tags === "cloud") {
+      this.tagCloud(body, id, s);
+      return;
+    }
     let items: BarItem[];
     if (isTags) {
       const since = weekStart(new Date(s.generatedAt)).getTime();
@@ -2302,7 +2487,27 @@ export class DashboardView extends ItemView {
         onClick: f.folder === ROOT_FOLDER ? undefined : () => this.plugin.revealFolder(f.folder),
       }));
     }
-    this.barListCard("tags", body, items, isTags ? L("还没有标签。给笔记加上 #标签，这里就会热闹起来", "No tags yet. Add #tags to your notes and they show up here.") : L("仓库里还没有文件夹", "No folders in the vault yet"), isTags ? "tag" : "folder");
+    this.barListCard(id, body, items, isTags ? L("还没有标签。给笔记加上 #标签，这里就会热闹起来", "No tags yet. Add #tags to your notes and they show up here.") : L("仓库里还没有文件夹", "No folders in the vault yet"), isTags ? "tag" : "folder");
+  }
+
+  /** 标签云：用得越多字越大；放不下的折成“还有 N 个” */
+  private tagCloud(body: HTMLElement, id: string, s: VaultStats) {
+    const tags = s.tags.slice(0, 80);
+    if (tags.length === 0) {
+      this.empty(body, "tag", L("还没有标签。给笔记加上 #标签，这里就会热闹起来", "No tags yet. Add #tags to your notes and they show up here."));
+      return;
+    }
+    const hi = Math.sqrt(tags[0][1]);
+    const lo = Math.sqrt(tags[tags.length - 1][1]);
+    const cloud = body.createDiv({ cls: "vp-cloud", attr: { role: "list" } });
+    const units: HTMLElement[] = [];
+    for (const [tag, n] of tags) {
+      const level = hi === lo ? 3 : Math.min(5, 1 + Math.floor(((Math.sqrt(n) - lo) / (hi - lo)) * 4.999));
+      const chip = cloud.createEl("button", { cls: `vp-cloud-tag is-l${level}`, text: tag, attr: { type: "button", role: "listitem", title: L(`${n} 篇笔记`, `${count(n, "notes")}`) } });
+      chip.addEventListener("click", () => this.plugin.openSearch(`tag:${tag}`));
+      units.push(chip);
+    }
+    this.fitList(id, cloud, body.createDiv({ cls: "vp-card-foot" }), units);
   }
 
   /** 条形排行列表卡片：画出所有条，按卡片高度截断 */
@@ -2329,8 +2534,16 @@ export class DashboardView extends ItemView {
    * 返回的 add 往列表里加一行，done 在加完之后调用。
    */
   private checkupCard(grid: HTMLElement, id: WidgetId, icon: string, help: string, total: number, warn: boolean, okText: string) {
-    const { head, body } = this.card(grid, "vp-checkup-card", widgetName(id), icon, help);
-    head.createSpan({ cls: "vp-count" + (total && warn ? " is-warn" : ""), text: fmtFull(total) });
+    // 在合并卡“库体检”里：列表直接画进它的面板，不另外建卡片（列表折叠记在合并卡的名下）
+    const hub = this.hubKit;
+    let body: HTMLElement;
+    if (hub) body = hub.body;
+    else {
+      const made = this.card(grid, "vp-checkup-card", widgetName(id), icon, help);
+      made.head.createSpan({ cls: "vp-count" + (total && warn ? " is-warn" : ""), text: fmtFull(total) });
+      body = made.body;
+    }
+    const fitId = hub ? hub.id : id;
     const host = body.createDiv();
     const list = host.createDiv({ cls: "vp-rows" });
     if (total === 0) list.createDiv({ cls: "vp-checkup-ok", text: okText });
@@ -2347,7 +2560,68 @@ export class DashboardView extends ItemView {
       });
       units.push(row);
     };
-    return { body, host, foot, add, done: () => this.fitList(id, host, foot, units) };
+    return { body, host, foot, add, done: () => this.fitList(fitId, host, foot, units) };
+  }
+
+  /** 合并卡“库体检”正在画的面板（普通的体检卡是 null） */
+  private hubKit: { body: HTMLElement; id: string } | null = null;
+  private checkupTab: "brokenLinks" | "orphans" | "sameName" | "emptyBig" | "unusedFiles" | "dupes" | null = null;
+
+  /** 库体检合并卡：六个标签，标签上带数量（有问题的用警示色），下面是选中那一项的列表和操作 */
+  private renderCheckupHub(grid: HTMLElement, s: VaultStats) {
+    const id: WidgetId = "checkupHub";
+    const c = checkupModel(s);
+    const set = this.plugin.settings;
+    const dd = this.plugin.dedupe;
+    const dupOn = set.dedupeEnabled && set.dedupeCard;
+    const dupN = dupOn && dd.analysis ? significantPairs(dd.analysis, dd.ignoredSet()).length : 0;
+    type Tab = NonNullable<typeof this.checkupTab>;
+    const counts: Record<Tab, number> = {
+      brokenLinks: c.unresolvedCount,
+      orphans: c.orphans.length,
+      sameName: c.sameName.length,
+      emptyBig: c.empty.length + c.big.length,
+      unusedFiles: c.unusedAttachments.length,
+      dupes: dupN,
+    };
+    const order: Tab[] = ["brokenLinks", "orphans", "sameName", "emptyBig", "unusedFiles", "dupes"];
+    // 第一次打开：停在第一个有问题的标签上
+    const tab: Tab = this.checkupTab ?? order.find((k) => counts[k] > 0) ?? "brokenLinks";
+    const total = order.reduce((a, k) => a + counts[k], 0);
+    const { ctrls, panel } = this.hubShell(
+      grid,
+      id,
+      "heart-pulse",
+      L(
+        "随看板一起刷新。断链和孤立笔记来自 Obsidian 的链接索引；重复内容来自最近一次扫描。会改动笔记的操作都先确认，删除的笔记进回收站。",
+        "Refreshes with the dashboard. Broken links and orphans come from Obsidian's link index; duplicates from the last scan. Anything that changes notes asks first, and deleted notes go to the trash."
+      ),
+      [
+        { id: "brokenLinks" as const, label: L("断链", "Broken"), count: counts.brokenLinks, warn: true },
+        { id: "orphans" as const, label: L("孤立", "Orphans"), count: counts.orphans },
+        { id: "sameName" as const, label: L("同名", "Same name"), count: counts.sameName },
+        { id: "emptyBig" as const, label: L("空与超大", "Empty/big"), count: counts.emptyBig },
+        { id: "unusedFiles" as const, label: L("附件", "Files"), count: counts.unusedFiles },
+        { id: "dupes" as const, label: L("重复", "Duplicates"), count: counts.dupes, warn: true },
+      ],
+      tab,
+      (v) => {
+        this.checkupTab = v;
+        this.rerender(id);
+      }
+    );
+    ctrls.createSpan({ cls: "vp-card-aside", text: total ? L(`共 ${fmtFull(total)} 项`, `${fmtFull(total)} to tidy`) : L("一切正常", "All good") });
+    this.hubKit = { body: panel, id };
+    try {
+      if (tab === "brokenLinks") this.renderBrokenLinks(panel, s);
+      else if (tab === "orphans") this.renderOrphans(panel, s);
+      else if (tab === "sameName") this.renderSameName(panel, s);
+      else if (tab === "emptyBig") this.renderEmptyBig(panel, s);
+      else if (tab === "unusedFiles") this.renderUnused(panel, s);
+      else this.renderDupes(panel);
+    } finally {
+      this.hubKit = null;
+    }
   }
 
   /** 断链：能唯一确定指向哪篇的排在前面，一键改过去；其余照旧可以新建笔记（用 Obsidian 自己的规则） */
@@ -2554,7 +2828,37 @@ export class DashboardView extends ItemView {
     ).open();
   }
 
-  /* ---------- 10. 2.0 新卡片 ---------- */
+  /* ---------- 10. 2.0 新卡片，以及合并卡共用的面板 ---------- */
+
+  /** 合并卡的标签条占的高度：算内容密度时要扣掉 */
+  /** 合并卡的标签条：每个标签可以带数量（有问题时用警示色） */
+  private tabStrip<T extends string>(parent: HTMLElement, tabs: { id: T; label: string; count?: number; warn?: boolean }[], current: T, onChange: (v: T) => void, label: string): HTMLElement {
+    const strip = parent.createDiv({ cls: "vp-tabs", attr: { role: "tablist", "aria-label": label } });
+    for (const t of tabs) {
+      const b = strip.createEl("button", {
+        cls: "vp-tab" + (t.id === current ? " is-active" : ""),
+        attr: { type: "button", role: "tab", "aria-selected": String(t.id === current), "data-fid": `${this.currentPart}:tab:${t.id}` },
+      });
+      b.createSpan({ text: t.label });
+      if (t.count !== undefined) b.createSpan({ cls: "vp-count" + (t.count && t.warn ? " is-warn" : ""), text: fmtFull(t.count) });
+      b.addEventListener("click", () => {
+        if (t.id !== current) onChange(t.id);
+      });
+    }
+    return strip;
+  }
+
+  /** 合并卡的外壳：卡片 + 标签条 + 装面板的容器。head 里可以再放这个标签页专属的样式切换 */
+  private hubShell<T extends string>(grid: HTMLElement, id: WidgetId, icon: string, help: string, tabs: { id: T; label: string; count?: number; warn?: boolean }[], current: T, onChange: (v: T) => void) {
+    const { head, body } = this.card(grid, `vp-hub-card vp-hub-${id}`, widgetName(id), icon, help);
+    const ctrls = head.createDiv({ cls: "vp-ctrls" });
+    this.tabStrip(body, tabs, current, (v) => {
+      this.expanded.delete(id);
+      onChange(v);
+    }, widgetName(id));
+    const panel = body.createDiv({ cls: "vp-hub-panel" });
+    return { ctrls, panel };
+  }
 
   /** 最常被链接：哪些笔记是核心（links.topLinked） */
   private renderTopLinked(grid: HTMLElement, s: VaultStats) {
@@ -2565,6 +2869,10 @@ export class DashboardView extends ItemView {
       "network",
       L("被其它笔记链接次数最多的笔记，通常就是你的索引页和核心笔记。点击打开。", "Notes linked from other notes the most, usually your index pages and core notes. Click to open.")
     );
+    this.topLinkedPanel(body, "topLinked", s);
+  }
+
+  private topLinkedPanel(body: HTMLElement, id: string, s: VaultStats) {
     const items: BarItem[] = s.links.topLinked.slice(0, 30).map(({ file, count: n }) => ({
       label: file.basename,
       title: file.path,
@@ -2572,20 +2880,30 @@ export class DashboardView extends ItemView {
       valueText: L(`${fmtFull(n)} 处链接`, `${fmtFull(n)} ${plural(n, "link")}`),
       onClick: (e) => void this.plugin.openFile(file, undefined, e),
     }));
-    this.barListCard("topLinked", body, items, L("还没有笔记被链接过", "No note is linked yet"), "network");
+    this.barListCard(id, body, items, L("还没有笔记被链接过", "No note is linked yet"), "network");
   }
 
-  /** 写作节奏：近 12 周每个星期几平均写多少字；单一系列，只突出最常写的一天 */
+  /** 写作节奏：近 12 周每个星期几平均写多少字；单一系列，只突出最常写的一天。柱状 / 折线 / 面积 */
   private renderRhythm(grid: HTMLElement, s: VaultStats) {
-    const dn = rhythmDensity(this.box("rhythm"));
-    const r = weekdayRhythm(s, new Date(s.generatedAt), 12);
-    const { body } = this.card(
+    const { head, body } = this.card(
       grid,
       "vp-rhythm-card",
       L("写作节奏", "Writing rhythm"),
       "bar-chart-3",
-      L("近 12 周里，每个星期几平均写了多少字（只算开始记录之后的日子）。最常写的一天用实色标出。", "Average words written on each weekday over the last 12 weeks (only days since recording started). The busiest day is solid.")
+      L("近 12 周里，每个星期几平均写了多少字（只算开始记录之后的日子）。最常写的一天用实色标出。可以换成折线或面积。", "Average words written on each weekday over the last 12 weeks (only days since recording started). The busiest day is solid. You can switch to a line or area chart.")
     );
+    this.rhythmStyleSwitch(head, "rhythm");
+    this.rhythmPanel(body, "rhythm", s, this.box("rhythm"));
+  }
+
+  private rhythmStyleSwitch(parent: HTMLElement, cardId: string) {
+    this.segmented<RhythmStyle>(parent, RHYTHM_STYLES.map((v) => [v, v === "bar" ? L("柱状", "Bar") : v === "line" ? L("折线", "Line") : L("面积", "Area")]), this.plugin.settings.chartStyles.rhythm, (v) => this.setChartStyle("rhythm", v, cardId), L("图的样式", "Chart style"));
+  }
+
+  private rhythmPanel(body: HTMLElement, id: string, s: VaultStats, box: Box) {
+    const dn = rhythmDensity(box);
+    const style = this.plugin.settings.chartStyles.rhythm;
+    const r = weekdayRhythm(s, new Date(s.generatedAt), 12);
     const max = Math.max(...r.map((x) => x.average), 0);
     if (max === 0) {
       this.empty(body, "bar-chart-3", L("还没有写作记录", "No writing recorded yet"));
@@ -2596,6 +2914,29 @@ export class DashboardView extends ItemView {
       const top = body.createDiv({ cls: "vp-kpi-row" });
       bigNumber(top.createDiv({ cls: "vp-kpi-num" }), weekdayName(best.day), undefined);
       top.createSpan({ cls: "vp-kpi-caption", text: L(`平均 ${fmtFull(best.average)} 字`, `${fmtFull(best.average)} words avg`) });
+    }
+    if (style !== "bar") {
+      const points: SeriesPoint[] = r.map((x) => ({
+        label: weekdayShort(x.day),
+        value: x.average,
+        tipTitle: weekdayName(x.day),
+        tipRows: [{ label: L("平均写", "Average"), value: count(fmtFull(x.average), "words"), dot: "is-accent" }],
+      }));
+      const chartWrap = body.createDiv({ cls: "vp-chart-wrap" });
+      const tip = new Tooltip(chartWrap);
+      const host = chartWrap.createDiv({ cls: "vp-chart-host" });
+      host.setAttr("role", "img");
+      srLabel(host, r.map((x) => `${weekdayName(x.day)} ${fmtFull(x.average)}`).join(L("，", ", ")), chartWrap);
+      this.responsive(
+        chartWrap,
+        (w, h) => {
+          host.empty();
+          if (h < 60) return;
+          drawTrendChart(host, points, { width: w, height: Math.max(64, h), kind: style === "line" ? "line" : "area", tooltip: tip, zeroBased: true });
+        },
+        { narrowH: 140 }
+      );
+      return;
     }
     const bars = body.createDiv({ cls: "vp-rhythm", attr: { role: "img" } });
     srLabel(bars, r.map((x) => `${weekdayName(x.day)} ${fmtFull(x.average)}`).join(L("，", ", ")));
@@ -2610,8 +2951,6 @@ export class DashboardView extends ItemView {
 
   /** 笔记活跃度：近 30 天新建和修改，两个数字 + 一条分段条（两段的环读不准，不用） */
   private renderActivity(grid: HTMLElement, s: VaultStats) {
-    const dn = activityDensity(this.box("activity"));
-    const a = noteActivity(s, new Date(s.generatedAt));
     const { body } = this.card(
       grid,
       "vp-activity-card",
@@ -2619,6 +2958,12 @@ export class DashboardView extends ItemView {
       "activity",
       L("近 30 天新建了多少篇、改了多少篇以前的笔记（新建的不重复算修改，不含采集文件夹）。看你是在写新的，还是在改旧的。", "Notes created and older notes edited in the last 30 days (new notes aren't counted again as edits; clipping folders left out): writing new or reworking old.")
     );
+    this.activityPanel(body, s, this.box("activity"));
+  }
+
+  private activityPanel(body: HTMLElement, s: VaultStats, box: Box) {
+    const dn = activityDensity(box);
+    const a = noteActivity(s, new Date(s.generatedAt));
     const pair = body.createDiv({ cls: "vp-pair" });
     const one = (cls: string, label: string, n: number, key: string) => {
       const x = pair.createDiv({ cls: `vp-pair-item ${cls}` });
@@ -2647,28 +2992,11 @@ export class DashboardView extends ItemView {
       "list-checks",
       L("待办最多的几篇笔记，条是这篇里已完成的比例。“接下来”按截止日期，这张按笔记。点击打开。", "Notes with the most open tasks; the bar shows how much of each is done. Next up sorts by due date, this card by note. Click to open.")
     );
-    const groups = s.tasks.byNote.filter((g) => g.pending > 0).slice(0, 30);
-    const host = body.createDiv();
-    const list = host.createDiv({ cls: "vp-rows" });
-    const units: HTMLElement[] = [];
-    if (groups.length === 0) this.empty(list, "party-popper", L("没有待办", "No open tasks"));
-    for (const g of groups) {
-      const row = list.createDiv({ cls: "vp-row vp-group-row" });
-      row.createSpan({ cls: "vp-row-name", text: g.key, attr: { title: g.file?.path ?? g.key } });
-      const m = row.createDiv({ cls: "vp-meter is-inline" });
-      m.createDiv({ cls: "vp-meter-fill" }).setCssProps({ "--vp-meter-width": `${(g.done / Math.max(1, g.total)) * 100}%` });
-      row.createSpan({ cls: "vp-row-meta vp-tabular is-fit", text: L(`待办 ${g.pending}`, `${g.pending} open`) });
-      const f = g.file;
-      if (f) this.clickable(row, L(`${g.key}，待办 ${g.pending}`, `${g.key}, ${g.pending} open`), (e) => void this.plugin.openFile(f, undefined, e));
-      units.push(row);
-    }
-    this.fitList("taskNotes", host, body.createDiv({ cls: "vp-card-foot" }), units);
+    this.tasksPanel(body, "taskNotes", s, "notes");
   }
 
   /** 链接密度：一个数字的卡片（一个数就是图，不画仪表盘） */
   private renderDensity(grid: HTMLElement, s: VaultStats) {
-    const dn = densityDensity(this.box("density"));
-    const d = linkDensity(s);
     const { body } = this.card(
       grid,
       "vp-density-card",
@@ -2676,6 +3004,12 @@ export class DashboardView extends ItemView {
       "link",
       L("平均每篇笔记有几个链接，以及有多少笔记和别的笔记连着（孤立笔记的反面）。", "Average links per note, and how many notes are connected to another note (the opposite of orphans).")
     );
+    this.densityPanel(body, s, this.box("density"));
+  }
+
+  private densityPanel(body: HTMLElement, s: VaultStats, box: Box) {
+    const dn = densityDensity(box);
+    const d = linkDensity(s);
     const row = body.createDiv({ cls: "vp-kpi-row" });
     // 一位小数：用字符串传，bigNumber 收到数字会取整；也不做数字滚动（滚动按整数走）
     bigNumber(row.createDiv({ cls: "vp-kpi-num" }), d.perNote.toFixed(1), L("个/篇", "per note"));
@@ -2688,36 +3022,283 @@ export class DashboardView extends ItemView {
     }
   }
 
-  /** 文件夹构成：堆叠横条，前 4 个文件夹各一色，其余并成“其他”；必须带图例 */
+  /** 文件夹构成：前 4 个文件夹各一色，其余并成“其他”；堆叠条 / 环形图 / 列表三种画法，都带名字和百分比 */
   private renderFolders(grid: HTMLElement, s: VaultStats) {
-    const dn = foldersDensity(this.box("folders"));
-    const parts = folderShares(s, 4);
-    const { body } = this.card(
+    const { head, body } = this.card(
       grid,
       "vp-folders-card",
       L("文件夹构成", "Folder mix"),
       "folder-tree",
-      L("按笔记数看内容都在哪些顶层文件夹。前 4 个各一种颜色，其余合成“其他”。", "Where your notes live, by top-level folder and note count. The top 4 get a color each, the rest is Other.")
+      L("按笔记数看内容都在哪些顶层文件夹。前 4 个各一种颜色，其余合成“其他”。可以换成环形图或列表。", "Where your notes live, by top-level folder and note count. The top 4 get a color each, the rest is Other. You can switch to a donut or a list.")
     );
+    this.mixStyleSwitch(head, "folders");
+    this.mixPanel(body, s, this.box("folders"));
+  }
+
+  private mixStyleSwitch(parent: HTMLElement, cardId: string) {
+    this.segmented<MixStyle>(parent, MIX_STYLES.map((v) => [v, v === "stack" ? L("堆叠条", "Stack") : v === "donut" ? L("环形图", "Donut") : L("列表", "List")]), this.plugin.settings.chartStyles.mix, (v) => this.setChartStyle("mix", v, cardId), L("图的样式", "Chart style"));
+  }
+
+  private mixPanel(body: HTMLElement, s: VaultStats, box: Box) {
+    const style = this.plugin.settings.chartStyles.mix;
+    const dn = foldersDensity(box);
+    const parts = folderShares(s, style === "list" ? 6 : 4);
     if (parts.length === 0) {
       this.empty(body, "folder", L("仓库里还没有文件夹", "No folders in the vault yet"));
       return;
     }
     const name = (p: (typeof parts)[number]) => (p.other ? L("其他", "Other") : folderName(p.folder));
-    const bar = body.createDiv({ cls: "vp-stack", attr: { role: "img" } });
-    srLabel(bar, parts.map((p) => `${name(p)} ${Math.round(p.share * 100)}%`).join(L("，", ", ")));
+    const cat = (p: (typeof parts)[number], i: number) => (p.other ? "is-other" : `is-c${(i % 4) + 1}`);
+    const reveal = (el: HTMLElement, p: (typeof parts)[number]) => {
+      if (!p.other && p.folder !== ROOT_FOLDER) this.clickable(el, L(`在文件列表里定位 ${p.folder}`, `Reveal ${p.folder} in the file list`), () => this.plugin.revealFolder(p.folder));
+    };
+    const label = parts.map((p) => `${name(p)} ${Math.round(p.share * 100)}%`).join(L("，", ", "));
+    if (style === "list") {
+      const rows = body.createDiv({ cls: "vp-mixrows", attr: { role: "img", "aria-label": label } });
+      parts.forEach((p, i) => {
+        const row = rows.createDiv({ cls: "vp-mixrow" });
+        row.createSpan({ cls: `vp-swatch ${cat(p, i)}`, attr: { "aria-hidden": "true" } });
+        row.createSpan({ cls: "vp-legend-name", text: name(p), attr: { title: name(p) } });
+        const track = row.createDiv({ cls: "vp-mixtrack" });
+        track.createDiv({ cls: `vp-mixfill ${cat(p, i)}` }).setCssProps({ "--vp-stack-w": `${p.share * 100}%` });
+        row.createSpan({ cls: "vp-legend-val", text: `${Math.round(p.share * 100)}% · ${count(fmtFull(p.notes), "notes")}` });
+        reveal(row, p);
+      });
+      return;
+    }
+    if (style === "donut") {
+      const size = Math.max(72, Math.min(170, Math.floor(bodyH(box) - 6), Math.floor(innerW(box) * 0.45)));
+      const row = body.createDiv({ cls: "vp-donutrow" });
+      const donut = drawDonut(row, parts.map((p, i) => ({ share: p.share, cls: cat(p, i), title: `${name(p)} · ${count(p.notes, "notes")}` })), size, Math.max(10, Math.round(size / 8)));
+      donut.setAttr("role", "img");
+      donut.setAttr("aria-label", label);
+      const center = donut.querySelector<HTMLElement>(".vp-donut-center");
+      if (center) {
+        bigNumber(center, s.totalNotes, undefined, "vp-num vp-num-sm");
+        center.createDiv({ cls: "vp-ring-caption", text: unit("notes") });
+      }
+      const legend = row.createDiv({ cls: "vp-legend is-list" });
+      parts.forEach((p, i) => {
+        const it = legend.createDiv({ cls: "vp-legend-item" });
+        it.createSpan({ cls: `vp-swatch ${cat(p, i)}`, attr: { "aria-hidden": "true" } });
+        it.createSpan({ cls: "vp-legend-name", text: name(p) });
+        it.createSpan({ cls: "vp-legend-val", text: `${Math.round(p.share * 100)}%` });
+        reveal(it, p);
+      });
+      return;
+    }
+    const bar = body.createDiv({ cls: "vp-stack", attr: { role: "img", "aria-label": label } });
     parts.forEach((p, i) => {
-      const seg = bar.createDiv({ cls: `vp-stack-seg ${p.other ? "is-other" : `is-c${i + 1}`}`, attr: { title: `${name(p)} · ${count(p.notes, "notes")}` } });
+      const seg = bar.createDiv({ cls: `vp-stack-seg ${cat(p, i)}`, attr: { title: `${name(p)} · ${count(p.notes, "notes")}` } });
       seg.setCssProps({ "--vp-stack-w": `${p.share * 100}%` });
     });
     const legend = body.createDiv({ cls: "vp-legend" + (dn.list ? " is-list" : "") });
     parts.forEach((p, i) => {
       const it = legend.createDiv({ cls: "vp-legend-item" });
-      it.createSpan({ cls: `vp-swatch ${p.other ? "is-other" : `is-c${i + 1}`}`, attr: { "aria-hidden": "true" } });
+      it.createSpan({ cls: `vp-swatch ${cat(p, i)}`, attr: { "aria-hidden": "true" } });
       it.createSpan({ cls: "vp-legend-name", text: name(p) });
       it.createSpan({ cls: "vp-legend-val", text: `${Math.round(p.share * 100)}%${dn.list ? ` · ${count(fmtFull(p.notes), "notes")}` : ""}` });
-      if (!p.other && p.folder !== ROOT_FOLDER) this.clickable(it, L(`在文件列表里定位 ${p.folder}`, `Reveal ${p.folder} in the file list`), () => this.plugin.revealFolder(p.folder));
+      reveal(it, p);
     });
+  }
+
+  /* ---------- 合并卡：结构、写作习惯、任务（每张带标签页，样式切换放在标题行） ---------- */
+
+  private structTab: "tags" | "folders" | "mix" | "linked" | "density" = "tags";
+  private habitTab: "rhythm" | "activity" = "rhythm";
+  private hubTaskTab: "due" | "folder" | "notes" = "due";
+
+  private renderStructure(grid: HTMLElement, s: VaultStats) {
+    const id: WidgetId = "structure";
+    const tab = this.structTab;
+    const { ctrls, panel } = this.hubShell(
+      grid,
+      id,
+      "layout-grid",
+      L("标签、文件夹和链接放在一张卡里：常用标签、文件夹排行、文件夹构成、最常被链接、链接密度。标签可以换成标签云，文件夹构成可以换成环形图或列表。", "Tags, folders and links in one card: top tags, folder ranking, folder mix, most linked and link density. Tags can be a cloud, the folder mix a donut or a list."),
+      [
+        { id: "tags" as const, label: L("标签", "Tags") },
+        { id: "folders" as const, label: L("文件夹", "Folders") },
+        { id: "mix" as const, label: L("构成", "Mix") },
+        { id: "linked" as const, label: L("被链接", "Linked") },
+        { id: "density" as const, label: L("密度", "Density") },
+      ],
+      tab,
+      (v) => {
+        this.structTab = v;
+        this.rerender(id);
+      }
+    );
+    const box = this.box(id, HUB_CHROME);
+    if (tab === "tags") this.tagStyleSwitch(ctrls, id);
+    if (tab === "mix") this.mixStyleSwitch(ctrls, id);
+    if (tab === "tags" || tab === "folders") this.tagsPanel(panel, id, s, tab);
+    else if (tab === "mix") this.mixPanel(panel, s, box);
+    else if (tab === "linked") this.topLinkedPanel(panel, id, s);
+    else this.densityPanel(panel, s, box);
+  }
+
+  private renderHabits(grid: HTMLElement, s: VaultStats) {
+    const id: WidgetId = "habits";
+    const tab = this.habitTab;
+    const { ctrls, panel } = this.hubShell(
+      grid,
+      id,
+      "activity",
+      L("写作习惯：一般星期几写（可以换成折线或面积），以及近 30 天是在写新的还是在改旧的。", "Writing habits: which weekdays you write (switchable to a line or area chart), and whether the last 30 days were new notes or reworking old ones."),
+      [{ id: "rhythm" as const, label: L("写作节奏", "Rhythm") }, { id: "activity" as const, label: L("笔记活跃度", "Activity") }],
+      tab,
+      (v) => {
+        this.habitTab = v;
+        this.rerender(id);
+      }
+    );
+    const box = this.box(id, HUB_CHROME);
+    if (tab === "rhythm") {
+      this.rhythmStyleSwitch(ctrls, id);
+      this.rhythmPanel(panel, id, s, box);
+    } else this.activityPanel(panel, s, box);
+  }
+
+  private renderTasksHub(grid: HTMLElement, s: VaultStats) {
+    const id: WidgetId = "tasksHub";
+    const tab = this.hubTaskTab;
+    const { panel } = this.hubShell(
+      grid,
+      id,
+      "list-todo",
+      L("笔记里的待办：按到期时间（逾期单独列出）、按文件夹、按笔记看。点任务直接跳到那一行。", "Open tasks in your notes: by due date (overdue first), by folder, or by note. Click a task to jump to its line."),
+      [{ id: "due" as const, label: L("到期", "Due"), count: s.tasks.overdue.length, warn: true }, { id: "folder" as const, label: L("按文件夹", "By folder") }, { id: "notes" as const, label: L("按笔记", "By note") }],
+      tab,
+      (v) => {
+        this.hubTaskTab = v;
+        this.rerender(id);
+      }
+    );
+    this.tasksPanel(panel, id, s, tab);
+  }
+
+  /* ---------- 新卡片：最近编辑、目标进度、本月对比上月、笔记长度分布 ---------- */
+
+  /** 最近编辑的笔记：按修改时间，点一下打开 */
+  private renderRecent(grid: HTMLElement, s: VaultStats) {
+    const { body } = this.card(grid, "vp-recent-card", L("最近编辑", "Recently edited"), "history", L("最近改动过的笔记，最新的在前。点击打开。", "Notes you edited most recently, newest first. Click to open."));
+    const host = body.createDiv();
+    const list = host.createDiv({ cls: "vp-rows" });
+    const units: HTMLElement[] = [];
+    const now = Date.now();
+    const notes = recentNotes(s, 50);
+    if (notes.length === 0) this.empty(list, "files", L("还没有笔记", "No notes yet"));
+    for (const f of notes) {
+      const row = list.createDiv({ cls: "vp-row" });
+      row.createSpan({ cls: "vp-row-name", text: f.file.basename, attr: { title: f.file.path } });
+      row.createSpan({ cls: "vp-row-meta vp-tabular is-fit", text: relativeTime(f.mtime, now, L) });
+      this.clickable(row, `${f.file.basename}${L("，", ", ")}${relativeTime(f.mtime, now, L)}`, (e) => void this.plugin.openFile(f.file, undefined, e));
+      units.push(row);
+    }
+    this.fitList("recent", host, body.createDiv({ cls: "vp-card-foot" }), units);
+  }
+
+  /** 目标进度：今天、本周、本月三个环 */
+  private renderGoals(grid: HTMLElement, s: VaultStats) {
+    const set = this.plugin.settings;
+    const { body } = this.card(
+      grid,
+      "vp-goals-card",
+      L("目标进度", "Goals"),
+      "target",
+      L("今天和本周的字数各按你设的目标算；本月是已经过去的日子里有几天打卡。目标在设置里改。", "Today and this week count words against your goals; this month counts how many of the days so far were streak days. Change the goals in settings.")
+    );
+    const rings = goalRings(s, { dailyGoal: set.dailyWordGoal, weeklyGoal: set.weeklyWordGoal }, new Date(s.generatedAt));
+    const size = goalRingSize(this.box("goals"));
+    const row = body.createDiv({ cls: "vp-goalrow" });
+    for (const g of rings) {
+      const cell = row.createDiv({ cls: "vp-goalcell", attr: { role: "group" } });
+      const title = g.key === "today" ? L("今天", "Today") : g.key === "week" ? L("本周", "This week") : L("本月", "This month");
+      const center = drawRing(cell, g.ratio, size, size >= 100 ? 10 : 7, "vp-goal-ring" + (size < 90 ? " is-small" : size >= 130 ? " is-large" : ""));
+      const wrap = center.parentElement as HTMLElement;
+      this.tweenRing(`goal:${g.key}`, wrap, g.ratio);
+      wrap.setAttr("role", "img");
+      const valueText = g.unit === "days" ? L(`${g.value} / ${g.goal} 天`, `${g.value} / ${g.goal} days`) : g.goal > 0 ? `${fmtNum(g.value)} / ${fmtNum(g.goal)}` : `${fmtNum(g.value)}`;
+      srLabel(wrap, `${title}${L("，", ", ")}${valueText}`);
+      bigNumber(center, g.unit === "days" ? `${Math.round(g.ratio * 100)}` : fmtNum(g.value), g.unit === "days" ? "%" : undefined, "vp-num vp-ring-num");
+      cell.createDiv({ cls: "vp-goal-title", text: title });
+      cell.createDiv({ cls: "vp-kpi-caption", text: g.unit === "days" ? L(`打卡 ${g.value} / ${g.goal} 天`, `${g.value} of ${g.goal} days`) : g.goal > 0 ? L(`目标 ${fmtNum(g.goal)} 字`, `goal ${fmtNum(g.goal)}`) : L("没设目标", "no goal set") });
+    }
+  }
+
+  /** 本月对比上月：到今天为止，和上个月同样天数的对比 */
+  private renderMonthCompare(grid: HTMLElement, s: VaultStats) {
+    const { body } = this.card(
+      grid,
+      "vp-compare-card",
+      L("本月对比上月", "This month vs last"),
+      "git-compare",
+      L("本月到今天为止，和上个月同样天数的对比（上个月不够长就取整月）：写作字数、新建笔记、打卡天数。", "This month so far against the same number of days last month (the whole month if it was shorter): words written, new notes, streak days.")
+    );
+    const m = monthCompare(s, this.plugin.settings.dailyWordGoal, new Date(s.generatedAt));
+    const label: Record<string, string> = { words: L("写作字数", "Words written"), notes: L("新建笔记", "New notes"), checkins: L("打卡天数", "Streak days") };
+    const unitOf: Record<string, string> = { words: unit("words"), notes: unit("notes"), checkins: unit("days") };
+    const rows = body.createDiv({ cls: "vp-compare" });
+    for (const r of m.rows) {
+      const row = rows.createDiv({ cls: "vp-compare-row", attr: { role: "group" } });
+      const top = row.createDiv({ cls: "vp-compare-top" });
+      top.createSpan({ cls: "vp-label", text: label[r.key] });
+      if (r.changePct !== null && r.changePct !== 0) top.createSpan({ cls: `vp-delta ${r.changePct > 0 ? "is-up" : "is-down"}`, text: `${r.changePct > 0 ? "+" : ""}${r.changePct}%` });
+      else if (r.changePct === 0) top.createSpan({ cls: "vp-date-chip", text: L("持平", "Same") });
+      const peak = Math.max(r.cur, r.prev, 1);
+      const bar = (cls: string, caption: string, v: number) => {
+        const line = row.createDiv({ cls: "vp-compare-line" });
+        line.createSpan({ cls: "vp-compare-cap", text: caption });
+        const track = line.createDiv({ cls: "vp-compare-track" });
+        track.createDiv({ cls: `vp-compare-fill ${cls}` }).setCssProps({ "--vp-bar-width": `${Math.max(v > 0 ? 3 : 0, (v / peak) * 100)}%` });
+        line.createSpan({ cls: "vp-compare-val", text: `${fmtNum(v)} ${unitOf[r.key]}` });
+      };
+      bar("is-cur", L("本月", "This"), r.cur);
+      bar("is-prev", L("上月", "Last"), r.prev);
+      srLabel(row, `${label[r.key]}${L("，", ", ")}${L("本月", "this month")} ${fmtFull(r.cur)}${L("，", ", ")}${L("上月同期", "last month")} ${fmtFull(r.prev)}`);
+    }
+  }
+
+  /** 笔记长度分布：你的笔记大多是几百字还是几千字 */
+  private renderLengths(grid: HTMLElement, s: VaultStats) {
+    const { head, body } = this.card(
+      grid,
+      "vp-lengths-card",
+      L("笔记长度分布", "Note length"),
+      "bar-chart-horizontal",
+      L("按字数把笔记分成 6 档，看你的笔记大多多长（采集文件夹里的不算）。", "Your notes grouped into six length bands (clipping folders left out).")
+    );
+    const style = this.plugin.settings.chartStyles.lengths;
+    this.segmented<LengthStyle>(head, LENGTH_STYLES.map((v) => [v, v === "bar" ? L("柱状", "Bar") : L("面积", "Area")]), style, (v) => this.setChartStyle("lengths", v, "lengths"), L("图的样式", "Chart style"));
+    const names: Record<string, string> = { empty: L("空", "Empty"), tiny: "<100", short: "100+", medium: "500+", long: "2千+", huge: "1万+" };
+    const en: Record<string, string> = { empty: "Empty", tiny: "<100", short: "100+", medium: "500+", long: "2K+", huge: "10K+" };
+    const buckets = lengthBuckets(s);
+    const total = buckets.reduce((a, b) => a + b.count, 0);
+    if (total === 0) {
+      this.empty(body, "bar-chart-horizontal", L("还没有笔记", "No notes yet"));
+      return;
+    }
+    const points: SeriesPoint[] = buckets.map((b) => ({
+      label: L(names[b.id], en[b.id]),
+      value: b.count,
+      tipTitle: L(`${names[b.id]} 字`, `${en[b.id]} words`),
+      tipRows: [{ label: L("笔记", "Notes"), value: `${count(b.count, "notes")} · ${Math.round((b.count / total) * 100)}%`, dot: "is-accent" }],
+    }));
+    const chartWrap = body.createDiv({ cls: "vp-chart-wrap" });
+    const tip = new Tooltip(chartWrap);
+    const host = chartWrap.createDiv({ cls: "vp-chart-host" });
+    host.setAttr("role", "img");
+    srLabel(host, points.map((p) => `${p.label} ${p.value}`).join(L("，", ", ")), chartWrap);
+    this.responsive(
+      chartWrap,
+      (w, h) => {
+        host.empty();
+        if (h < 60) return;
+        drawTrendChart(host, points, { width: w, height: Math.max(64, h), kind: style === "bar" ? "bar" : "area", tooltip: tip, zeroBased: true });
+      },
+      { narrowH: 180 }
+    );
   }
 
   /* ---------- 日历：选一天看日程、记日程 ---------- */

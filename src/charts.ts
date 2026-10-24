@@ -93,6 +93,11 @@ function niceTicks(min: number, max: number, count: number, zeroBased: boolean):
 
 /* ---------------- 平滑曲线（单调三次插值，不会过冲） ---------------- */
 
+/** 折线：相邻两点直接连 */
+function polylinePath(xs: number[], ys: number[]): string {
+  return xs.map((x, i) => `${i === 0 ? "M" : "L"}${x.toFixed(1)},${ys[i].toFixed(1)}`).join(" ");
+}
+
 function monotonePath(xs: number[], ys: number[]): string {
   const n = xs.length;
   if (n === 0) return "";
@@ -198,7 +203,8 @@ export interface SeriesPoint {
 export interface ChartOptions {
   width: number;
   height: number;
-  kind: "area" | "bar";
+  /** bar 柱状；line 折线；curve 平滑曲线；area 平滑曲线加下面的面积 */
+  kind: "area" | "bar" | "line" | "curve";
   zeroBased?: boolean;
   /** 柱状图：最后一根（本日 / 本周）用实色，其余用浅色 */
   highlightLast?: boolean;
@@ -286,14 +292,18 @@ export function drawTrendChart(container: HTMLElement, points: SeriesPoint[], o:
   } else {
     const xs = points.map((_, i) => xOf(i));
     const ys = points.map((p) => yOf(p.value));
-    const line = monotonePath(xs, ys);
+    const line = o.kind === "line" ? polylinePath(xs, ys) : monotonePath(xs, ys);
     const base = padT + ch;
-    svgEl(
-      "path",
-      { d: `${line} L${xs[n - 1].toFixed(1)},${base} L${xs[0].toFixed(1)},${base} Z`, class: "vp-area", fill: `url(#${gid})` },
-      svg
-    );
+    if (o.kind === "area") {
+      svgEl(
+        "path",
+        { d: `${line} L${xs[n - 1].toFixed(1)},${base} L${xs[0].toFixed(1)},${base} Z`, class: "vp-area", fill: `url(#${gid})` },
+        svg
+      );
+    }
     svgEl("path", { d: line, class: "vp-line" }, svg);
+    // 折线、曲线：每个数据点画一个小圆点（点太密时只画最后一个）
+    if ((o.kind === "line" || o.kind === "curve") && n <= 40) for (let i = 0; i < n - 1; i++) svgEl("circle", { cx: xs[i], cy: ys[i], r: 2.5, class: "vp-line-dot" }, svg);
     svgEl("circle", { cx: xs[n - 1], cy: ys[n - 1], r: 4, class: "vp-line-end" }, svg);
   }
 
@@ -503,4 +513,81 @@ export function drawBarList(container: HTMLElement, items: BarItem[], emptyText:
       });
     }
   });
+}
+
+/* ---------------- 环形图 ---------------- */
+
+export interface DonutPart {
+  /** 占整体的比例（0–1） */
+  share: number;
+  /** 颜色类，如 is-c1 … is-c4、is-other */
+  cls: string;
+  title: string;
+}
+
+/** 环形图：每一段是一个 circle 的描边，颜色由 CSS 类决定；中间留给调用方放字（返回的容器里有 .vp-donut-center） */
+export function drawDonut(container: HTMLElement, parts: DonutPart[], size: number, stroke: number): HTMLElement {
+  const wrap = container.createDiv({ cls: "vp-donut" });
+  wrap.setCssProps({ "--vp-donut-size": `${size}px` });
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const svg = svgEl("svg", { width: size, height: size, viewBox: `0 0 ${size} ${size}`, role: "img" }, wrap);
+  svgEl("circle", { cx: size / 2, cy: size / 2, r, class: "vp-donut-track", "stroke-width": stroke, fill: "none" }, svg);
+  const gap = parts.length > 1 ? Math.min(3, c * 0.01) : 0;
+  let offset = 0;
+  for (const p of parts) {
+    const len = Math.max(0, p.share * c - gap);
+    if (len <= 0) continue;
+    const seg = svgEl(
+      "circle",
+      {
+        cx: size / 2,
+        cy: size / 2,
+        r,
+        class: `vp-donut-seg ${p.cls}`,
+        "stroke-width": stroke,
+        fill: "none",
+        "stroke-dasharray": `${len} ${c - len}`,
+        "stroke-dashoffset": -offset,
+        transform: `rotate(-90 ${size / 2} ${size / 2})`,
+      },
+      svg
+    );
+    svgEl("title", {}, seg).textContent = p.title;
+    offset += p.share * c;
+  }
+  wrap.createDiv({ cls: "vp-donut-center" });
+  return wrap;
+}
+
+/* ---------------- 本周七天的折线（无坐标轴，随容器拉伸） ---------------- */
+
+/**
+ * 七个点连成折线 / 曲线 / 面积，高度占比 fracs（0–1）。线和面积用 SVG（non-scaling-stroke，随容器宽度拉伸不变形），
+ * 圆点和数字用 HTML 按百分比摆，不会被拉扁。返回每个点的 HTML 容器，调用方可以在里面再放东西。
+ */
+export function drawWeekLine(container: HTMLElement, fracs: number[], opts: { area: boolean; goal?: number; done: boolean[]; future: boolean[] }): void {
+  const n = fracs.length;
+  const W = 700;
+  const H = 100;
+  const xs = fracs.map((_, i) => ((i + 0.5) / n) * W);
+  const ys = fracs.map((f) => H - Math.max(0, Math.min(1, f)) * H);
+  const live = fracs.map((_, i) => !opts.future[i]);
+  const idx = live.map((l, i) => (l ? i : -1)).filter((i) => i >= 0);
+  const svg = svgEl("svg", { viewBox: `0 0 ${W} ${H}`, preserveAspectRatio: "none", class: "vp-weekline-svg", "aria-hidden": "true" }, container);
+  const path = monotonePath(idx.map((i) => xs[i]), idx.map((i) => ys[i]));
+  if (idx.length > 1) {
+    if (opts.area) {
+      const gid = `vp-grad-${++uid}`;
+      const grad = svgEl("linearGradient", { id: gid, x1: 0, y1: 0, x2: 0, y2: 1 }, svgEl("defs", {}, svg));
+      svgEl("stop", { offset: "0%", class: "vp-grad-top" }, grad);
+      svgEl("stop", { offset: "100%", class: "vp-grad-bottom" }, grad);
+      svgEl("path", { d: `${path} L${xs[idx[idx.length - 1]].toFixed(1)},${H} L${xs[idx[0]].toFixed(1)},${H} Z`, class: "vp-area", fill: `url(#${gid})` }, svg);
+    }
+    svgEl("path", { d: path, class: "vp-spark-line" }, svg);
+  }
+  if (opts.goal !== undefined) {
+    const y = H - Math.max(0, Math.min(1, opts.goal)) * H;
+    svgEl("line", { x1: 0, x2: W, y1: y, y2: y, class: "vp-weekline-goal" }, svg);
+  }
 }

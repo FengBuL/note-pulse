@@ -4,11 +4,12 @@ import { sanitizeProperty } from "./wordprops-logic";
 import { ClipDedupeSettings, DEFAULT_SETTINGS as DEDUPE_DEFAULTS, dedupeSections } from "./dedupe/settings";
 import { L, LanguagePref, setLanguage } from "./i18n";
 import { Agenda, sanitizeAgenda } from "./agenda";
+import { ChartStyles, DEFAULT_CHART_STYLES, sanitizeChartStyles } from "./chart-styles";
 import { WidgetLayout, defaultLayout, normalizeLayout } from "./widgets";
 
 export type HeatmapMode = "auto" | "mtime" | "delta";
 export type OutlierMode = "exclude" | "off";
-export type WeekStyle = "dots" | "bars";
+export type WeekStyle = "dots" | "bars" | "line";
 
 /** 设置结构版本：用于一次性迁移旧设置 */
 export const SETTINGS_VERSION = 6;
@@ -49,6 +50,8 @@ export interface DashboardSettings {
   agenda: Agenda;
   /** 已经庆祝过的达成（每日目标、每周目标、连续打卡里程碑），免得每次打开都撒花 */
   celebrated: string[];
+  /** 各张图表选的画法（柱状 / 折线 / 曲线 / 面积 / 环形图 / 标签云……） */
+  chartStyles: ChartStyles;
   autoRefresh: boolean;
   refreshDelaySec: number;
   openInNewTab: boolean;
@@ -93,6 +96,7 @@ export const DEFAULT_SETTINGS: DashboardSettings = {
   layout: defaultLayout(),
   agenda: {},
   celebrated: [],
+  chartStyles: { ...DEFAULT_CHART_STYLES },
   autoRefresh: true,
   refreshDelaySec: 3,
   openInNewTab: true,
@@ -295,12 +299,13 @@ export class DashboardSettingTab extends PluginSettingTab {
           },
           {
             name: L("本周的显示方式", "This week display"),
-            desc: L("今日写作卡里本周七天的样子。圆点：达标打勾，没达标显示完成百分比。柱状：柱高是当天字数，虚线是每日目标。也可以直接在看板上切换。", "How the seven days of this week look on the Today card. Dots: a check for days that met the goal, otherwise the percentage done. Bars: bar height is that day's words, the dashed line is the daily goal. You can also switch on the dashboard."),
+            desc: L("今日写作卡里本周七天的样子。圆点：达标打勾，没达标显示完成百分比。柱状：柱高是当天字数，虚线是每日目标。折线：七天的字数连成一条线。也可以直接在看板上切换。", "How the seven days of this week look on the Today card. Dots: a check for days that met the goal, otherwise the percentage done. Bars: bar height is that day's words, the dashed line is the daily goal. Line: the seven days joined by a line. You can also switch on the dashboard."),
             render: (setting) =>
               setting.addDropdown((d) =>
                 d
                   .addOption("dots", L("圆点", "Dots"))
                   .addOption("bars", L("柱状", "Bars"))
+                  .addOption("line", L("折线", "Line"))
                   .setValue(st.weekStyle)
                   .onChange(async (v) => {
                     st.weekStyle = v as WeekStyle;
@@ -706,10 +711,11 @@ export function migrateWritingSettings(settings: DashboardSettings): void {
   if (typeof settings.reportFolder !== "string") settings.reportFolder = DEFAULT_SETTINGS.reportFolder;
   settings.reportWeekExpanded = settings.reportWeekExpanded === true || settings.reportMonthExpanded === true;
   delete settings.reportMonthExpanded;
-  if (settings.weekStyle !== "dots" && settings.weekStyle !== "bars") settings.weekStyle = DEFAULT_SETTINGS.weekStyle;
+  if (settings.weekStyle !== "dots" && settings.weekStyle !== "bars" && settings.weekStyle !== "line") settings.weekStyle = DEFAULT_SETTINGS.weekStyle;
   // 2.0 之前没有布局：生成默认布局（1.8 的看板 + 6 张新卡片）
   settings.layout = normalizeLayout(settings.layout);
   settings.agenda = sanitizeAgenda(settings.agenda);
+  settings.chartStyles = sanitizeChartStyles(settings.chartStyles);
   settings.celebrated = Array.isArray(settings.celebrated) ? settings.celebrated.filter((x): x is string => typeof x === "string") : [];
 }
 

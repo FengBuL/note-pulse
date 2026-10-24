@@ -19,6 +19,16 @@ export type WidgetId =
   | "density"
   | "folders"
   | "calendar"
+  | "trendHub"
+  | "overview"
+  | "checkupHub"
+  | "structure"
+  | "habits"
+  | "tasksHub"
+  | "recent"
+  | "goals"
+  | "monthCompare"
+  | "lengths"
   | "brokenLinks"
   | "orphans"
   | "sameName"
@@ -74,6 +84,18 @@ export const WIDGETS: WidgetInfo[] = [
   spec("density", 2, 6, 2, 4, 4, 3, true),
   spec("folders", 3, 12, 2, 5, 4, 3, true),
   spec("calendar", 3, 12, 4, 10, 4, 7, true),
+  // 合并卡：同一类的数据放进一张带标签页的卡里（新建的默认布局不放它们，在“添加卡片”里加）
+  spec("trendHub", 5, 12, 5, 10, 8, 7, true),
+  spec("overview", 4, 12, 3, 6, 12, 3, true),
+  spec("checkupHub", 4, 12, 4, 12, 6, 7, true),
+  spec("structure", 4, 12, 4, 10, 4, 7, true),
+  spec("habits", 3, 8, 4, 8, 4, 5, true),
+  spec("tasksHub", 4, 12, 4, 12, 6, 7, true),
+  // 新卡片
+  spec("recent", 3, 12, 3, 12, 4, 6, true),
+  spec("goals", 3, 12, 4, 6, 6, 4, true),
+  spec("monthCompare", 3, 8, 5, 6, 4, 5, true),
+  spec("lengths", 4, 12, 4, 8, 6, 5, true),
 ];
 
 const INFO = new Map(WIDGETS.map((w) => [w.id, w]));

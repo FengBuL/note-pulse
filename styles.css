@@ -537,6 +537,11 @@
   min-height: 20px;
   margin-bottom: 6px;
 }
+/* 2 行高放不下样式切换，先收起来（拉高一点就回来了） */
+.vp-card.is-tight .vp-ctrls,
+.vp-card.is-tight .vp-card-head .vp-seg {
+  display: none;
+}
 .vp-card.is-tight .vp-card-icon {
   width: 20px;
   height: 20px;
@@ -945,6 +950,66 @@
 .vp-week-day.is-future .vp-week-bar {
   background: var(--vp-track);
 }
+/* 折线：线和面积铺满柱子区域（上面留 16px 给数字），圆点和数字按百分比摆，下面一排星期标签 */
+.vp-week.is-line {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.vp-weekline {
+  position: relative;
+  box-sizing: border-box;
+  flex: 1 1 auto;
+  min-height: var(--vp-week-lane, 44px);
+  padding-top: 16px;
+}
+.vp-weekline-svg {
+  position: absolute;
+  top: 16px;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: calc(100% - 16px);
+  overflow: visible;
+}
+.vp-weekline-goal {
+  stroke: color-mix(in srgb, var(--vp-accent) 40%, transparent);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+  vector-effect: non-scaling-stroke;
+}
+.vp-weekline-pt {
+  position: absolute;
+  left: var(--vp-wl-x);
+  bottom: calc((100% - 16px) * var(--vp-week-f, 0));
+  box-sizing: border-box;
+  width: 10px;
+  height: 10px;
+  margin: 0 0 -5px -5px;
+  border: 2px solid var(--vp-accent);
+  border-radius: 50%;
+  background: var(--vp-surface);
+}
+.vp-weekline-pt.is-active {
+  background: var(--vp-accent);
+}
+.vp-weekline-pt.is-today {
+  box-shadow: var(--vp-ring-today);
+}
+.vp-weekline-pt .vp-week-val {
+  bottom: 12px;
+}
+.vp-weekline-labels {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+  text-align: center;
+}
+.vp-weekline-labels .vp-week-label.is-today {
+  color: var(--text-normal);
+  font-weight: 600;
+}
 .vp-week-meter {
   margin-top: var(--vp-s3);
 }
@@ -1143,6 +1208,13 @@
 .vp-meter.is-inline {
   width: 64px;
   flex-shrink: 0;
+}
+
+/* 小下拉框（选项多的时候用，比分段控件省地方） */
+.vp-root .vp-shell .vp-select {
+  height: 26px;
+  padding: 0 24px 0 var(--vp-s2);
+  font-size: var(--vp-fs-12);
 }
 
 /* ---------------- 分段控件 ---------------- */
@@ -2496,6 +2568,319 @@ body.is-mobile .vp-root :is(button, [role="button"], [role="tab"], .is-clickable
 }
 .vp-root .vp-shell .vp-cal-input:focus {
   border-color: var(--vp-accent);
+}
+
+/* ---------------- 合并卡、新卡片、图表新样式 ---------------- */
+
+/* 合并卡的标签条 */
+.vp-tabs {
+  display: flex;
+  flex: none;
+  flex-wrap: wrap;
+  gap: var(--vp-s1);
+  margin-bottom: var(--vp-s2);
+}
+.vp-root .vp-shell .vp-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--vp-r-f);
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-muted);
+  font-size: var(--vp-fs-12);
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.vp-root .vp-shell .vp-tab:hover {
+  color: var(--text-normal);
+  background: var(--vp-hover);
+}
+.vp-root .vp-shell .vp-tab.is-active {
+  color: var(--vp-accent-ink);
+  background: color-mix(in srgb, var(--vp-accent) 12%, transparent);
+  border-color: color-mix(in srgb, var(--vp-accent) 30%, transparent);
+}
+.vp-tab .vp-count {
+  min-width: 18px;
+  height: 16px;
+  padding: 0 5px;
+  font-size: var(--vp-fs-11);
+}
+.vp-hub-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+}
+.vp-grid.is-narrow .vp-hub-panel {
+  flex: none;
+}
+
+/* 标签云 */
+.vp-cloud {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: var(--vp-s2);
+}
+.vp-root .vp-shell .vp-cloud-tag {
+  height: auto;
+  padding: 2px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--vp-r-f);
+  background: color-mix(in srgb, var(--vp-accent) 7%, transparent);
+  box-shadow: none;
+  color: var(--vp-accent-ink);
+  line-height: 1.5;
+  cursor: pointer;
+}
+.vp-root .vp-shell .vp-cloud-tag:hover {
+  border-color: color-mix(in srgb, var(--vp-accent) 40%, transparent);
+}
+.vp-cloud-tag.is-l1 {
+  font-size: var(--vp-fs-11);
+  opacity: 0.75;
+}
+.vp-cloud-tag.is-l2 {
+  font-size: var(--vp-fs-12);
+  opacity: 0.85;
+}
+.vp-cloud-tag.is-l3 {
+  font-size: var(--vp-fs-13);
+}
+.vp-cloud-tag.is-l4 {
+  font-size: var(--vp-fs-15);
+  font-weight: 600;
+}
+.vp-cloud-tag.is-l5 {
+  font-size: var(--vp-fs-20);
+  font-weight: 600;
+}
+
+/* 环形图和列表（文件夹构成） */
+.vp-donutrow {
+  display: flex;
+  align-items: center;
+  flex: 1 1 0;
+  min-height: 0;
+  gap: var(--vp-s5);
+}
+.vp-donut {
+  position: relative;
+  flex: none;
+  width: var(--vp-donut-size);
+  height: var(--vp-donut-size);
+}
+.vp-donut svg {
+  display: block;
+}
+.vp-donut-track {
+  stroke: var(--vp-track);
+}
+.vp-donut-seg.is-c1 {
+  stroke: var(--vp-cat-1);
+}
+.vp-donut-seg.is-c2 {
+  stroke: var(--vp-cat-2);
+}
+.vp-donut-seg.is-c3 {
+  stroke: var(--vp-cat-3);
+}
+.vp-donut-seg.is-c4 {
+  stroke: var(--vp-cat-4);
+}
+.vp-donut-seg.is-other {
+  stroke: var(--vp-cat-other);
+}
+.vp-donut-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+.vp-donutrow .vp-legend {
+  flex: 1;
+  min-width: 0;
+}
+.vp-mixrows {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: hidden;
+  gap: var(--vp-s2);
+}
+.vp-mixrow {
+  display: flex;
+  align-items: center;
+  gap: var(--vp-s2);
+  font-size: var(--vp-fs-12);
+}
+.vp-mixrow .vp-legend-name {
+  flex: 0 1 30%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vp-mixtrack {
+  flex: 1;
+  height: 8px;
+  border-radius: var(--vp-r-f);
+  background: var(--vp-track);
+  overflow: hidden;
+}
+.vp-mixfill {
+  width: var(--vp-stack-w, 0%);
+  height: 100%;
+  border-radius: inherit;
+}
+.vp-mixfill.is-c1 {
+  background: var(--vp-cat-1);
+}
+.vp-mixfill.is-c2 {
+  background: var(--vp-cat-2);
+}
+.vp-mixfill.is-c3 {
+  background: var(--vp-cat-3);
+}
+.vp-mixfill.is-c4 {
+  background: var(--vp-cat-4);
+}
+.vp-mixfill.is-other {
+  background: var(--vp-cat-other);
+}
+.vp-mixrow .vp-legend-val {
+  flex: none;
+  min-width: 78px;
+  text-align: right;
+}
+.vp-mixrow.is-clickable {
+  cursor: pointer;
+}
+
+/* 折线、曲线的数据点 */
+.vp-line-dot {
+  fill: var(--vp-surface);
+  stroke: var(--vp-accent);
+  stroke-width: 1.5;
+}
+
+/* 数据概览：四格 */
+.vp-tiles {
+  display: grid;
+  flex: 1 1 0;
+  min-height: 0;
+  grid-template-columns: repeat(var(--vp-ov-cols, 4), minmax(0, 1fr));
+  grid-auto-rows: minmax(0, 1fr);
+  gap: var(--vp-s3);
+}
+.vp-tile.vp-kpi {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  padding: 8px 12px 6px;
+  gap: 6px;
+  border: 1px solid var(--vp-line);
+  border-radius: var(--vp-r-s);
+  background: color-mix(in srgb, var(--vp-surface) 60%, transparent);
+  overflow: hidden;
+}
+.vp-grid.is-narrow .vp-tiles {
+  flex: none;
+  grid-auto-rows: auto;
+}
+
+/* 目标进度：三个环 */
+.vp-goalrow {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-around;
+  flex: 1 1 0;
+  min-height: 0;
+  gap: var(--vp-s3);
+}
+.vp-goalcell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.vp-goal-title {
+  font-size: var(--vp-fs-13);
+  font-weight: 600;
+}
+.vp-grid.is-narrow .vp-goalrow {
+  flex: none;
+}
+
+/* 本月对比上月 */
+.vp-compare {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 0;
+  min-height: 0;
+  gap: var(--vp-s2);
+  overflow: hidden;
+}
+.vp-compare-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.vp-compare-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--vp-s2);
+}
+.vp-compare-line {
+  display: flex;
+  align-items: center;
+  gap: var(--vp-s2);
+  font-size: var(--vp-fs-11);
+  line-height: 14px;
+}
+.vp-compare-cap {
+  flex: none;
+  width: 28px;
+  color: var(--vp-subtle);
+}
+.vp-compare-track {
+  flex: 1;
+  height: 7px;
+  border-radius: var(--vp-r-f);
+  background: var(--vp-track);
+  overflow: hidden;
+}
+.vp-compare-fill {
+  width: var(--vp-bar-width, 0%);
+  height: 100%;
+  border-radius: inherit;
+}
+.vp-compare-fill.is-cur {
+  background: var(--vp-grad);
+}
+.vp-compare-fill.is-prev {
+  background: color-mix(in srgb, var(--vp-accent) 32%, transparent);
+}
+.vp-compare-val {
+  flex: none;
+  min-width: 70px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
 }
 
 /* ---------------- 编辑看板 ---------------- */

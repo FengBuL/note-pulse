@@ -1,6 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { COLS, overlap } from "../src/grid";
+
+const OPTIONAL = ["trendHub", "overview", "checkupHub", "structure", "habits", "tasksHub", "recent", "goals", "monthCompare", "lengths"];
 import { WIDGETS, WidgetId, addWidget, defaultLayout, hiddenWidgets, limitsOf, normalizeLayout, readingOrder, removeWidget, sameLayout, widgetInfo } from "../src/widgets";
 
 const at = (l: { items: { id: string; x: number; y: number; w: number; h: number }[] }, id: string) => {
@@ -12,8 +14,9 @@ const at = (l: { items: { id: string; x: number; y: number; w: number; h: number
 test("默认布局：和方案第 10 节一致，全部卡片都在看板上", () => {
   const d = defaultLayout();
   assert.equal(d.version, 2);
-  assert.equal(hiddenWidgets(d).length, 0);
-  assert.equal(d.items.length, WIDGETS.length);
+  // 合并卡和 2.0 之后新增的卡片默认不放在看板上，在“添加卡片”里加
+  assert.deepEqual(hiddenWidgets(d).map((w) => w.id).sort(), [...OPTIONAL].sort());
+  assert.equal(d.items.length, WIDGETS.length - OPTIONAL.length);
   const expected: Record<string, string> = {
     hero: "0,0 8x6",
     tasks: "8,0 4x6",
@@ -120,12 +123,12 @@ test("迁移：不带 version 但带 size 的也按档位布局处理；隐藏�
 
 test("编辑：添加用这张卡的默认大小，放在最后一行第一个放得下的位置；移除后下面的补上来", () => {
   let l = removeWidget(defaultLayout(), "dupes");
-  assert.deepEqual(hiddenWidgets(l).map((w) => w.id), ["dupes"]);
+  assert.deepEqual(hiddenWidgets(l).map((w) => w.id).filter((id) => !OPTIONAL.includes(id)), ["dupes"]);
   l = addWidget(l, "dupes");
   assert.equal(at(l, "dupes"), "0,46 4x4", "从最后一行往下找：最后一行是满的，另起一行");
   assert.ok(sameLayout(addWidget(l, "dupes"), l), "已经在的不重复加");
   l = removeWidget(l, "reports");
-  assert.equal(hiddenWidgets(l).length, 1);
+  assert.equal(hiddenWidgets(l).filter((w) => !OPTIONAL.includes(w.id)).length, 1);
   l = addWidget(l, "reports");
   assert.equal(at(l, "reports"), "0,46 12x4", "整行的卡放不进最后一行，另起一行");
   const gone = removeWidget(defaultLayout(), "hero");

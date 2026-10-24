@@ -1,5 +1,5 @@
 /* 浏览器里补上 Obsidian 给 DOM 加的那几个方法（createDiv / setText / setCssProps …），只用于本地预览 */
-type Opts = { cls?: string | string[]; text?: string; attr?: Record<string, string | number | boolean | null>; title?: string; type?: string; href?: string };
+type Opts = { cls?: string | string[]; text?: string; attr?: Record<string, string | number | boolean | null>; title?: string; type?: string; href?: string; value?: string };
 
 function apply(el: HTMLElement, o?: Opts | string) {
   if (!o) return;
@@ -12,6 +12,7 @@ function apply(el: HTMLElement, o?: Opts | string) {
   if (o.title) el.title = o.title;
   if (o.type) el.setAttribute("type", o.type);
   if (o.href) el.setAttribute("href", o.href);
+  if (o.value !== undefined) el.setAttribute("value", o.value);
   if (o.attr) for (const [k, v] of Object.entries(o.attr)) if (v !== null && v !== undefined) el.setAttribute(k, String(v));
 }
 
