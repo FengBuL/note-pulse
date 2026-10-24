@@ -139,12 +139,56 @@ function tabs(p: Pen, x: number, y: number, n: number): void {
 
 const TREND = [4, 6, 5, 8, 7, 11, 9, 13];
 
-const DRAW: Record<WidgetId, (p: Pen) => void> = {
-  hero: (p) => {
+
+const RHYTHM = [2, 3, 5, 9, 12, 8, 5, 3, 2, 1, 4, 6];
+
+/** 趋势图：柱状 / 折线 / 曲线 / 面积 */
+function trendBody(p: Pen, a: Area, style: string | undefined, values: number[] = TREND): void {
+  if (style === "line" || style === "curve" || style === "area") {
+    lineChart(p, a, values, { smooth: style !== "line", area: style === "area" });
+    if (style === "line") for (const [x, y] of points(a, values)) p.dot(x, y, 1.8, "acc");
+  } else bars(p, a, values);
+}
+
+/** 节奏图：柱状 / 折线 / 面积 */
+function rhythmBody(p: Pen, a: Area, style: string | undefined): void {
+  if (style === "line" || style === "area") lineChart(p, a, RHYTHM, { smooth: true, area: style === "area" });
+  else bars(p, a, RHYTHM);
+}
+
+/** 本周七天：圆点 / 柱状 / 折线 */
+function weekBody(p: Pen, a: Area, style: string | undefined): void {
+  const v = [3, 5, 4, 9, 6, 11, 8];
+  if (style === "bars") bars(p, a, v);
+  else if (style === "line") {
+    lineChart(p, a, v, { smooth: false });
+    for (const [x, y] of points(a, v)) p.dot(x, y, 2, "acc");
+  } else {
+    v.forEach((n, i) => p.dot(a.x + 6 + i * ((a.w - 12) / 6), a.y + a.h / 2, 5, n > 6 ? "acc" : "dim", n > 6 ? 0.9 : 1));
+  }
+}
+
+/** 标签云：大小不一的小块 */
+function cloud(p: Pen, a: Area): void {
+  const sizes = [[34, 9], [20, 6], [26, 7], [16, 5], [30, 8], [14, 5], [22, 6], [18, 5], [28, 7]];
+  let x = a.x;
+  let y = a.y + 2;
+  sizes.forEach(([w, h], i) => {
+    if (x + w > a.x + a.w) {
+      x = a.x;
+      y += 13;
+    }
+    p.rect(x, y + (9 - h) / 2, w, h, i % 3 === 0 ? "acc" : i % 3 === 1 ? "rose" : "dim", h / 2, i % 3 === 2 ? 1 : 0.8);
+    x += w + 5;
+  });
+}
+
+const DRAW: Record<WidgetId, (p: Pen, style?: string) => void> = {
+  hero: (p, style) => {
     const a = frame(p, 40);
     p.rect(a.x, a.y, 44, 16, "acc", 3);
     p.rect(a.x, a.y + 21, 30, 4, "dim");
-    bars(p, { x: a.x + 62, y: a.y, w: 78, h: 38 }, [3, 5, 4, 9, 6, 11, 8]);
+    weekBody(p, { x: a.x + 62, y: a.y, w: 78, h: 38 }, style);
   },
   tasks: (p) => {
     const a = frame(p);
@@ -167,13 +211,17 @@ const DRAW: Record<WidgetId, (p: Pen) => void> = {
     lineChart(p, { x: a.x + 76, y: a.y + 4, w: 64, h: 24 }, [3, 5, 4, 7, 6, 9], { smooth: true });
   },
   heat: (p) => heat(p, frame(p), 26, 7),
-  trend: (p) => bars(p, frame(p), TREND),
-  trendHub: (p) => {
+  trend: (p, style) => trendBody(p, frame(p), style),
+  trendHub: (p, style) => {
     const a = frame(p);
     tabs(p, a.x, a.y - 2, 4);
-    lineChart(p, { x: a.x, y: a.y + 12, w: a.w, h: a.h - 14 }, TREND, { smooth: true, area: true });
+    trendBody(p, { x: a.x, y: a.y + 12, w: a.w, h: a.h - 14 }, style);
   },
-  tags: (p) => rows(p, frame(p), 5, "rose"),
+  tags: (p, style) => {
+    const a = frame(p);
+    if (style === "cloud") cloud(p, a);
+    else rows(p, a, 5, "rose");
+  },
   reports: (p) => {
     const a = frame(p);
     for (let i = 0; i < 3; i++) {
@@ -184,7 +232,7 @@ const DRAW: Record<WidgetId, (p: Pen) => void> = {
     }
   },
   topLinked: (p) => rows(p, frame(p), 5, "acc"),
-  rhythm: (p) => bars(p, frame(p), [2, 3, 5, 9, 12, 8, 5, 3, 2, 1, 4, 6], "acc"),
+  rhythm: (p, style) => rhythmBody(p, frame(p), style),
   activity: (p) => {
     const a = frame(p);
     for (let i = 0; i < 12; i++) p.rect(a.x + i * 11.2, a.y + 6, 9, 22, "acc", 2, 0.15 + ((i * 37) % 10) / 12);
@@ -198,14 +246,28 @@ const DRAW: Record<WidgetId, (p: Pen) => void> = {
     p.dot(a.x + 116, a.y + 26, 3, "rose");
     p.path(`M${a.x + 100} ${a.y + 14} L${a.x + 124} ${a.y + 6} M${a.x + 100} ${a.y + 14} L${a.x + 116} ${a.y + 26}`, "dim");
   },
-  folders: (p) => {
+  folders: (p, style) => {
     const a = frame(p);
-    let x = a.x;
-    ([[0.4, "acc"], [0.25, "rose"], [0.2, "warn"], [0.15, "ok"]] as [number, Tone][]).forEach(([f, tone]) => {
-      p.rect(x, a.y + 4, a.w * f - 1.5, 14, tone, 2, 0.85);
-      x += a.w * f;
-    });
-    p.rect(a.x, a.y + 26, a.w * 0.5, 3, "dim");
+    const parts: [number, Tone][] = [[0.4, "acc"], [0.25, "rose"], [0.2, "warn"], [0.15, "ok"]];
+    if (style === "donut") {
+      donut(p, a.x + 34, a.y + 28, 17, parts);
+      rows(p, { x: a.x + 72, y: a.y + 8, w: 68, h: 44 }, 4, "acc");
+    } else if (style === "list") {
+      parts.forEach(([f, tone], i) => {
+        const y = a.y + 2 + i * 13;
+        p.dot(a.x + 3, y + 2, 2.2, tone);
+        p.rect(a.x + 10, y, 40, 4, "dim");
+        p.rect(a.x + 60, y + 0.5, (a.w - 90) * f * 2, 3, tone, 1.5, 0.7);
+        p.rect(a.x + a.w - 18, y, 18, 4, "dim");
+      });
+    } else {
+      let x = a.x;
+      parts.forEach(([f, tone]) => {
+        p.rect(x, a.y + 4, a.w * f - 1.5, 14, tone, 2, 0.85);
+        x += a.w * f;
+      });
+      p.rect(a.x, a.y + 26, a.w * 0.5, 3, "dim");
+    }
   },
   calendar: (p) => {
     const a = frame(p);
@@ -235,10 +297,10 @@ const DRAW: Record<WidgetId, (p: Pen) => void> = {
     donut(p, a.x + 36, a.y + 38, 17, [[4, "acc"], [3, "rose"], [2, "warn"], [1, "ok"]]);
     rows(p, { x: a.x + 72, y: a.y + 20, w: 68, h: 40 }, 3, "acc");
   },
-  habits: (p) => {
+  habits: (p, style) => {
     const a = frame(p);
     tabs(p, a.x, a.y - 2, 3);
-    bars(p, { x: a.x, y: a.y + 14, w: a.w, h: a.h - 16 }, [2, 3, 5, 9, 12, 8, 5, 3, 2, 4]);
+    rhythmBody(p, { x: a.x, y: a.y + 14, w: a.w, h: a.h - 16 }, style);
   },
   tasksHub: (p) => {
     const a = frame(p);
@@ -273,7 +335,12 @@ const DRAW: Record<WidgetId, (p: Pen) => void> = {
       p.rect(a.x, y + 6.5, a.w * cur, 5, "acc", 2, 0.85);
     });
   },
-  lengths: (p) => bars(p, frame(p), [3, 8, 14, 11, 6, 3, 1], "rose"),
+  lengths: (p, style) => {
+    const a = frame(p);
+    const v = [3, 8, 14, 11, 6, 3, 1];
+    if (style === "area") lineChart(p, a, v, { smooth: true, area: true, tone: "rose" });
+    else bars(p, a, v, "rose");
+  },
   brokenLinks: (p) => {
     const a = frame(p);
     rows(p, a, 4, "dng");
@@ -323,8 +390,8 @@ const DRAW: Record<WidgetId, (p: Pen) => void> = {
   },
 };
 
-/** 往 host 里画 id 对应卡片的预览缩略图 */
-export function drawAddPreview(host: HTMLElement, id: WidgetId): void {
+/** 往 host 里画 id 对应卡片的预览缩略图；style 是这张卡现在选的图形样式（没有样式的卡片忽略） */
+export function drawAddPreview(host: HTMLElement, id: WidgetId, style?: string): void {
   const svg = svgEl("svg", { viewBox: `0 0 ${PREVIEW_W} ${PREVIEW_H}`, class: "vp-add-svg", "aria-hidden": "true", focusable: "false", preserveAspectRatio: "xMidYMid meet" }, host);
-  DRAW[id](pen(svg));
+  DRAW[id](pen(svg), style);
 }

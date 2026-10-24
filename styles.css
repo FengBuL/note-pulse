@@ -3073,18 +3073,31 @@ body.is-mobile .vp-root :is(button, [role="button"], [role="tab"], .is-clickable
 .vp-root .vp-shell .vp-add-item {
   display: flex;
   flex-direction: column;
-  gap: var(--vp-s1);
-  height: auto;
+  gap: var(--vp-s2);
   padding: var(--vp-s2);
   border: 1px solid var(--vp-line);
   border-radius: var(--vp-r-s);
   background: var(--vp-surface);
+}
+.vp-root .vp-shell .vp-add-item:hover,
+.vp-root .vp-shell .vp-add-item:focus-within {
+  border-color: var(--vp-accent);
+}
+.vp-root .vp-shell .vp-add-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--vp-s1);
+  width: 100%;
+  height: auto;
+  padding: 0;
+  border: 0;
+  background: none;
   box-shadow: none;
   text-align: left;
   cursor: pointer;
 }
-.vp-root .vp-shell .vp-add-item:hover {
-  border-color: var(--vp-accent);
+.vp-add-seg {
+  align-self: flex-start;
 }
 .vp-add-preview {
   aspect-ratio: 16 / 9;

@@ -684,6 +684,45 @@ export class DashboardView extends ItemView {
   }
 
   /** 添加面板：列出被移除的卡片，点一下加到最后一行第一个放得下的位置 */
+  /**
+   * 添加面板里能先选图形样式的卡片：选项、现在用的样式、确认添加时怎么记下来。
+   * 样式本来就是按图的种类记的（写作趋势和每周写作共用一个），所以这里选的就是以后这类图的样式。
+   */
+  private addStyleSpec(id: WidgetId): { options: [string, string][]; current: string; apply: (v: string) => void } | null {
+    const set = this.plugin.settings;
+    const chart = <K extends keyof ChartStyles>(key: K, styles: readonly ChartStyles[K][], name: (v: ChartStyles[K]) => string) => ({
+      options: styles.map((v): [string, string] => [v, name(v)]),
+      current: set.chartStyles[key] as string,
+      apply: (v: string) => {
+        set.chartStyles = { ...set.chartStyles, [key]: v };
+      },
+    });
+    switch (id) {
+      case "trend":
+      case "trendHub":
+        return chart("trend", TREND_STYLES, trendStyleName);
+      case "rhythm":
+      case "habits":
+        return chart("rhythm", RHYTHM_STYLES, (v) => (v === "bar" ? L("柱状", "Bar") : v === "line" ? L("折线", "Line") : L("面积", "Area")));
+      case "folders":
+        return chart("mix", MIX_STYLES, (v) => (v === "stack" ? L("堆叠条", "Stack") : v === "donut" ? L("环形图", "Donut") : L("列表", "List")));
+      case "tags":
+        return chart("tags", TAG_STYLES, (v) => (v === "bars" ? L("条形", "Bars") : L("标签云", "Cloud")));
+      case "lengths":
+        return chart("lengths", LENGTH_STYLES, (v) => (v === "bar" ? L("柱状", "Bar") : L("面积", "Area")));
+      case "hero":
+        return {
+          options: [["dots", L("圆点", "Dots")], ["bars", L("柱状", "Bars")], ["line", L("折线", "Line")]],
+          current: set.weekStyle,
+          apply: (v) => {
+            set.weekStyle = v as WeekStyle;
+          },
+        };
+      default:
+        return null;
+    }
+  }
+
   private renderAddPanel(parent: HTMLElement) {
     const panel = parent.createDiv({ cls: "vp-card vp-add-panel" });
     const hidden = hiddenWidgets(this.plugin.settings.layout);
@@ -693,11 +732,38 @@ export class DashboardView extends ItemView {
     }
     const list = panel.createDiv({ cls: "vp-add-list" });
     for (const w of hidden) {
-      const b = list.createEl("button", { cls: "vp-add-item", attr: { type: "button", "data-fid": `add:${w.id}` } });
-      drawAddPreview(b.createDiv({ cls: "vp-add-preview" }), w.id);
-      b.createDiv({ cls: "vp-add-name", text: widgetName(w.id) });
-      b.createDiv({ cls: "vp-add-desc", text: `${widgetDesc(w.id)} · ${w.w} × ${w.h}` });
-      b.addEventListener("click", () => this.applyLayout(addWidget(this.plugin.settings.layout, w.id), { reveal: w.id }));
+      const item = list.createDiv({ cls: "vp-add-item" });
+      const spec = this.addStyleSpec(w.id);
+      // 确认添加之前选的样式：预览跟着变，点“添加”才写进设置
+      let style = spec?.current;
+      const main = item.createEl("button", { cls: "vp-add-main", attr: { type: "button", "data-fid": `add:${w.id}` } });
+      const preview = main.createDiv({ cls: "vp-add-preview" });
+      drawAddPreview(preview, w.id, style);
+      main.createDiv({ cls: "vp-add-name", text: widgetName(w.id) });
+      main.createDiv({ cls: "vp-add-desc", text: `${widgetDesc(w.id)} · ${w.w} × ${w.h}` });
+      main.addEventListener("click", () => {
+        if (spec && style !== undefined && style !== spec.current) spec.apply(style);
+        this.applyLayout(addWidget(this.plugin.settings.layout, w.id), { reveal: w.id });
+      });
+      if (!spec) continue;
+      const seg = item.createDiv({ cls: "vp-seg vp-add-seg", attr: { role: "tablist", "aria-label": L(`${widgetName(w.id)}的图形样式`, `${widgetName(w.id)} chart style`) } });
+      for (const [v, text] of spec.options) {
+        const b = seg.createEl("button", {
+          cls: "vp-seg-btn" + (v === style ? " is-active" : ""),
+          text,
+          attr: { type: "button", role: "tab", "aria-selected": String(v === style), "data-fid": `add:${w.id}:style:${v}` },
+        });
+        b.addEventListener("click", () => {
+          style = v;
+          preview.empty();
+          drawAddPreview(preview, w.id, v);
+          for (const o of Array.from(seg.children)) {
+            const on = o === b;
+            o.toggleClass("is-active", on);
+            o.setAttr("aria-selected", String(on));
+          }
+        });
+      }
     }
   }
 
