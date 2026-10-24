@@ -194,7 +194,7 @@ function migrateV1(raw: { items: unknown[] }): WidgetLayout {
  * 读到的布局可能来自别的版本、被同步弄坏或被手改：
  * - 没有或读不懂：默认布局；
  * - v1（档位）：迁移到网格；
- * - v2：去掉未知卡和重复卡，尺寸夹进范围，重叠的推开，整体上浮。
+ * - v2：去掉未知卡和重复卡，尺寸夹进范围，重叠的推开（不上浮，用户留的空位保留）。
  */
 export function normalizeLayout(raw: unknown): WidgetLayout {
   if (!raw || typeof raw !== "object" || !Array.isArray((raw as { items?: unknown }).items)) return defaultLayout();
@@ -250,15 +250,21 @@ export function withItems(items: GridItem[]): WidgetLayout {
   return { version: 2, items: items as WidgetLayoutItem[] };
 }
 
-/** 加一张卡：用这张卡的默认大小，放在最后一行第一个放得下的位置 */
+/** 加一张卡：用这张卡的默认大小，放在最上面第一个放得下的位置（先填空位，没有空位就排在最后） */
 export function addWidget(layout: WidgetLayout, id: WidgetId): WidgetLayout {
   const info = INFO.get(id);
   if (!info || layout.items.some((i) => i.id === id)) return layout;
   return withItems(addItem(layout.items, { id, x: 0, y: 0, w: info.w, h: info.h }));
 }
 
+/** 移除一张卡：空出来的位置保持空着，别的卡不动 */
 export function removeWidget(layout: WidgetLayout, id: WidgetId): WidgetLayout {
-  return withItems(compact(layout.items.filter((i) => i.id !== id)));
+  return withItems(layout.items.filter((i) => i.id !== id));
+}
+
+/** 整理：每张卡往上补，不留空位（编辑栏的“整理”按钮） */
+export function tidyLayout(layout: WidgetLayout): WidgetLayout {
+  return withItems(compact(layout.items));
 }
 
 export function sameLayout(a: WidgetLayout, b: WidgetLayout): boolean {

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { COLS, overlap } from "../src/grid";
 
 const OPTIONAL = ["trendHub", "overview", "checkupHub", "structure", "habits", "tasksHub", "recent", "goals", "monthCompare", "lengths"];
-import { WIDGETS, WidgetId, addWidget, addableWidgets, coveredBy, defaultLayout, MERGED_FROM, WIDGET_CATEGORIES, hiddenWidgets, limitsOf, normalizeLayout, readingOrder, removeWidget, sameLayout, widgetInfo } from "../src/widgets";
+import { WIDGETS, WidgetId, addWidget, addableWidgets, coveredBy, defaultLayout, MERGED_FROM, WIDGET_CATEGORIES, hiddenWidgets, limitsOf, normalizeLayout, readingOrder, removeWidget, sameLayout, tidyLayout, widgetInfo } from "../src/widgets";
 
 const at = (l: { items: { id: string; x: number; y: number; w: number; h: number }[] }, id: string) => {
   const i = l.items.find((x) => x.id === id);
@@ -121,19 +121,21 @@ test("迁移：不带 version 但带 size 的也按档位布局处理；隐藏�
   assert.deepEqual(hiddenWidgets(m).map((w) => w.id).includes("tasks"), true);
 });
 
-test("编辑：添加用这张卡的默认大小，放在最后一行第一个放得下的位置；移除后下面的补上来", () => {
+test("编辑：添加用这张卡的默认大小，先填最上面第一个放得下的空位；移除后空位保持空着，整理之后才补上来", () => {
   let l = removeWidget(defaultLayout(), "dupes");
   assert.deepEqual(hiddenWidgets(l).map((w) => w.id).filter((id) => !OPTIONAL.includes(id)), ["dupes"]);
   l = addWidget(l, "dupes");
-  assert.equal(at(l, "dupes"), "0,46 4x4", "从最后一行往下找：最后一行是满的，另起一行");
+  assert.equal(at(l, "dupes"), "6,38 4x4", "放回刚空出来的位置");
   assert.ok(sameLayout(addWidget(l, "dupes"), l), "已经在的不重复加");
   l = removeWidget(l, "reports");
   assert.equal(hiddenWidgets(l).filter((w) => !OPTIONAL.includes(w.id)).length, 1);
   l = addWidget(l, "reports");
-  assert.equal(at(l, "reports"), "0,46 12x4", "整行的卡放不进最后一行，另起一行");
+  assert.equal(at(l, "reports"), "0,42 12x4", "整行的卡放回它空出来的整行");
   const gone = removeWidget(defaultLayout(), "hero");
-  assert.equal(at(gone, "notes"), "0,0 3x3", "移除后下面的卡补上来");
+  assert.equal(at(gone, "notes"), "0,6 3x3", "移除后别的卡不动，上面留着空位");
+  assert.equal(at(tidyLayout(gone), "notes"), "0,0 3x3", "整理之后补上来");
   for (const a of gone.items) for (const b of gone.items) if (a !== b) assert.ok(!overlap(a, b));
+  assert.ok(sameLayout(tidyLayout(tidyLayout(gone)), tidyLayout(gone)), "整理两次结果不变");
 });
 
 test("sameLayout：位置或大小不同就不相同", () => {

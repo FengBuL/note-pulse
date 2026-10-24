@@ -34,7 +34,7 @@ import { DayContext, achievementText, achievements, alertText, computeAlerts, gr
 import { COLS, GAP, GridItem, ROW_H, rowsToPx } from "./grid";
 import { GestureHost, GridGesture, setPlace } from "./grid-edit";
 import { Box, HUB_CHROME, HeroDensity, KpiDensity, activityDensity, goalRingSize, overviewDensity, calendarDensity, innerW, bodyH, densityDensity, densityKey, foldersDensity, heatDensity, heroDensity, isTight, kpiDensity, rhythmDensity, trendDensity } from "./density";
-import { MERGED_FROM, SUPERSEDED, WIDGET_CATEGORIES, WidgetCategory, WidgetId, WidgetInfo, WidgetLayout, WidgetLayoutItem, addWidget, addableWidgets, coveredBy, defaultLayout, widgetInfo, limitsOf, readingOrder, removeWidget, sameLayout, withItems } from "./widgets";
+import { MERGED_FROM, SUPERSEDED, WIDGET_CATEGORIES, WidgetCategory, WidgetId, WidgetInfo, WidgetLayout, WidgetLayoutItem, addWidget, addableWidgets, coveredBy, defaultLayout, widgetInfo, limitsOf, readingOrder, removeWidget, sameLayout, tidyLayout, withItems } from "./widgets";
 import { MOTION, SegRect, animateHeight, countUp, drawLines, markStagger, playLayout, reducedMotion, segRect, slideSeg, snapshotRects } from "./motion";
 import {
   BarItem,
@@ -697,6 +697,14 @@ export class DashboardView extends ItemView {
     this.pushUndo();
     this.plugin.settings.layout = next;
     void this.plugin.saveViewSetting();
+    this.updateTidy();
+  }
+
+  /** “整理”按钮：版面已经整齐（没有空位）就灰着 */
+  private tidyBtn: HTMLButtonElement | null = null;
+  private updateTidy() {
+    const layout = this.plugin.settings.layout;
+    if (this.tidyBtn) this.tidyBtn.disabled = sameLayout(tidyLayout(layout), layout);
   }
 
   /** 拖动、调大小期间：只改各张卡的位置和大小，不保存，不重画内容 */
@@ -772,7 +780,7 @@ export class DashboardView extends ItemView {
   /** 编辑栏：恢复默认布局、添加卡片、完成；添加面板打开时列在编辑栏下面 */
   private renderEditBar(parent: HTMLElement) {
     const bar = parent.createDiv({ cls: "vp-editbar", attr: { role: "toolbar", "aria-label": L("编辑看板", "Edit dashboard") } });
-    bar.createDiv({ cls: "vp-editbar-hint", text: L("拖动卡片换位置，拖右下角调大小", "Drag a card to move it, drag its corner to resize") });
+    bar.createDiv({ cls: "vp-editbar-hint", text: L("拖动卡片换位置（放哪是哪，不会自动补位），拖右下角调大小", "Drag a card to move it (it stays where you drop it), drag its corner to resize") });
     this.liveEl = bar.createDiv({ cls: "vp-sr-only", attr: { "aria-live": "polite", role: "status" } });
     const acts = bar.createDiv({ cls: "vp-editbar-actions" });
     const btn = (icon: string, text: string, fn: () => void, primary = false) => {
@@ -786,6 +794,11 @@ export class DashboardView extends ItemView {
     this.undoBtn.disabled = this.undoStack.length === 0;
     this.undoBtn.setAttr("title", L("撤销（Cmd / Ctrl + Z）", "Undo (Cmd / Ctrl + Z)"));
     btn("rotate-ccw", L("恢复默认布局", "Restore default"), () => this.applyLayout(defaultLayout()));
+    // 整理：卡片放在哪就在哪，不会自动补位；想排整齐，点这里把每张卡往上补
+    const tidy = btn("arrow-up-to-line", L("整理", "Tidy up"), () => this.applyLayout(tidyLayout(this.plugin.settings.layout)));
+    tidy.setAttr("title", L("整理：把每张卡往上补，不留空位", "Tidy up: move every card up to close the gaps"));
+    this.tidyBtn = tidy;
+    this.updateTidy();
     btn("circle-help", L("新手引导", "Guide"), () => this.startTour(true));
     const add = btn("plus", L("添加卡片", "Add a card"), () => {
       this.addOpen = !this.addOpen;

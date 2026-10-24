@@ -1,18 +1,18 @@
 /*
  * 编辑看板时卡片的拖动、拖角调大小和键盘操作。用 Pointer 事件自己实现：
  * HTML5 拖放拿不到中途位置，做不了实时让位，拖动的样子也由浏览器决定。
- * 算法（让位、上浮、夹范围）在 grid.ts，这里只管 DOM：跟手、占位框、让位动画、自动滚动、Esc 取消。
+ * 算法（让位、夹范围）在 grid.ts，这里只管 DOM：跟手、占位框、让位动画、自动滚动、Esc 取消。
  * 拖动过程中不保存、不重画卡片内容，只改位置；松手保存一次。
  *
  * 手感上的几个做法：
  * - 被拖的卡（或调大小的卡）每一帧都跟着指针走，像素级，不按格子跳；格子吸附只体现在虚线占位框上。
  * - 指针事件合并到每帧处理一次；被拖的卡提升成独立的合成层，移动只是合成，不重绘。
- * - 拖动时别的卡的让位：干扰小的（最多挪 3 张，或者比现在挪得少）立刻让；会把一大片卡片推开的，
- *   指针要在那一格停一会儿（250ms）才让，划过去的途中不会让整个版面乱跳。
+ * - 落点就是指针所在的格子（虚线占位框立刻跟着走）；占位框压住别的卡时，那些卡要等指针在这一格停一会儿（180ms）才让开，
+ *   划过去的途中别的卡一动不动，不会整个版面乱跳；占位框没压住任何卡时，不需要让位，立刻生效。
  * - 调大小时，移动途中只有卡片自己和虚线框在变，别的卡一动不动（它们的重排和动画是最费力的部分），
  *   指针停住 120ms 后才让位；内容每 200ms 重画一次。
  */
-import { COLS, GAP, GridItem, LimitsOf, ROW_H, bestMove, bestPlace, displacedCount, growItem, nudgeItem, resizeItem } from "./grid";
+import { COLS, GAP, GridItem, LimitsOf, ROW_H, displacedCount, growItem, moveItemSnap, nudgeItem, placeItemSnap, resizeItem } from "./grid";
 import { MOTION, playLayout, snapshotRects } from "./motion";
 
 export interface GestureHost {
@@ -58,10 +58,8 @@ const EDGE = 48;
 const MAX_SCROLL = 18;
 const SETTLE_MS = 160;
 const SHIFT_MS = 200;
-/** 最多挪动这么多张别的卡，就算“干扰小”，立刻让位 */
-const CALM = 3;
-/** 会大面积推开别的卡的让位，指针要停这么久才生效 */
-const DWELL_MS = 250;
+/** 占位框压住别的卡时，指针要停这么久，那些卡才让开 */
+const DWELL_MS = 180;
 /** 调大小时，内容（列表、图表）按这个间隔重画 */
 const REDRAW_MS = 200;
 /** 调大小时，指针停住这么久，别的卡才跟着让位（移动途中只有虚线框在变，别的卡一动不动） */
@@ -163,8 +161,8 @@ export class GridGesture {
         }, REST_MS);
         return;
       }
-      const dn = displacedCount(base, next, id);
-      if (dn <= CALM || dn <= displacedCount(base, shown, id)) {
+      // 没压住任何卡：别的卡不用动（或者要回到原位），立刻生效；压住了就等指针停一下
+      if (displacedCount(base, next, id) === 0) {
         cancelDwell();
         showNow(next);
         return;
@@ -214,7 +212,11 @@ export class GridGesture {
         if (!redraw) redraw = win.setTimeout(redrawContent, Math.max(0, REDRAW_MS - (now - lastRedraw)));
       } else {
         card.setCssProps({ transform: `translate3d(${dx}px, ${dy}px, 0) scale(1.02)` });
-        follow(bestMove(base, id, Math.round((origin.x + dx) / unitX), Math.round((origin.y + dy) / unitY)));
+        const next = moveItemSnap(base, id, Math.round((origin.x + dx) / unitX), Math.round((origin.y + dy) / unitY));
+        const me = next.find((i) => i.id === id);
+        // 虚线占位框立刻跟着指针走；被压住的卡什么时候让开由 follow 决定
+        if (placeholder && me) setPlace(placeholder, me);
+        follow(next);
       }
     };
 
@@ -365,9 +367,8 @@ export class GridGesture {
         cancelDwell();
         return;
       }
-      const dn = displacedCount(base, next, item.id);
       cancelDwell();
-      if (dn <= CALM || dn <= displacedCount(base, shown, item.id)) {
+      if (displacedCount(base, next, item.id) === 0) {
         showNow(next);
         return;
       }
@@ -390,12 +391,20 @@ export class GridGesture {
       // 指针在看板左右范围里、上下离看板不远：落在看板里；否则回到没有这张卡的样子
       const over = last.x >= r.left - 8 && last.x <= r.right + 8 && last.y >= r.top - 24 && last.y <= r.bottom + 120;
       if (!over) {
+        placeholder?.remove();
+        placeholder = null;
         follow(base);
         return;
       }
       const gx = Math.round((last.x - r.left) / unitX() - item.w / 2);
       const gy = Math.round((last.y - r.top) / unitY - item.h / 2);
-      follow(bestPlace(base, item, gx, gy));
+      const next = placeItemSnap(base, item, gx, gy);
+      const me = next.find((i) => i.id === item.id);
+      if (me) {
+        if (!placeholder) placeholder = grid.createDiv({ cls: "vp-ph", attr: { "data-widget": "__ph", "aria-hidden": "true" } });
+        setPlace(placeholder, me);
+      }
+      follow(next);
     };
 
     const frame = () => {

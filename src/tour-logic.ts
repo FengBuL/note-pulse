@@ -99,7 +99,10 @@ export function tourSteps(wide: boolean): TourStep[] {
     {
       id: "drag",
       title: L("拖动卡片换位置", "Drag a card to move it"),
-      body: L("按住卡片拖到想放的地方，别的卡片会实时让位，虚线框是松手后的位置。按 Esc 取消，Cmd / Ctrl + Z 撤销，也可以用方向键移动。", "Drag a card where you want it; the others make room live and the dashed frame shows where it will land. Esc cancels, Cmd / Ctrl + Z undoes, arrow keys work too."),
+      body: L(
+        "按住卡片拖到想放的位置，落在哪就是哪，虚线框是松手后的位置；压住的卡片会就近让开。留下的空位不会自动补上，想排整齐就点编辑栏里的“整理”。按 Esc 取消，Cmd / Ctrl + Z 撤销，也可以用方向键移动。",
+        "Drag a card where you want it; it lands exactly where the dashed frame shows, and cards underneath step aside. Gaps are not filled automatically; click “Tidy up” in the edit bar to close them. Esc cancels, Cmd / Ctrl + Z undoes, arrow keys work too."
+      ),
       target: "card",
       state: EDIT,
       demo: "drag",

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { COLS, GAP, GridItem, Limits, ROW_H, addItem, bestMove, bestPlace, displacedCount, compact, findSpot, flowItems, growItem, moveItem, nudgeItem, overlap, placeItem, removeItem, repairItems, resizeItem, rowsToPx, sizeRange } from "../src/grid";
+import { COLS, GAP, GridItem, Limits, ROW_H, addItem, displacedCount, compact, findSpot, flowItems, growItem, moveItem, moveItemSnap, nudgeItem, overlap, placeItem, placeItemSnap, removeItem, repairItems, resizeItem, rowsToPx, sizeRange } from "../src/grid";
 
 const LIM: Limits = { minW: 2, maxW: 12, minH: 2, maxH: 10 };
 const limitsOf = (id: string): Limits => (id.startsWith("n") ? { minW: 2, maxW: 4, minH: 2, maxH: 4 } : LIM);
@@ -11,7 +11,7 @@ const pos = (items: GridItem[], id: string) => {
   return `${i.x},${i.y} ${i.w}x${i.h}`;
 };
 
-/** 不重叠、不越界、没有洞（每张卡要么在第 0 行，要么被正上方一行的卡挡住） */
+/** 不重叠、不越界、整数、id 不重复。自由摆放允许有空位，所以不检查“悬空” */
 function assertValid(items: GridItem[], label = "") {
   const ids = new Set<string>();
   for (const a of items) {
@@ -20,8 +20,12 @@ function assertValid(items: GridItem[], label = "") {
     assert.ok(Number.isInteger(a.x) && Number.isInteger(a.y) && Number.isInteger(a.w) && Number.isInteger(a.h), `${label} 非整数 ${JSON.stringify(a)}`);
     assert.ok(a.x >= 0 && a.y >= 0 && a.w >= 1 && a.h >= 1 && a.x + a.w <= COLS, `${label} 越界 ${JSON.stringify(a)}`);
     for (const b of items) if (a !== b) assert.ok(!overlap(a, b), `${label} 重叠 ${a.id} ${b.id}`);
-    if (a.y > 0) assert.ok(items.some((b) => b !== a && overlap(b, { ...a, y: a.y - 1 })), `${label} ${a.id} 悬空在第 ${a.y} 行`);
   }
+}
+
+/** 没有洞：每张卡要么在第 0 行，要么被正上方一行的卡挡住（整理之后应该是这样） */
+function assertTight(items: GridItem[], label = "") {
+  for (const a of items) if (a.y > 0) assert.ok(items.some((b) => b !== a && overlap(b, { ...a, y: a.y - 1 })), `${label} ${a.id} 悬空在第 ${a.y} 行`);
 }
 
 /** 固定种子的随机数，失败了能复现 */
@@ -48,56 +52,80 @@ test("上浮：悬空的卡往上补；已经紧凑的不动；再来一次结�
   assert.deepEqual(compact(out), out);
 });
 
-test("拖动：往下拖过一张卡，两张换位置", () => {
-  const base = [it("a", 0, 0, 12, 3), it("b", 0, 3, 12, 3), it("c", 0, 6, 12, 3)];
-  const out = moveItem(base, "a", 0, 4);
-  assertValid(out);
-  assert.deepEqual(out.map((i) => i.id), ["b", "a", "c"]);
-  assert.equal(pos(out, "a"), "0,3 12x3");
+test("sizeRange：右边界限制最大宽度", () => {
+  assert.deepEqual(sizeRange(it("a", 9, 0, 3, 3), limitsOf), { maxW: 3, maxH: 10 });
+  assert.deepEqual(sizeRange(it("n1", 0, 0, 2, 2), limitsOf), { maxW: 4, maxH: 4 });
 });
 
-test("拖动：同一行里拖到邻居上，两张卡互换位置，不留洞", () => {
+test("拖动：落点就是指针所在的格子；x 夹在 0 到 12−w；最低排在所有卡的下面，不会悬在半空", () => {
+  const base = [it("a", 0, 0, 4, 3), it("b", 4, 0, 4, 3)];
+  assert.equal(pos(moveItem(base, "a", 8, 0), "a"), "8,0 4x3");
+  assert.equal(pos(moveItem(base, "a", 99, 0), "a"), "8,0 4x3");
+  assert.equal(pos(moveItem(base, "a", -5, -5), "a"), "0,0 4x3");
+  assert.equal(pos(moveItem(base, "a", 0, 40), "a"), "0,3 4x3", "拖到很下面：排在所有卡的下面（b 的底边是第 3 行）");
+  assert.equal(pos(moveItem(base, "a", 8, 2), "a"), "8,2 4x3", "放在空位里，想放哪就是哪，不会自动上浮");
+  assert.equal(pos(moveItem(base, "a", 8, 2), "b"), "4,0 4x3");
+});
+
+test("拖动：不上浮——卡片留下的空位保持空着，别的卡不会自己补上来", () => {
+  const base = [it("a", 0, 0, 12, 3), it("b", 0, 3, 12, 3), it("c", 0, 6, 12, 3)];
+  const out = moveItem(base, "a", 0, 9);
+  assertValid(out);
+  assert.equal(pos(out, "a"), "0,9 12x3");
+  assert.equal(pos(out, "b"), "0,3 12x3", "b 没动，上面留了空位");
+  assert.equal(pos(out, "c"), "0,6 12x3");
+  assert.deepEqual(compact(out).map((i) => `${i.id}:${i.y}`), ["b:0", "c:3", "a:6"], "整理之后才补齐");
+});
+
+test("拖动：同大小的两张卡互换，别的卡一张都不动", () => {
   const base = [it("a", 0, 0, 4, 3), it("b", 4, 0, 4, 3), it("c", 8, 0, 4, 3), it("d", 0, 3, 12, 2)];
   const out = moveItem(base, "c", 0, 0);
   assertValid(out);
   assert.equal(pos(out, "c"), "0,0 4x3");
   assert.equal(pos(out, "a"), "8,0 4x3", "a 进了 c 刚离开的位置");
-  assert.equal(pos(out, "b"), "4,0 4x3", "没被挡住的 b 原地不动");
+  assert.equal(pos(out, "b"), "4,0 4x3");
   assert.equal(pos(out, "d"), "0,3 12x2");
+  assert.equal(displacedCount(base, out, "c"), 1);
 });
 
-test("拖动：只拖一点点，位置回到原样", () => {
-  const base = [it("a", 0, 0, 12, 3), it("b", 0, 3, 12, 3)];
-  assert.deepEqual(moveItem(base, "a", 0, 1), base);
-  assert.deepEqual(moveItem(base, "a", 0, 0), base);
-});
-
-test("拖动：往上拖到另一张卡上面，两张换位置", () => {
-  const base = [it("a", 0, 0, 12, 3), it("b", 0, 3, 12, 3)];
-  const out = moveItem(base, "b", 0, 1);
-  assertValid(out);
-  assert.deepEqual(out.map((i) => i.id), ["b", "a"]);
-});
-
-test("拖动：拖到右边空位，不影响别的卡；拖到页面外被夹住；拖到很下面会上浮", () => {
-  const base = [it("a", 0, 0, 4, 3), it("b", 4, 0, 4, 3)];
-  const right = moveItem(base, "a", 8, 0);
-  assert.equal(pos(right, "a"), "8,0 4x3");
-  assert.equal(pos(right, "b"), "4,0 4x3");
-  assert.equal(pos(moveItem(base, "a", 99, 0), "a"), "8,0 4x3", "x 夹在 0 到 12−w");
-  assert.equal(pos(moveItem(base, "a", -5, -5), "a"), "0,0 4x3");
-  assert.equal(pos(moveItem(base, "a", 0, 40), "a"), "0,0 4x3", "没有东西挡着就上浮");
-});
-
-test("拖动：没被挡住的卡原地不动", () => {
-  const base = [it("a", 0, 0, 4, 3), it("b", 4, 0, 4, 3), it("c", 8, 0, 4, 3), it("d", 0, 3, 12, 2)];
+test("拖动：压住别的卡时，那张卡就近让开：附近有空位就挪到空位，别的卡不动", () => {
+  const base = [it("a", 0, 0, 4, 3), it("b", 4, 0, 4, 3), it("c", 0, 6, 4, 3)];
+  // a 拖到 b 上：b 去 a 空出来的位置（互换），不会被推到下面
   const out = moveItem(base, "a", 4, 0);
   assertValid(out);
-  assert.equal(pos(out, "c"), "8,0 4x3");
   assert.equal(pos(out, "a"), "4,0 4x3");
+  assert.equal(pos(out, "b"), "0,0 4x3");
+  assert.equal(pos(out, "c"), "0,6 4x3");
 });
 
-test("调大小：夹在范围里，不超出右边界；长高把下面的卡往下推", () => {
+test("拖动：压住大小不同的卡、附近又没有空位时，被压住的卡往下推，连锁推下去，但谁也不重叠、一张不少", () => {
+  const base = [it("a", 0, 0, 4, 3), it("b", 4, 0, 8, 6), it("c", 0, 3, 4, 3), it("d", 4, 6, 8, 3)];
+  const out = moveItem(base, "a", 6, 2);
+  assertValid(out);
+  assert.equal(pos(out, "a"), "6,2 4x3");
+  assert.deepEqual(out.map((i) => i.id).sort(), ["a", "b", "c", "d"]);
+});
+
+test("拖动：只拖一点点，位置回到原样；落回原处什么都不变", () => {
+  const base = [it("a", 0, 0, 12, 3), it("b", 0, 3, 12, 3)];
+  assert.deepEqual(moveItem(base, "a", 0, 0), base);
+  assert.deepEqual(moveItemSnap(base, "a", 0, 0), base);
+});
+
+test("拖动落点：指针格子会压住别的卡、而旁边一格正好有放得下的空位时，落进那个空位；否则落点不偏", () => {
+  const base = [it("a", 0, 0, 4, 3), it("b", 4, 0, 4, 3), it("c", 0, 3, 4, 3)];
+  // a 拖到 (7,0)：压住 b 的右半边；往右一格 (8,0) 是空位
+  const snap = moveItemSnap(base, "a", 7, 0);
+  assert.equal(pos(snap, "a"), "8,0 4x3");
+  assert.equal(displacedCount(base, snap, "a"), 0);
+  // 没有这样的空位时，不偏：压住 b，落点就是 (5,0)
+  const tight = [it("a", 0, 0, 4, 3), it("b", 4, 0, 4, 3), it("c", 8, 0, 4, 3)];
+  const out = moveItemSnap(tight, "a", 5, 0);
+  assert.equal(pos(out, "a"), "5,0 4x3");
+  assertValid(out);
+});
+
+test("调大小：夹在范围里，不超出右边界；长高把下面的卡往下推，缩回去不会自动补位", () => {
   const base = [it("n1", 8, 0, 2, 2), it("b", 0, 2, 12, 3)];
   assert.equal(pos(resizeItem(base, "n1", 9, 9, limitsOf), "n1"), "8,0 4x4", "n 类卡最大 4×4，右边也只剩 4 列");
   assert.equal(pos(resizeItem(base, "n1", 0, 0, limitsOf), "n1"), "8,0 2x2", "最小 2×2");
@@ -105,10 +133,11 @@ test("调大小：夹在范围里，不超出右边界；长高把下面的卡�
   assertValid(grown);
   assert.equal(pos(grown, "b"), "0,4 12x3");
   const back = resizeItem(grown, "n1", 2, 2, limitsOf);
-  assert.equal(pos(back, "b"), "0,2 12x3", "缩回去，下面的卡补上来");
+  assert.equal(pos(back, "b"), "0,4 12x3", "缩回去，b 留在原处，上面留了空位");
+  assert.equal(pos(compact(back), "b"), "0,2 12x3", "整理之后补上来");
 });
 
-test("调大小：往右撑到邻居，邻居向右让一让（右边没空位才被推到下面），不会跑到上面去", () => {
+test("调大小：往右撑到邻居，邻居向右让一让（右边没空位就让到别处），谁也不重叠", () => {
   const base = [it("a", 0, 0, 4, 3), it("b", 4, 0, 4, 3), it("c", 0, 3, 4, 3)];
   const out = resizeItem(base, "a", 6, 3, limitsOf);
   assertValid(out);
@@ -117,27 +146,16 @@ test("调大小：往右撑到邻居，邻居向右让一让（右边没空位�
   assert.equal(pos(out, "c"), "0,3 4x3");
   const tight = resizeItem([it("a", 0, 0, 4, 3), it("b", 4, 0, 8, 3), it("c", 0, 3, 4, 3)], "a", 6, 3, limitsOf);
   assertValid(tight);
-  assert.equal(pos(tight, "b"), "4,3 8x3", "右边放不下，b 被推到下面");
+  assert.equal(pos(tight, "a"), "0,0 6x3");
 });
 
-test("调大小：下面一整列卡跟着往下挪，缩回去再补上来", () => {
+test("调大小：下面的卡被挡住时让开，一张不少、谁也不重叠", () => {
   const base = [it("a", 0, 0, 12, 3), it("b", 0, 3, 12, 3), it("c", 0, 6, 12, 3), it("d", 0, 9, 6, 3), it("e", 6, 9, 6, 3)];
   const out = resizeItem(base, "a", 12, 5, limitsOf);
   assertValid(out);
-  assert.equal(pos(out, "b"), "0,5 12x3");
-  assert.equal(pos(out, "c"), "0,8 12x3");
-  assert.equal(pos(out, "d"), "0,11 6x3");
-  assert.equal(pos(out, "e"), "6,11 6x3");
-  assert.deepEqual(resizeItem(out, "a", 12, 3, limitsOf), base);
-});
-
-test("调大小：长高碰到下面整行的大卡，大卡和它下面的卡一起往下挪，不会跳到页面最底下", () => {
-  const base = [it("n1", 0, 0, 3, 3), it("n2", 3, 0, 3, 3), it("big", 0, 3, 12, 4), it("x", 0, 7, 8, 4), it("y", 8, 7, 4, 4)];
-  const out = resizeItem(base, "n1", 4, 4, limitsOf);
-  assertValid(out);
-  assert.equal(pos(out, "big"), "0,4 12x4");
-  assert.equal(pos(out, "x"), "0,8 8x4");
-  assert.equal(pos(out, "n2"), "4,0 3x3", "右边有空位，邻居向右让一让");
+  assert.equal(pos(out, "a"), "0,0 12x5");
+  assert.ok(out.find((i) => i.id === "b")!.y >= 5);
+  assert.deepEqual(out.map((i) => i.id).sort(), ["a", "b", "c", "d", "e"]);
 });
 
 test("sizeRange：右边界限制最大宽度", () => {
@@ -150,20 +168,22 @@ test("键盘：方向键移动一格，Shift + 方向键调大小", () => {
   assert.equal(pos(nudgeItem(base, "a", 0, 0), "a"), "0,0 4x3");
   assert.equal(pos(nudgeItem(base, "b", 1, 0), "b"), "5,0 4x3");
   const left = nudgeItem(base, "b", -1, 0);
-  assert.equal(pos(left, "b"), "3,0 4x3", "往左一格压到 a，a 被挤到下面");
-  assert.equal(pos(left, "a"), "0,3 4x3");
+  assertValid(left);
+  assert.equal(pos(left, "b"), "3,0 4x3", "往左一格压到 a，a 让开");
   const grown = growItem(base, "a", 1, 1, limitsOf);
+  assertValid(grown);
   assert.equal(pos(grown, "a"), "0,0 5x4");
   assert.equal(pos(grown, "b"), "5,0 4x3", "撑到邻居，邻居向右让一让");
 });
 
-test("找空位：最后一行右边有空位就放那里，否则另起一行", () => {
+test("找空位：从最上面开始先填空位，没有空位就排在所有卡的下面", () => {
   assert.deepEqual(findSpot([it("a", 0, 0, 12, 3), it("b", 0, 3, 8, 3)], 4, 3), { x: 8, y: 3 });
   assert.deepEqual(findSpot([it("a", 0, 0, 12, 3), it("b", 0, 3, 8, 3)], 6, 3), { x: 0, y: 6 });
   assert.deepEqual(findSpot([], 4, 3), { x: 0, y: 0 });
+  assert.deepEqual(findSpot([it("a", 0, 0, 4, 3), it("b", 8, 0, 4, 3), it("c", 0, 3, 12, 3)], 4, 3), { x: 4, y: 0 }, "上面有空位就先填上面的");
 });
 
-test("添加和移除：添加后不重叠；移除后下面的卡补上来；已有的不重复加", () => {
+test("添加和移除：添加后不重叠；移除后空位保持空着；已有的不重复加", () => {
   let l = [it("a", 0, 0, 12, 3), it("b", 0, 3, 8, 3)];
   l = addItem(l, it("c", 0, 0, 4, 3));
   assertValid(l);
@@ -171,10 +191,11 @@ test("添加和移除：添加后不重叠；移除后下面的卡补上来；�
   assert.equal(addItem(l, it("c", 0, 0, 4, 3)), l);
   l = removeItem(l, "a");
   assertValid(l);
-  assert.equal(pos(l, "b"), "0,0 8x3");
+  assert.equal(pos(l, "b"), "0,3 8x3", "移除后别的卡不动，上面留空位");
+  assert.equal(pos(compact(l), "b"), "0,0 8x3", "整理之后补上来");
 });
 
-test("修复坏数据：去掉未知和重复、夹范围、拉回边界、推开重叠、上浮", () => {
+test("修复坏数据：去掉未知和重复、夹范围、拉回边界、推开重叠（不上浮）", () => {
   const raw = [
     { id: "a", x: 0, y: 0, w: 6, h: 3 },
     { id: "a", x: 6, y: 0, w: 6, h: 3 },
@@ -279,19 +300,6 @@ test("拖动结果只取决于起点布局和当前位置，和中间走过的�
   }
 });
 
-test("拖动落点吸附到干扰最小的格子；挪动别的卡的数量不会比直接落在指针格子上更多", () => {
-  const base = [it("a", 0, 0, 4, 3), it("b", 4, 0, 4, 3), it("c", 8, 0, 4, 3), it("d", 0, 3, 4, 3), it("e", 4, 3, 4, 3), it("f", 8, 3, 4, 3)];
-  for (let x = 0; x <= 8; x++) for (let y = 0; y <= 6; y++) {
-    const direct = moveItem(base, "a", x, y);
-    const snapped = bestMove(base, "a", x, y);
-    assertValid(snapped, `${x},${y}`);
-    assert.ok(displacedCount(base, snapped, "a") <= displacedCount(base, direct, "a"), `${x},${y}`);
-  }
-  // 偏了一格的拖动：落在 b 的右半边，吸附成和 b 互换，而不是把 b、c 都推走
-  const snapped = bestMove(base, "a", 5, 0);
-  assert.ok(displacedCount(base, snapped, "a") <= 1);
-});
-
 test("displacedCount：不算被拖的那张，位置或大小变了才算", () => {
   const base = [it("a", 0, 0, 4, 3), it("b", 4, 0, 4, 3)];
   assert.equal(displacedCount(base, base, "a"), 0);
@@ -299,52 +307,58 @@ test("displacedCount：不算被拖的那张，位置或大小变了才算", () 
   assert.equal(displacedCount(base, [it("a", 8, 0, 4, 3), it("b", 4, 0, 6, 3)], "a"), 1);
 });
 
-test("拖入新卡：放到指定格子，别的卡让位；放在空位不影响别的卡；已有的不重复放", () => {
+test("拖入新卡：落在指定格子；放在空位不影响别的卡；压住的卡就近让开；已有的不重复放", () => {
   const base = [it("a", 0, 0, 6, 4), it("b", 6, 0, 6, 4), it("c", 0, 4, 12, 3)];
   const empty = placeItem(base, it("n1", 0, 0, 4, 3), 0, 7);
   assertValid(empty);
   assert.equal(pos(empty, "n1"), "0,7 4x3", "放在最下面的空位");
   assert.equal(displacedCount(base, empty, "n1"), 0);
+  assert.equal(pos(placeItem(base, it("n1", 0, 0, 4, 3), 0, 99), "n1"), "0,7 4x3", "放到很下面：排在所有卡的下面");
   const mid = placeItem(base, it("n1", 0, 0, 4, 3), 4, 0);
   assertValid(mid);
+  assert.equal(pos(mid, "n1"), "4,0 4x3", "落点就是指定的格子");
   assert.ok(base.every((b) => mid.some((m) => m.id === b.id && m.w === b.w && m.h === b.h)), "老卡一张不少、大小不变");
-  assert.ok(mid.find((m) => m.id === "n1"), "新卡在布局里");
   assert.equal(placeItem(base, it("a", 0, 0, 2, 2), 3, 3), base, "已经在的原样返回");
   const clamped = placeItem(base, it("n2", 0, 0, 5, 3), 11, -4);
   assertValid(clamped);
   assert.equal(clamped.find((m) => m.id === "n2")!.x, 7, "右边夹进栅格");
 });
 
-test("拖入新卡：落点吸附到干扰最小的格子，挪动别的卡不会比直接落在指针格子上更多", () => {
-  const rand = rng(77);
-  const pick = (n: number) => Math.floor(rand() * n);
-  for (let round = 0; round < 40; round++) {
-    const entries = Array.from({ length: 3 + pick(8) }, (_, i) => ({ id: `w${i}`, w: 2 + pick(8), h: 2 + pick(4) }));
-    const base = repairItems(flowItems(entries), limitsOf, () => true);
-    const item = it("new", 0, 0, 2 + pick(8), 2 + pick(4));
-    const x = pick(12);
-    const y = pick(base.length ? 20 : 1);
-    const direct = placeItem(base, item, x, y);
-    const best = bestPlace(base, item, x, y);
-    assertValid(best, `round ${round}`);
-    assert.ok(displacedCount(base, best, "new") <= displacedCount(base, direct, "new"));
-  }
+test("拖入新卡：旁边一格有放得下的空位就落进去，否则落点不偏", () => {
+  const base = [it("a", 0, 0, 4, 3), it("b", 4, 0, 4, 3)];
+  const snap = placeItemSnap(base, it("n", 0, 0, 4, 3), 7, 0);
+  assert.equal(pos(snap, "n"), "8,0 4x3");
+  assert.equal(displacedCount(base, snap, "n"), 0);
 });
 
-test("随机拖入 2000 次：每一步之后都不重叠、不越界、没有洞，老卡一张不少", () => {
+test("随机拖入和拖动 2000 次：每一步之后都不重叠、不越界，老卡一张不少、大小不变；整理之后没有洞", () => {
   const rand = rng(424242);
   const pick = (n: number) => Math.floor(rand() * n);
   for (let round = 0; round < 8; round++) {
     const entries = Array.from({ length: 3 + pick(8) }, (_, i) => ({ id: `w${i}`, w: 2 + pick(8), h: 2 + pick(4) }));
     let l = repairItems(flowItems(entries), limitsOf, () => true);
     for (let step = 0; step < 250; step++) {
-      const id = `x${round}-${step}`;
       const before = l.map((i) => `${i.id}:${i.w}x${i.h}`);
-      const added = it(id, 0, 0, 2 + pick(8), 2 + pick(4));
-      l = bestPlace(l, added, pick(14) - 1, pick(30) - 2);
+      if (pick(2)) {
+        const id = `x${round}-${step}`;
+        l = placeItemSnap(l, it(id, 0, 0, 2 + pick(8), 2 + pick(4)), pick(14) - 1, pick(30) - 2);
+      } else if (l.length) {
+        const target = l[pick(l.length)];
+        l = moveItemSnap(l, target.id, pick(14) - 1, pick(30) - 2);
+      }
       assertValid(l, `r${round} s${step}`);
       assert.ok(before.every((b) => l.some((i) => `${i.id}:${i.w}x${i.h}` === b)), "老卡不丢、大小不变");
       if (l.length > 14) l = removeItem(l, l[pick(l.length)].id);
     }
+    assertTight(compact(l), `整理 ${round}`);
+  }
+});
+
+test("落点精确：除了夹进栅格和排到最后一行，卡片总是落在指针所在的格子（默认版面里任何格子）", () => {
+  const base = [it("a", 0, 0, 8, 6), it("b", 8, 0, 4, 6), it("c", 0, 6, 3, 3), it("d", 3, 6, 3, 3), it("e", 6, 6, 3, 3), it("f", 9, 6, 3, 3), it("g", 0, 9, 12, 5)];
+  const bottom = (id: string) => Math.max(...base.filter((i) => i.id !== id).map((i) => i.y + i.h));
+  for (const c of base) for (let y = 0; y < 18; y++) for (let x = 0; x <= COLS - c.w; x++) {
+    const me = moveItem(base, c.id, x, y).find((i) => i.id === c.id)!;
+    assert.equal(`${me.x},${me.y}`, `${x},${Math.min(y, bottom(c.id))}`, `${c.id} → ${x},${y}`);
   }
 });
