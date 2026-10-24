@@ -2,7 +2,7 @@
 
 **English** | [中文](#中文说明)
 
-Note Pulse is an [Obsidian](https://obsidian.md) plugin that opens a dashboard of your vault in one view: today's writing and streak, note and word count trends, a writing heatmap, task completion, and tag, folder and link stats.
+Note Pulse is an [Obsidian](https://obsidian.md) plugin that opens a customizable dashboard of your vault: writing streak and heatmap, note and word trends, tasks, vault check-up, and duplicate cleanup.
 
 The UI is in English and Chinese and follows Obsidian's language (you can pick one in settings). It follows your light or dark theme, has no external dependencies (all charts are plain SVG), and works on desktop and mobile.
 
@@ -23,6 +23,7 @@ The UI is in English and Chinese and follows Obsidian's language (you can pick o
 
 | Panel | What it shows |
 | --- | --- |
+| Customizable workbench (2.0–2.1) | 12-column grid you arrange yourself: free placement (cards stay where you drop them; empty cells stay empty), hover-pause nudge when overlapping, Pack / 整理 to tidy upward with undo, resize, add/remove cards, keyboard, and mobile view-only stacking |
 | Headline | One sentence at the top: words written this week compared with the same days last week, your streak, today's goal and tasks due today |
 | Today's writing | Progress ring for today's words vs. your daily goal, current and longest streak, this week as dots or bars (switch on the card), weekly goal progress, and the notes you touched today |
 | Up next | Overdue tasks listed separately, then tasks due in the next 7 days; click to jump to the line. Understands `📅 YYYY-MM-DD`, `⏳` and `[due:: ]`; `- [-]` counts as cancelled |
@@ -149,7 +150,7 @@ Advanced options (what counts as a passage, which copy to keep, link style, prop
 
 - **Oversized notes and clipping folders.** A single auto-collected file with 200,000 characters can outweigh a year of writing. Note Pulse excludes notes over the threshold from writing stats by default, lets you mark whole folders as "collection" folders, and suggests it in a banner when it finds a folder where most notes are oversized.
 - **The word trend is based on current word counts.** It adds each note's current word count on its creation date. It is not a historical snapshot, so editing an old note changes the past. The chart says so, and "new notes per day" is the default view for that reason.
-- **Arrange your own dashboard.** Use the pencil at the top right: drag a card to move it (the others make room and a dashed box shows where it will land; Esc cancels), drag its bottom-right corner to change both width and height on a 12-column grid, remove it with ×, add cards back or restore the default from the edit bar, and undo with Cmd/Ctrl+Z. With a card focused, arrow keys move it, Shift+arrows resize it and Delete removes it. Cards fill the window width at any screen size and what they show follows their real size: a taller list shows more rows and folds the rest into "N more", a wider chart shows more weeks. The layout syncs with the vault. On phones and narrow panes (under 760 px) the cards stack in one column in the same order, and the dashboard is view-only. There is also a Calendar card: a month view with a daily agenda you can write in (items sync with the vault). The Add card panel also offers merged cards that put one kind of data into one tabbed card (Writing trends, Overview, Vault checkup, Vault structure, Writing habits, Tasks) and new cards (Recently edited, Goals, This month vs last, Note length); charts can be switched between bar, line, curve and area, donut, list or tag cloud where it makes sense, and the choice syncs with the vault. Besides the original cards there are six more (Most linked, Writing rhythm, Note activity, Notes with most tasks, Link density, Folder mix), and the vault checkup is now six cards of its own (Broken links, Orphans, Same name, Empty and oversized, Unused attachments, Duplicates), each resizable.
+- **Arrange your own dashboard.** Use the pencil at the top right: drag a card to place it exactly under the pointer (no auto-pack upward; empty cells stay empty when you move, remove or shrink a card). Overlapping cards nudge aside only after a short hover pause (swap, nearest empty cell, or push down); dragging past does not reshuffle the board. Drag the bottom-right corner to change both width and height on a 12-column grid, remove with ×, add cards back or restore the default from the edit bar, use **整理** / Pack to pack cards upward with undo, and undo with Cmd/Ctrl+Z. New cards fill the topmost fitting empty slot. With a card focused, arrow keys move it, Shift+arrows resize it and Delete removes it. Cards fill the window width at any screen size and what they show follows their real size: a taller list shows more rows and folds the rest into "N more", a wider chart shows more weeks. The layout syncs with the vault. On phones and narrow panes (under 760 px) the cards stack in one column in the same order, and the dashboard is view-only. There is also a Calendar card: a month view with a daily agenda you can write in (items sync with the vault). The Add card panel also offers merged cards that put one kind of data into one tabbed card (Writing trends, Overview, Vault checkup, Vault structure, Writing habits, Tasks) and new cards (Recently edited, Goals, This month vs last, Note length); charts can be switched between bar, line, curve and area, donut, list or tag cloud where it makes sense, and the choice syncs with the vault. Besides the original cards there are six more (Most linked, Writing rhythm, Note activity, Notes with most tasks, Link density, Folder mix), and the vault checkup is now six cards of its own (Broken links, Orphans, Same name, Empty and oversized, Unused attachments, Duplicates), each resizable.
 - **Vault checkup.** Broken links that can only mean one note (it was moved, or the name differs only in spaces or case) can be fixed in one click; you see which notes change first, and you can undo. Other broken links can create the missing note. Orphans can be skipped per folder (Settings → Scope), and clipping folders are skipped automatically. The checkup also lists notes that share a name (a bare [[link]] may point to the wrong one) and attachments no note uses.
 - **Creation dates can be wrong after sync.** If many notes share one creation day, a banner points you to the created-date field setting.
 - **Streaks** count a day when it reaches the daily goal, or you wrote a daily note with at least 10 words. An empty template does not count. The current streak is not broken by today until the day is over.
@@ -205,6 +206,32 @@ Settings and the daily word log live in `data.json`; the per-note word-count cac
 To release, run `npm version <patch|minor|major>` (updates `manifest.json` and `versions.json`), run `npm run build`, then create a GitHub release whose tag matches the version (no `v` prefix) and attach `main.js`, `manifest.json` and `styles.css`.
 
 ## Changelog
+
+### 2.1.0
+
+- Free placement for cards: a card lands exactly under the pointer; no auto-pack upward; empty cells stay empty when you move, remove or shrink a card.
+- Overlapping cards nudge aside only after a short hover pause (swap, nearest empty cell, or push down); dragging past does not reshuffle the board.
+- Edit bar **整理** / Pack packs cards upward with undo; new cards fill the topmost fitting empty slot.
+- Confetti celebration banner moves to the top center of the pane.
+
+### 2.0.1
+
+- First-run onboarding for the 2.0 dashboard: a step tour (greetings, edit, drag, resize, chart styles, add card, done), once per vault; replay via command, settings or the edit bar.
+- No confetti until the tour is done or skipped; on mobile and narrow panes the tour only covers visible UI.
+
+### 2.0.0
+
+- 12-column editable grid: drag to move with live reflow, corner resize, undo, restore default, keyboard; cards fill the window width and content scales with card size; mobile is view-only stacking.
+- Add card panel with categories, previews and drag-to-place; new cards (Calendar, merged tabbed cards, Recently edited, Goals, This month vs last, Note length); vault checkup split into six cards.
+- Chart style switching (bar / line / curve / area, donut, list, tag cloud); headline greetings and reminders, goal confetti, fullscreen.
+
+### 1.5.1
+
+- Redesigned writing weekly / monthly report layout and preview; Writing reports card dual panels with a live overview.
+
+### 1.5.0
+
+- Weekly word goal; generate weekly / monthly Markdown reports with preview.
 
 ### 1.4.0
 
@@ -294,7 +321,7 @@ First release.
 
 ## 中文说明
 
-Note Pulse（笔记脉搏）是一个 Obsidian 插件，在一个页面里集中展示你仓库的各项数据：今日写作与连续打卡、笔记与字数趋势、写作热力图、任务完成情况，以及标签、文件夹和链接统计。
+Note Pulse（笔记脉搏）是一个 Obsidian 插件，提供可自定义布局的看板：写作连续打卡与热力图、笔记与字数趋势、任务、库体检和重复内容清理。
 
 界面有中文和英文，默认跟随 Obsidian 的界面语言，也可以在设置里指定；自动适配明暗主题，没有任何外部依赖（图表均为原生 SVG），桌面端和移动端都能用。
 
@@ -302,6 +329,7 @@ Note Pulse（笔记脉搏）是一个 Obsidian 插件，在一个页面里集中
 
 | 区块 | 内容 |
 | --- | --- |
+| 可自定义工作台（2.0–2.1） | 12 列网格自己排：自由摆放（卡片放哪就在哪，空位保持空着）、重叠时短暂停顿才让开、编辑栏「整理」一键上浮并可撤销、调大小、增删卡片、键盘操作；手机只看不改 |
 | 页首一句话 | 本周写了多少、和上周同期比、连续写作天数、今天是否达标、今天到期的任务 |
 | 今日写作 | 今日字数与每日目标的进度环、当前与最长连续打卡、本周七天（圆点或柱状，卡片上切换）、每周目标进度、今天动过的笔记 |
 | 接下来 | 已逾期的任务单独列出，下面是 7 天内到期的；点击直接跳到任务所在行。识别 `📅 YYYY-MM-DD`、`⏳`、`[due:: ]`，`- [-]` 视为已取消 |
@@ -407,7 +435,7 @@ views:
 
 - **超大笔记与采集文件夹。** 一个 20 万字的自动采集文件，可能比你一年写的字还多。Note Pulse 默认把超过阈值的笔记排除出写作统计，支持把整个文件夹标记为“采集文件夹”；发现某个文件夹里大部分笔记都超大时，会在看板顶部提示，并给出一键按钮。
 - **字数趋势用的是“当前字数”。** 它把每篇笔记现在的字数记在创建日上，不是历史快照，修改旧笔记会改变过去的曲线。图上有说明，默认视图也改成了“每天新建笔记数”。
-- **自己排看板。** 点看板右上角的铅笔：拖动卡片换位置（别的卡片会让开，虚线框显示会落在哪里，按 Esc 取消），拖右下角同时调宽和高（12 列网格，按格子吸附），点 × 移除，编辑栏里可以加回移除的卡片、恢复默认布局，Cmd / Ctrl + Z 撤销。聚焦卡片后，方向键移动一格，Shift + 方向键调大小，Delete 移除。卡片按窗口宽度铺满，不管多宽的屏幕；内容跟着卡片的实际大小变：拉高的列表多显示几行、放不下的折成“还有 N 个”，拉宽的图表多显示几周。布局随库同步。手机和窄面板（不到 760px）里卡片按同样的顺序排成一列，只看不改。还有一张“日历”卡片：月历加每天的日程，可以自己记（随库同步）。“添加卡片”里还有把同一类数据合进一张带标签页的合并卡（写作趋势、数据概览、库体检、笔记结构、写作习惯、任务）和新卡片（最近编辑、目标进度、本月对比上月、笔记长度分布）；图表可以在柱状、折线、曲线、面积、环形图、列表、标签云之间换画法，选择随库同步。除了原来的卡片，还有最常被链接、写作节奏、笔记活跃度、任务最多的笔记、链接密度、文件夹构成六张；库体检拆成断链、孤立笔记、同名笔记、空笔记与超大笔记、未引用的附件、重复内容六张，各自可以调大小。
+- **自己排看板。** 点看板右上角的铅笔：拖动卡片放到指针所在的格子（不再自动上浮补位；移动、移除或缩小后留下的空位保持空着）。压住别的卡时，那些卡只在指针短暂停顿后才就近让开（互换、挪到最近空位，或往下推）；划过去不会整片重排。拖右下角同时调宽和高（12 列网格，按格子吸附），点 × 移除，编辑栏里可以加回移除的卡片、恢复默认布局，用「整理」把卡片往上补齐并可撤销，Cmd / Ctrl + Z 撤销。新加的卡片先填最上面第一个放得下的空位。聚焦卡片后，方向键移动一格，Shift + 方向键调大小，Delete 移除。卡片按窗口宽度铺满，不管多宽的屏幕；内容跟着卡片的实际大小变：拉高的列表多显示几行、放不下的折成“还有 N 个”，拉宽的图表多显示几周。布局随库同步。手机和窄面板（不到 760px）里卡片按同样的顺序排成一列，只看不改。还有一张“日历”卡片：月历加每天的日程，可以自己记（随库同步）。“添加卡片”里还有把同一类数据合进一张带标签页的合并卡（写作趋势、数据概览、库体检、笔记结构、写作习惯、任务）和新卡片（最近编辑、目标进度、本月对比上月、笔记长度分布）；图表可以在柱状、折线、曲线、面积、环形图、列表、标签云之间换画法，选择随库同步。除了原来的卡片，还有最常被链接、写作节奏、笔记活跃度、任务最多的笔记、链接密度、文件夹构成六张；库体检拆成断链、孤立笔记、同名笔记、空笔记与超大笔记、未引用的附件、重复内容六张，各自可以调大小。
 - **库体检。** 断链里能唯一确定该指向哪篇的（笔记被移动过，或名字只差空格、大小写），可以一键修复，修复前会说明改哪几篇，之后可以撤销；其余的可以直接新建笔记。孤立笔记可以按文件夹不检查（设置 → 范围），采集文件夹自动不检查。还会列出同名笔记（只写名字的 [[链接]] 可能指错）和没有被任何笔记引用的附件。
 - **同步后创建时间可能不准。** 如果很多笔记的创建日期是同一天，看板会提示你设置创建日期字段。
 - **打卡**：当天达到每日目标，或写了不少于 10 字的日记就算；空模板不算。今天还没结束时不会打断当前连续天数。
@@ -425,6 +453,32 @@ views:
 - 插件只在本地读取笔记，不联网，不收集任何数据。
 
 ### 更新日志
+
+**2.1.0**
+
+- 卡片自由摆放：落点就是指针所在的格子；不再自动上浮补位；移动、移除或缩小后留下的空位保持空着。
+- 压住别的卡时，那些卡只在指针短暂停顿后才就近让开（互换、挪到最近空位，或往下推）；划过去不会整片重排。
+- 编辑栏新增「整理」：一键把卡片往上补齐并可撤销；新加的卡片先填最上面第一个放得下的空位。
+- 撒花庆祝的祝贺条移到面板顶部居中。
+
+**2.0.1**
+
+- 2.0 看板首次打开的新手引导：分步讲解（问候与提醒、进入编辑、拖动、调大小、切换图样式、添加卡片、完成），每个库只出现一次；可通过命令、设置或编辑栏重看。
+- 引导完成或跳过前不撒花；手机和窄面板只讲看得到的部分。
+
+**2.0.0**
+
+- 12 列可编辑网格：拖动换位并实时让位、拖角调大小、撤销、恢复默认、键盘操作；卡片铺满窗口宽度，内容随卡片大小缩放；手机只看不改、按序堆叠。
+- 「添加卡片」按分类列出并带预览，可拖到想放的位置；新卡片（日历、合并标签卡、最近编辑、目标进度、本月对比上月、笔记长度分布）；库体检拆成 6 张卡。
+- 图表可换画法（柱状 / 折线 / 曲线 / 面积、环形图、列表、标签云）；页首问候与提醒、目标达成撒花、看板全屏。
+
+**1.5.1**
+
+- 重设计写作周报 / 月报布局与预览；「写作回顾」卡片双面板，带实时概览。
+
+**1.5.0**
+
+- 每周字数目标；可生成带预览的周报 / 月报 Markdown 笔记。
 
 **1.4.0**
 

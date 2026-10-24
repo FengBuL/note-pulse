@@ -3,7 +3,7 @@
   "name": "Note Pulse",
   "version": "2.1.1",
   "minAppVersion": "1.7.2",
-  "description": "A dashboard for your vault: writing streak and heatmap, note and word trends, tasks, tags and links, plus duplicate-content cleanup.",
+  "description": "Customizable vault dashboard: writing streak, heatmap and trends, tasks, vault check-up, and duplicate cleanup.",
   "author": "FengBuL",
   "authorUrl": "https://github.com/FengBuL",
   "isDesktopOnly": false
