@@ -84,3 +84,12 @@ export function significantPairs(a: Analysis, ignored: ReadonlySet<string>): Ove
     return !!g && !ignored.has(groupKey(g));
   }));
 }
+
+/** 清理这些笔记对能减少多少字符：每篇较新的笔记按它和别的笔记共同部分里最多的那个算，免得重复计数 */
+export function pairReclaimChars(pairs: OverlapPair[]): number {
+  const byNewer = new Map<string, number>();
+  for (const p of pairs) byNewer.set(p.newer, Math.max(byNewer.get(p.newer) ?? 0, p.sharedChars));
+  let sum = 0;
+  for (const v of byNewer.values()) sum += v;
+  return sum;
+}

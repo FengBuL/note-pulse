@@ -51,7 +51,7 @@ const spec = (id: WidgetId, minW: number, maxW: number, minH: number, maxH: numb
  * 宽高范围的依据是：在这个范围里内容能跟着有意义地变化，超出范围只会多出空白或被截断。
  */
 export const WIDGETS: WidgetInfo[] = [
-  spec("hero", 5, 12, 5, 8, 8, 6),
+  spec("hero", 5, 12, 6, 8, 8, 6),
   spec("tasks", 3, 12, 3, 12, 4, 6),
   spec("notes", 2, 6, 2, 4, 3, 3),
   spec("words", 2, 6, 2, 4, 3, 3),

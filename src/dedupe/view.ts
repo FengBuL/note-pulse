@@ -1,8 +1,8 @@
 import { ItemView, Platform, WorkspaceLeaf, setIcon } from "obsidian";
 import type { DedupeService as ClipDedupePlugin } from "./service";
 import type { DupGroup, OverlapPair } from "./core/group";
-import { groupItem } from "./core/plan";
-import { noteDay, overview, readablePreview } from "./core/summary";
+import { groupItem, pairsToItems } from "./core/plan";
+import { noteDay, overview, pairReclaimChars, readablePreview, significantPairs } from "./core/summary";
 import { StrKey, t } from "./i18n";
 import type { ScanProgress } from "./scanner";
 import { splitList } from "./settings";
@@ -26,6 +26,7 @@ export class ClipDedupeView extends ItemView {
   private allNotes = new Set<string>();
   private advOpen = new Set<string>();
   private globalAdvOpen = false;
+  private scatterOpen = false;
   private scopeMode: "all" | "folder" | null = null;
   private renderedVersion = -1;
   private blockText = new Map<string, string | null>();
@@ -281,33 +282,130 @@ export class ClipDedupeView extends ItemView {
     const p = this.plugin;
     const a = p.analysis;
     if (!a) return;
-    const ov = overview(a, p.ignoredSet());
+    const ignoredSet = p.ignoredSet();
+    const ov = overview(a, ignoredSet);
+    // 主角是“大面积重复的笔记”：一篇笔记至少 70% 的内容在另一篇里也有。零散的句子、段落重复放到下面折起来的一栏
+    const pairs = significantPairs(a, ignoredSet);
 
     const sum = parent.createDiv({ cls: "cd-card cd-summary-card" });
     const txt = sum.createDiv({ cls: "cd-summary-text" });
-    txt.createEl("h2", { cls: "cd-summary-lead", text: t("resultLead", ov.notes, ov.groups.length) });
-    txt.createDiv({ cls: "cd-summary-save", text: t("resultSave", fmtNum(ov.words)) });
-    txt.createDiv({ cls: "cd-summary-how", text: t("resultHow") });
-    const all = sum.createEl("button", { cls: "cd-btn is-primary is-big cd-fix-all", attr: { type: "button" } });
-    setIcon(all.createSpan({ cls: "cd-btn-icon", attr: { "aria-hidden": "true" } }), "sparkles");
-    all.createSpan({ cls: "cd-btn-label", text: t("fixAll") });
-    all.addEventListener("click", () => p.startCleanup(ov.groups.map((g) => groupItem(g, this.keepChoice.get(g.id) ?? 0)), "mark"));
+    if (pairs.length > 0) {
+      txt.createEl("h2", { cls: "cd-summary-lead", text: t("pairsLead", pairs.length) });
+      txt.createDiv({ cls: "cd-summary-save", text: t("resultSave", fmtNum(pairReclaimChars(pairs))) });
+      txt.createDiv({ cls: "cd-summary-how", text: t("pairsHow") });
+      const all = sum.createEl("button", { cls: "cd-btn is-primary is-big cd-fix-all", attr: { type: "button" } });
+      setIcon(all.createSpan({ cls: "cd-btn-icon", attr: { "aria-hidden": "true" } }), "sparkles");
+      all.createSpan({ cls: "cd-btn-label", text: t("fixAll") });
+      all.addEventListener("click", () => p.startCleanup(pairsToItems(a, pairs), "mark"));
+    } else {
+      txt.createEl("h2", { cls: "cd-summary-lead", text: t("pairsNoneLead") });
+      txt.createDiv({ cls: "cd-summary-how", text: t("pairsNoneText") });
+    }
 
-    const head = parent.createDiv({ cls: "cd-list-head" });
-    head.createEl("h3", { cls: "cd-list-title", text: t("listTitle") });
-    head.createSpan({ cls: "cd-list-sub", text: this.sort === "reclaim" ? t("listSort") : "" });
+    if (pairs.length > 0) {
+      const head = parent.createDiv({ cls: "cd-list-head" });
+      head.createEl("h3", { cls: "cd-list-title", text: t("pairsListTitle") });
+      head.createSpan({ cls: "cd-list-sub", text: t("pairsListSub") });
+      const list = parent.createDiv({ cls: "cd-list" });
+      for (const pr of pairs.slice(0, this.pairLimit)) this.renderPairCard(list, pr);
+      if (pairs.length > this.pairLimit) {
+        const more = parent.createEl("button", { cls: "cd-btn cd-more", text: t("showMore", Math.min(PAGE, pairs.length - this.pairLimit)), attr: { type: "button" } });
+        more.addEventListener("click", () => {
+          this.pairLimit += PAGE;
+          this.renderBody();
+        });
+      }
+    }
 
+    this.renderScattered(parent, ov);
+    this.renderGlobalAdvanced(parent, ov.ignored);
+  }
+
+  /** 零散重复的段落：折起来，打开才画（可能有上千段），里面还是原来逐段处理的样子 */
+  private renderScattered(parent: HTMLElement, ov: ReturnType<typeof overview>) {
+    if (ov.groups.length === 0) return;
+    const det = parent.createEl("details", { cls: "cd-card cd-scatter" });
+    if (this.scatterOpen) det.setAttr("open", "");
+    const sum = det.createEl("summary", { cls: "cd-adv-summary" });
+    sum.createSpan({ cls: "cd-scatter-title", text: t("scatterTitle", ov.groups.length) });
+    det.createDiv({ cls: "cd-adv-text cd-scatter-hint", text: t("scatterHint") });
+    det.addEventListener("toggle", () => {
+      if (det.open === this.scatterOpen) return;
+      this.scatterOpen = det.open;
+      if (det.open) this.renderBody();
+    });
+    if (!this.scatterOpen) return;
+
+    const sortRow = det.createDiv({ cls: "cd-field" });
+    const sortId = `cd-sort-${++seq}`;
+    sortRow.createEl("label", { cls: "cd-adv-title", text: t("advSort"), attr: { for: sortId } });
+    const sel = sortRow.createEl("select", { cls: "dropdown cd-select" });
+    sel.id = sortId;
+    for (const [v, label] of [["reclaim", "sortReclaim"], ["count", "sortCount"], ["newest", "sortNewest"]] as [Sort, StrKey][]) {
+      const o = sel.createEl("option", { text: t(label), value: v });
+      if (v === this.sort) o.selected = true;
+    }
+    sel.addEventListener("change", () => {
+      this.sort = sel.value as Sort;
+      this.limit = PAGE;
+      this.renderBody();
+    });
     const groups = this.sorted(ov.groups);
-    const list = parent.createDiv({ cls: "cd-list" });
+    const list = det.createDiv({ cls: "cd-list" });
     for (const g of groups.slice(0, this.limit)) this.renderItem(list, g);
     if (groups.length > this.limit) {
-      const more = parent.createEl("button", { cls: "cd-btn cd-more", text: t("showMore", Math.min(PAGE, groups.length - this.limit)), attr: { type: "button" } });
+      const more = det.createEl("button", { cls: "cd-btn cd-more", text: t("showMore", Math.min(PAGE, groups.length - this.limit)), attr: { type: "button" } });
       more.addEventListener("click", () => {
         this.limit += PAGE;
         this.renderBody();
       });
     }
-    this.renderGlobalAdvanced(parent, ov.ignored);
+  }
+
+  /** 一对大面积重复的笔记：重复了多少、共同的一段摘录、较早和较晚的两篇，以及一个主要动作（保留较早的，清理这一篇） */
+  private renderPairCard(parent: HTMLElement, pr: OverlapPair) {
+    const p = this.plugin;
+    const a = p.analysis;
+    if (!a) return;
+    const pct = Math.round(Math.max(pr.newerRatio, pr.olderRatio) * 100);
+    const card = parent.createDiv({ cls: "cd-card cd-item cd-pair-card" });
+    const head = card.createDiv({ cls: "cd-item-head" });
+    head.createDiv({ cls: "cd-item-title", text: t("pairLead", baseName(pr.newer), baseName(pr.older), pct) });
+    head.createSpan({ cls: "cd-item-save", text: t("pairShared", pr.sharedBlocks, fmtNum(Math.round(pr.sharedChars))) });
+
+    // 共同部分里最长的一段，让人一眼认出“是同一篇”
+    const biggest = pr.groupIds.map((id) => a.groups.find((g) => g.id === id)).filter((g): g is DupGroup => !!g).sort((x, y) => (y.occs[0]?.block.w ?? 0) - (x.occs[0]?.block.w ?? 0))[0];
+    if (biggest) {
+      const quote = card.createDiv({ cls: "cd-quote" });
+      const textEl = quote.createDiv({ cls: "cd-quote-text", text: t("loadingText") });
+      void (async () => {
+        const raw = await this.loadText(biggest, 0);
+        if (!card.isConnected) return;
+        textEl.setText(raw === null ? t("textUnavailable") : readablePreview(raw, 400));
+      })();
+    }
+
+    const ul = card.createDiv({ cls: "cd-where" }).createEl("ul", { cls: "cd-notes" });
+    const row = (path: string, keep: boolean) => {
+      const f = a.files.find((x) => x.path === path);
+      const li = ul.createEl("li", { cls: "cd-note" + (keep ? " is-keep" : "") });
+      li.createSpan({ cls: "cd-note-tag", text: keep ? t("tagKeep") : t("tagDup") });
+      if (f) li.createSpan({ cls: "cd-note-date", text: noteDay(f) });
+      const link = li.createEl("button", { cls: "cd-note-link", text: baseName(path), attr: { type: "button", title: path } });
+      link.addEventListener("click", (e) => void p.openNote(path, undefined, e));
+    };
+    row(pr.older, true);
+    row(pr.newer, false);
+
+    const acts = card.createDiv({ cls: "cd-item-actions" });
+    const main = acts.createEl("button", { cls: "cd-btn is-primary", attr: { type: "button" } });
+    setIcon(main.createSpan({ cls: "cd-btn-icon", attr: { "aria-hidden": "true" } }), "check");
+    main.createSpan({ cls: "cd-btn-label", text: t("pairKeepOlder") });
+    main.addEventListener("click", () => p.startCleanup(p.pairItems(pr.groupIds, pr.older, pr.newer), "mark"));
+    const both = acts.createEl("button", { cls: "cd-btn", text: t("pairOpenBoth"), attr: { type: "button" } });
+    both.addEventListener("click", () => void p.openBoth(pr.older, pr.newer));
+    const ign = acts.createEl("button", { cls: "cd-btn is-quiet", text: t("ignore"), attr: { type: "button" } });
+    ign.addEventListener("click", () => void p.ignorePair(pr));
   }
 
   private async loadText(g: DupGroup, idx: number): Promise<string | null> {
@@ -433,8 +531,7 @@ export class ClipDedupeView extends ItemView {
   /* ---------- page-level advanced options ---------- */
 
   private renderGlobalAdvanced(parent: HTMLElement, ignored: number) {
-    const a = this.plugin.analysis;
-    if (!a) return;
+    if (ignored <= 0) return;
     const det = parent.createEl("details", { cls: "cd-card cd-global-adv" });
     if (this.globalAdvOpen) det.setAttr("open", "");
     det.addEventListener("toggle", () => (this.globalAdvOpen = det.open));
@@ -442,54 +539,9 @@ export class ClipDedupeView extends ItemView {
     setIcon(sum.createSpan({ cls: "cd-btn-icon", attr: { "aria-hidden": "true" } }), "sliders-horizontal");
     sum.createSpan({ text: t("globalAdv") });
     const body = det.createDiv({ cls: "cd-adv-body" });
-
-    const sortRow = body.createDiv({ cls: "cd-field" });
-    const sortId = `cd-sort-${++seq}`;
-    sortRow.createEl("label", { cls: "cd-adv-title", text: t("advSort"), attr: { for: sortId } });
-    const sel = sortRow.createEl("select", { cls: "dropdown cd-select" });
-    sel.id = sortId;
-    for (const [v, label] of [["reclaim", "sortReclaim"], ["count", "sortCount"], ["newest", "sortNewest"]] as [Sort, StrKey][]) {
-      const o = sel.createEl("option", { text: t(label), value: v });
-      if (v === this.sort) o.selected = true;
-    }
-    sel.addEventListener("change", () => {
-      this.sort = sel.value as Sort;
-      this.limit = PAGE;
-      this.renderBody();
-    });
-
-    if (ignored > 0) {
-      const r = body.createDiv({ cls: "cd-field" });
-      r.createSpan({ cls: "cd-adv-title", text: t("advIgnored", ignored) });
-      const b = r.createEl("button", { cls: "cd-btn is-compact", text: t("advRestore"), attr: { type: "button" } });
-      b.addEventListener("click", () => void this.plugin.restoreIgnored());
-    }
-
-    body.createDiv({ cls: "cd-adv-title", text: t("advPairs") });
-    body.createDiv({ cls: "cd-adv-text", text: t("advPairsText") });
-    if (a.pairs.length === 0) body.createDiv({ cls: "cd-adv-text", text: t("pairsNone") });
-    const list = body.createDiv({ cls: "cd-pairs" });
-    for (const pr of a.pairs.slice(0, this.pairLimit)) this.renderPair(list, pr);
-    if (a.pairs.length > this.pairLimit) {
-      const more = body.createEl("button", { cls: "cd-btn cd-more", text: t("showMore", a.pairs.length - this.pairLimit), attr: { type: "button" } });
-      more.addEventListener("click", () => {
-        this.pairLimit += 10;
-        this.renderBody();
-      });
-    }
-  }
-
-  private renderPair(parent: HTMLElement, p: OverlapPair) {
-    const row = parent.createDiv({ cls: "cd-pair" });
-    row.createDiv({ cls: "cd-pair-title", text: t("pairTitle", baseName(p.newer), Math.round(p.newerRatio * 100)) });
-    const w = row.createDiv({ cls: "cd-pair-with" });
-    w.createSpan({ text: t("pairWith") });
-    const link = w.createEl("button", { cls: "cd-note-link", text: baseName(p.older), attr: { type: "button", title: p.older } });
-    link.addEventListener("click", (e) => void this.plugin.openNote(p.older, undefined, e));
-    const acts = row.createDiv({ cls: "cd-pair-actions" });
-    const both = acts.createEl("button", { cls: "cd-btn is-compact", text: t("pairOpenBoth"), attr: { type: "button" } });
-    both.addEventListener("click", () => void this.plugin.openBoth(p.older, p.newer));
-    const clean = acts.createEl("button", { cls: "cd-btn is-compact", text: t("pairClean"), attr: { type: "button" } });
-    clean.addEventListener("click", () => this.plugin.startCleanup(this.plugin.pairItems(p.groupIds, p.older, p.newer)));
+    const r = body.createDiv({ cls: "cd-field" });
+    r.createSpan({ cls: "cd-adv-title", text: t("advIgnored", ignored) });
+    const b = r.createEl("button", { cls: "cd-btn is-compact", text: t("advRestore"), attr: { type: "button" } });
+    b.addEventListener("click", () => void this.plugin.restoreIgnored());
   }
 }

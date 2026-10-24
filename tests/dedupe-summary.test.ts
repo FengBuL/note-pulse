@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { analyze, FileRecord } from "../src/dedupe/core/group";
-import { groupKey, noteDay, overview, readablePreview, significantPairs } from "../src/dedupe/core/summary";
+import { groupKey, noteDay, overview, pairReclaimChars, readablePreview, significantPairs } from "../src/dedupe/core/summary";
+import { pairsToItems } from "../src/dedupe/core/plan";
 import { tokenize } from "../src/dedupe/core/tokenize";
 import { OPTS } from "./dedupe/fixtures";
 
@@ -73,4 +74,26 @@ test("看板上的重复内容：共同部分太短的整篇相同也不算（�
   const short = "x".repeat(81);
   const a = analyze([rec("s1.md", `${short}\n`, 1), rec("s2.md", `${short}\n`, 2)]);
   assert.equal(significantPairs(a, new Set()).length, 0);
+});
+
+test("一键处理大面积重复：只清理这些笔记对里的笔记，同一段落出现在几对里也只清理一次", () => {
+  const p3 = (s: string) => `${s} ${"padding words to make the block long enough for the threshold. ".repeat(4)}`;
+  const A = p3("Alpha paragraph."), B = p3("Beta paragraph."), C = p3("Gamma paragraph."), Z = p3("Passage that also sits in an unrelated note.");
+  const fs = [
+    rec("a.md", `${A}\n\n${B}\n\n${C}\n`, 1),
+    rec("b.md", `${A}\n\n${B}\n\n${C}\n`, 2),
+    rec("c.md", `${A}\n\n${B}\n\n${C}\n`, 3),
+    rec("x.md", `${A}\n\n${Z}\n\n${p3("Other one.")}\n\n${p3("Other two.")}\n\n${p3("Other three.")}\n`, 4),
+  ];
+  const a = analyze(fs);
+  const pairs = significantPairs(a, new Set());
+  assert.equal(pairs.length, 3, "a–b、a–c、b–c 三对");
+  const items = pairsToItems(a, pairs);
+  assert.equal(items.length, 3, "三个共同段落，各一项");
+  for (const it of items) {
+    assert.equal(it.keep.path, "a.md", "每段只保留最早的 a");
+    assert.deepEqual(it.remove.map((o) => o.path).sort(), ["b.md", "c.md"], "x.md 虽然也有 Alpha 段，但不在任何一对里，不动");
+  }
+  assert.ok(pairReclaimChars(pairs) > 0);
+  assert.equal(pairReclaimChars([]), 0);
 });

@@ -38,6 +38,8 @@ for (let i = 370; i >= 0; i--) {
 // 本周：一 1320、二 2050、三 380、四 1730、五 1700、六（今天）640
 const wk = [1320, 2050, 380, 1730, 1700, 640];
 wk.forEach((v, i) => (dayWords[dayKey(addDays(today, -5 + i))] = v));
+// ?spike=1：这一周里有两天写得特别多，用来检查柱状图在字数悬殊时的样子
+if (q.get("spike") === "1") [26000, 1200].forEach((v, i) => (dayWords[dayKey(addDays(today, -5 + i))] = v));
 dayCreated[dayKey(today)] = 2;
 
 // ?big=1：按真实库的数量级放大列表（孤立笔记、断链、标签、待办），用来测展开 / 收起

@@ -1471,9 +1471,15 @@ export class DashboardView extends ItemView {
     );
 
     const row = box.createDiv({ cls: "vp-week" });
-    // 柱子的高度按“目标的 3 倍”封顶：某天写了几万字，其它天的柱子就不会都压成一条线，虚线（每日目标）也始终在看得清的高度上
+    // 柱子的高度：和每天写的字数成正比，每根柱子上面写着具体字数。
+    // 最高的一天超过每日目标的 4 倍时，整体改成按开方显示（0 到 1 之间开方），这样某天写了几万字也不会把别的天压成一条线，虚线（每日目标）还在看得清的高度上
     const peak = Math.max(...days.map((d) => d.words), 1);
-    const max = goal > 0 ? Math.max(goal, Math.min(peak, goal * 3)) : peak;
+    const squash = goal > 0 && peak > goal * 4;
+    const max = goal > 0 ? Math.max(goal, peak) : peak;
+    const frac = (w: number) => {
+      const r = Math.min(1, w / max);
+      return squash ? Math.sqrt(r) : r;
+    };
     for (const d of days) {
       const c = row.createDiv({ cls: "vp-week-day" + (d.done ? " is-active" : "") + (d.isToday ? " is-today" : "") + (d.future ? " is-future" : "") });
       const w = count(fmtFull(d.words), "words");
@@ -1490,15 +1496,16 @@ export class DashboardView extends ItemView {
         if (d.done) setIcon(dot, "check");
         else if (d.pct !== null) dot.createSpan({ cls: "vp-week-pct", text: `${d.pct}%` });
       } else {
+        c.createDiv({ cls: "vp-week-val" + (d.done ? " is-done" : ""), text: d.future || d.words === 0 ? "" : fmtNum(d.words), attr: { "aria-hidden": "true" } });
         const lane = c.createDiv({ cls: "vp-week-lane", attr: { role: "img", "aria-label": `${dayName} ${desc}` } });
         const bar = lane.createDiv({ cls: "vp-week-bar" });
-        bar.setCssProps({ "--vp-week-h": `${d.future ? 0 : Math.min(100, Math.max(4, (d.words / max) * 100))}%` });
+        bar.setCssProps({ "--vp-week-h": `${d.future ? 0 : Math.min(100, Math.max(4, frac(d.words) * 100))}%` });
       }
       c.createDiv({ cls: "vp-week-label", text: d.isToday ? L("今", "Today") : d.label });
     }
     if (style === "bars" && goal > 0) {
       row.addClass("has-goal");
-      row.setCssProps({ "--vp-week-goal": `${(goal / max) * 100}%` });
+      row.setCssProps({ "--vp-week-goal": `${frac(goal) * 100}%` });
     }
 
     if (settings.weeklyWordGoal > 0 && dn.weekDetail) {
@@ -1522,7 +1529,7 @@ export class DashboardView extends ItemView {
     else
       legend.setText(
         goal > 0
-          ? L(`实色为达标 · 虚线为每日目标 ${fmtFull(goal)} 字`, `Solid: goal met · dashed line: daily goal of ${fmtFull(goal)}`)
+          ? L(`实色为达标 · 虚线为每日目标 ${fmtFull(goal)} 字${squash ? " · 差距大，柱高按开方显示" : ""}`, `Solid: goal met · dashed line: daily goal of ${fmtFull(goal)}${squash ? " · bar heights use a square-root scale" : ""}`)
           : L("柱高为当天字数", "Bar height is that day's words")
       );
     return box;
@@ -2478,7 +2485,7 @@ export class DashboardView extends ItemView {
       k.add(name, newer, () => void dd.openNote(p.newer), L("对比", "Compare"), () => void dd.openBoth(p.older, p.newer));
     }
     k.done();
-    if (n > 0) this.moreLink(k.foot, L("逐段查看和清理", "Review and clean up"), () => void dd.openReport(false));
+    if (n > 0) this.moreLink(k.foot, L("查看和清理", "Review and clean up"), () => void dd.openReport(false));
     if (dupOn && dd.analysis && n === 0) {
       const scattered = dedupeOverview(dd.analysis, dd.ignoredSet()).groups.length;
       if (scattered > 0) k.body.createDiv({ cls: "vp-checkup-note is-quiet", text: L(`另有 ${fmtFull(scattered)} 处零散重复的段落，没有计入`, `${count(fmtFull(scattered), "passages")} shared here and there are not counted`) });

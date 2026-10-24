@@ -1,6 +1,6 @@
 import { Notice, TAbstractFile, TFile, TFolder, WorkspaceLeaf, debounce, normalizePath } from "obsidian";
 import type NotePulsePlugin from "../main";
-import { Analysis, DupGroup, Occurrence } from "./core/group";
+import { Analysis, DupGroup, Occurrence, OverlapPair } from "./core/group";
 import { ApplyIO, ApplyResult, BackupRecord, UndoResult, executePlan, undoBackup } from "./core/engine";
 import { CleanMode, Plan, PlanItem, buildPlan } from "./core/plan";
 import { StrKey, initLanguage, t } from "./i18n";
@@ -171,6 +171,18 @@ export class DedupeService {
   async ignoreGroup(g: DupGroup) {
     const key = groupKey(g);
     if (!this.settings.ignored.includes(key)) this.settings.ignored.push(key);
+    await this.host.saveDedupeSettings();
+    this.notifyViews();
+  }
+
+  /** 忽略一对笔记：它们共同的段落都标为忽略，这一对不再显示（恢复忽略后会回来） */
+  async ignorePair(p: OverlapPair) {
+    for (const id of p.groupIds) {
+      const g = this.groupIndex.get(id);
+      if (!g) continue;
+      const key = groupKey(g);
+      if (!this.settings.ignored.includes(key)) this.settings.ignored.push(key);
+    }
     await this.host.saveDedupeSettings();
     this.notifyViews();
   }

@@ -1,4 +1,4 @@
-import type { DupGroup, Occurrence } from "./group";
+import type { Analysis, DupGroup, Occurrence, OverlapPair } from "./group";
 import { hash53, trailingBlockId } from "./text";
 import { BlockKind, findTables, rangeFingerprint } from "./tokenize";
 
@@ -87,6 +87,35 @@ export interface PlanOptions {
 export function groupItem(group: DupGroup, keepIndex = 0): PlanItem {
   const keep = group.occs[Math.min(Math.max(0, keepIndex), group.occs.length - 1)];
   return { group, keep, remove: group.occs.filter((o) => o !== keep && o.f !== keep.f) };
+}
+
+/**
+ * 把“大面积重复的笔记对”变成要清理的段落：每个共同段落，在涉及的笔记里只保留最早的那份，其余标为重复。
+ * 只动这些笔记对里的笔记，不会碰到只是碰巧也含有同一段话的别的笔记。
+ * 同一段落出现在好几对里（A–B、A–C、B–C）时合并成一项，每个位置最多清理一次。
+ */
+export function pairsToItems(a: Analysis, pairs: OverlapPair[]): PlanItem[] {
+  const byId = new Map(a.groups.map((g) => [g.id, g]));
+  const involved = new Map<string, Set<string>>();
+  for (const p of pairs) {
+    for (const id of p.groupIds) {
+      let set = involved.get(id);
+      if (!set) involved.set(id, (set = new Set()));
+      set.add(p.older);
+      set.add(p.newer);
+    }
+  }
+  const items: PlanItem[] = [];
+  for (const [id, paths] of involved) {
+    const g = byId.get(id);
+    if (!g) continue;
+    // g.occs 已经按“保留规则”排好：第一份就是最早的
+    const occs = g.occs.filter((o) => paths.has(o.path));
+    if (occs.length < 2) continue;
+    const keep = occs[0];
+    items.push({ group: g, keep, remove: occs.filter((o) => o !== keep && o.f !== keep.f) });
+  }
+  return items;
 }
 
 export function newBlockId(key: string): string {

@@ -54,8 +54,12 @@ export interface HeroDensity {
 const FOOT_H = 70;
 const RING_MIN = 72;
 const RING_MAX = 168;
-/** 本周七天的盒子：内边距 24、顶上一行 28、圆点 / 柱子和星期标签之间 12、星期标签 18；图例和进度条共约 44 */
-const WEEK_CHROME = 24 + 28 + 12 + 18;
+/**
+ * 本周七天的盒子里除了圆点 / 柱子以外占的高度（实测）：内边距 24、顶上一行（标题和切换）36、
+ * 柱状时每根柱子上面一行字数 20、星期标签 24；再留 9 的余量。用柱状时的数算，圆点时稍微宽松一点。
+ * 图例和周目标进度条共约 44。
+ */
+const WEEK_CHROME = 24 + 36 + 20 + 24 + 9;
 const WEEK_DETAIL = 44;
 
 export function heroDensity(b: Box): HeroDensity {
@@ -63,11 +67,14 @@ export function heroDensity(b: Box): HeroDensity {
   if (b.narrow) return { wide: false, week: true, stacked: true, chips: true, ring: 112, dot: 30, lane: 44, bar: 16, weekDetail: true };
   const w = innerW(b);
   const main = Math.max(0, bodyH(b) - FOOT_H);
-  const wide = w >= 560;
-  const stacked = !wide && main >= 88 + 14 + 100;
+  const wide = w >= 640;
+  // 上下叠放时第一行（圆环和连续打卡）约 112 高，两行之间隔 30
+  const stacked = !wide && main >= 112 + 30 + 100;
   const week = wide || stacked;
-  const weekH = wide ? main : main - 88 - 14;
-  const weekDetail = week && weekH >= WEEK_CHROME + WEEK_DETAIL + 40;
+  const weekH = wide ? main : main - 112 - 30;
+  // 图例和周目标进度条要一行放得下（太窄会折成两行，撑高盒子）：本周七天这一栏的宽度约为卡片宽减去圆环、连续打卡和间距
+  const weekW = wide ? w - clamp(Math.floor(main / 4) * 4, RING_MIN, RING_MAX) - 180 - 60 : w;
+  const weekDetail = week && weekW >= 400 && weekH >= WEEK_CHROME + WEEK_DETAIL + 80;
   const room = Math.max(0, weekH - WEEK_CHROME - (weekDetail ? WEEK_DETAIL : 0));
   const ring = stacked ? 88 : clamp(Math.floor(main / 4) * 4, RING_MIN, RING_MAX);
   return {
