@@ -1,6 +1,6 @@
 {
   "name": "note-pulse",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "description": "A dashboard for your vault: note and word trends, writing streak heatmap, task completion, tags and link stats.",
   "main": "main.js",
   "scripts": {
