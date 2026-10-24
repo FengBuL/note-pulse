@@ -1170,7 +1170,7 @@
 .vp-week-day.is-future .vp-week-dot {
   border-style: dashed;
 }
-.vp-week-day:has(.vp-week-pct) .vp-week-dot {
+.vp-week-day .vp-week-dot.has-pct {
   border-color: color-mix(in srgb, var(--vp-accent) 45%, transparent);
 }
 .vp-week-pct {
@@ -6356,7 +6356,6 @@ body.is-mobile .cd-modal .cd-diff-list {
 .modal.vp-report-dialog {
   --vp-report-accent: var(--color-purple-rgb, 124, 92, 220);
   width: min(760px, 92vw);
-  max-height: 90vh;
   max-height: 90dvh;
   padding: 24px;
   border-radius: 16px;
@@ -6487,7 +6486,6 @@ body.is-mobile .cd-modal .cd-diff-list {
 @media (max-width: 600px) {
   .modal.vp-report-dialog {
     width: 100%;
-    max-height: 100vh;
     max-height: 100dvh;
     padding: 16px;
     padding-bottom: calc(16px + var(--mobile-navbar-height, 0px) + env(safe-area-inset-bottom, 0px));

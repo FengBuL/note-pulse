@@ -1814,7 +1814,10 @@ export class DashboardView extends ItemView {
       if (style === "dots") {
         const dot = c.createDiv({ cls: "vp-week-dot", attr: { role: "img", "aria-label": `${dayName} ${desc}` } });
         if (d.done) setIcon(dot, "check");
-        else if (d.pct !== null) dot.createSpan({ cls: "vp-week-pct", text: `${d.pct}%` });
+        else if (d.pct !== null) {
+          dot.addClass("has-pct");
+          dot.createSpan({ cls: "vp-week-pct", text: `${d.pct}%` });
+        }
       } else {
         const lane = c.createDiv({ cls: "vp-week-lane", attr: { role: "img", "aria-label": `${dayName} ${desc}` } });
         // 柱子高度占 0–1（最矮留 4%）；字数写在柱子正上方，跟着柱子高低走
