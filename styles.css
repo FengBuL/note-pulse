@@ -143,15 +143,22 @@
 /* 页头只剩右上角的几个按钮（标题和日期不要了；日期由“日历”卡片负责） */
 .vp-header {
   display: flex;
-  align-items: center;
-  justify-content: flex-end;
+  align-items: flex-start;
+  justify-content: space-between;
   gap: var(--vp-s4);
   margin-bottom: var(--vp-s4);
 }
+.vp-greeting {
+  flex: 1 1 0;
+  min-width: 0;
+}
+/* 按钮和问候语第一行（28px 字、行高 1.3）在同一条水平线上：按钮 30px 高，上边留 3px 让两者的中心对齐 */
 .vp-header-actions {
   display: flex;
+  flex: none;
   align-items: center;
   gap: var(--vp-s2);
+  margin-top: 3px;
 }
 .vp-status {
   font-size: var(--vp-fs-12);
@@ -204,7 +211,7 @@
 /* ---------------- 页首一句话 ---------------- */
 
 .vp-headline {
-  margin-bottom: var(--vp-s5);
+  margin: 0;
 }
 .vp-headline-lead {
   font-size: var(--vp-fs-28);
@@ -224,6 +231,188 @@
   margin-top: var(--vp-s1);
   font-size: var(--vp-fs-15);
   color: var(--text-muted);
+}
+
+/* ---------------- 提醒：逾期、快到期、连续打卡快断了 ---------------- */
+
+.vp-alerts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--vp-s2);
+  margin-bottom: var(--vp-s4);
+}
+.vp-alerts:empty {
+  display: none;
+}
+.vp-root .vp-shell .vp-alert {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--vp-s2);
+  height: auto;
+  min-height: 36px;
+  padding: 6px 12px 6px 10px;
+  border: 1px solid transparent;
+  border-left-width: 4px;
+  border-radius: var(--vp-r-m);
+  box-shadow: none;
+  font-size: var(--vp-fs-13);
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.vp-root .vp-shell .vp-alert.is-danger {
+  color: var(--vp-danger-ink);
+  background: var(--vp-danger-soft);
+  border-color: color-mix(in srgb, var(--vp-danger) 40%, transparent);
+  border-left-color: var(--vp-danger);
+}
+.vp-root .vp-shell .vp-alert.is-warn {
+  color: var(--vp-warning-ink);
+  background: var(--vp-warning-soft);
+  border-color: color-mix(in srgb, var(--vp-warning) 40%, transparent);
+  border-left-color: var(--vp-warning);
+}
+.vp-root .vp-shell .vp-alert.is-info {
+  color: var(--vp-accent-ink);
+  background: color-mix(in srgb, var(--vp-accent) 9%, transparent);
+  border-color: color-mix(in srgb, var(--vp-accent) 28%, transparent);
+  border-left-color: var(--vp-accent);
+}
+.vp-alert-icon,
+.vp-alert-go {
+  display: inline-flex;
+  flex: none;
+}
+.vp-alert-icon svg {
+  width: 16px;
+  height: 16px;
+}
+.vp-alert-go {
+  opacity: 0.6;
+}
+.vp-alert-go svg {
+  width: 14px;
+  height: 14px;
+}
+.vp-root .vp-shell .vp-alert:hover .vp-alert-go {
+  opacity: 1;
+}
+/* 逾期的图标轻轻跳动，提醒“这个最急” */
+.vp-motion .vp-alert.is-danger .vp-alert-icon {
+  animation: vp-nudge var(--vp-t-live) var(--vp-ease) infinite;
+}
+@keyframes vp-nudge {
+  0%,
+  70%,
+  100% {
+    transform: none;
+  }
+  80% {
+    transform: translateY(-2px);
+  }
+  90% {
+    transform: translateY(1px);
+  }
+}
+
+/* ---------------- 庆祝：撒花和一条祝贺 ---------------- */
+
+.vp-celebrate.vp-root {
+  position: fixed;
+  background: none;
+  z-index: 40;
+  left: var(--vp-cel-left, 0);
+  top: var(--vp-cel-top, 0);
+  width: var(--vp-cel-w, 100%);
+  height: var(--vp-cel-h, 100%);
+  overflow: hidden;
+  pointer-events: none;
+}
+.vp-celebrate-toast {
+  position: absolute;
+  bottom: var(--vp-s6);
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: var(--vp-s3);
+  max-width: calc(100% - var(--vp-s5) * 2);
+  padding: var(--vp-s3) var(--vp-s5) var(--vp-s3) var(--vp-s4);
+  border: 1px solid var(--vp-border);
+  border-radius: var(--vp-r-m);
+  background: var(--vp-surface);
+  box-shadow: var(--vp-shadow-pop);
+  font-size: var(--vp-fs-15);
+  font-weight: 600;
+  transform: translateX(-50%);
+  animation: vp-toast-in var(--vp-t-enter) var(--vp-ease-out) both;
+}
+@keyframes vp-toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 12px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+.vp-celebrate-icon {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--vp-grad);
+  color: var(--text-on-accent, #fff);
+}
+.vp-celebrate-icon svg {
+  width: 20px;
+  height: 20px;
+}
+.vp-confetti {
+  position: absolute;
+  top: -16px;
+  left: var(--vp-cx, 50%);
+  width: var(--vp-cw, 8px);
+  height: calc(var(--vp-cw, 8px) * 1.6);
+  border-radius: var(--vp-r-xs);
+  opacity: 0;
+  animation: vp-confetti-fall var(--vp-ct) var(--vp-ease-out) var(--vp-cd) both;
+}
+.vp-confetti.is-accent {
+  background: var(--vp-accent);
+}
+.vp-confetti.is-rose {
+  background: var(--vp-rose);
+}
+.vp-confetti.is-peach {
+  background: var(--vp-peach);
+}
+.vp-confetti.is-success {
+  background: var(--vp-success);
+}
+.vp-confetti.is-accent-2 {
+  background: var(--vp-accent-2);
+}
+@keyframes vp-confetti-fall {
+  0% {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) rotate(0deg);
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate3d(var(--vp-cdx, 0px), calc(var(--vp-cel-h, 800px) + 40px), 0) rotate(var(--vp-cr, 360deg));
+  }
+}
+
+/* 全屏：背景铺满（JS 在全屏时给容器加 vp-fullscreen） */
+.workspace-leaf-content.vp-fullscreen {
+  background: var(--background-primary);
 }
 
 /* ---------------- 12 列栅格 ---------------- */
@@ -1459,6 +1648,9 @@
   font-size: var(--vp-fs-11);
   color: var(--vp-warning-ink);
 }
+.vp-checkup-note.is-quiet {
+  color: var(--vp-subtle);
+}
 
 /* ---------------- 空状态 / 加载 ---------------- */
 
@@ -1789,6 +1981,9 @@
   }
   .vp-headline-lead {
     font-size: var(--vp-fs-20);
+  }
+  .vp-header-actions {
+    margin-top: 0;
   }
   .vp-headline-sub {
     font-size: var(--vp-fs-13);

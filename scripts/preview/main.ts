@@ -15,7 +15,7 @@ const dedupe = {
 const app = {
   vault: { getName: () => "我的知识库", getMarkdownFiles: () => [], getAbstractFileByPath: (p: string) => mk(p, 0) },
   metadataCache: { getFileCache: () => null },
-  workspace: { openLinkText: async () => undefined },
+  workspace: { openLinkText: async () => undefined, on: () => ({}) },
   fileManager: { trashFile: async () => undefined },
 };
 const plugin = {

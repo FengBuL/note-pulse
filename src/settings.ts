@@ -47,6 +47,8 @@ export interface DashboardSettings {
   layout: WidgetLayout;
   /** 日历卡片里用户记的日程：日期 → 当天的条目。存在 data.json 里，随库同步 */
   agenda: Agenda;
+  /** 已经庆祝过的达成（每日目标、每周目标、连续打卡里程碑），免得每次打开都撒花 */
+  celebrated: string[];
   autoRefresh: boolean;
   refreshDelaySec: number;
   openInNewTab: boolean;
@@ -90,6 +92,7 @@ export const DEFAULT_SETTINGS: DashboardSettings = {
   motion: true,
   layout: defaultLayout(),
   agenda: {},
+  celebrated: [],
   autoRefresh: true,
   refreshDelaySec: 3,
   openInNewTab: true,
@@ -707,6 +710,7 @@ export function migrateWritingSettings(settings: DashboardSettings): void {
   // 2.0 之前没有布局：生成默认布局（1.8 的看板 + 6 张新卡片）
   settings.layout = normalizeLayout(settings.layout);
   settings.agenda = sanitizeAgenda(settings.agenda);
+  settings.celebrated = Array.isArray(settings.celebrated) ? settings.celebrated.filter((x): x is string => typeof x === "string") : [];
 }
 
 /**

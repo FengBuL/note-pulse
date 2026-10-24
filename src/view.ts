@@ -3,8 +3,7 @@ import type NotePulsePlugin from "./main";
 import { ConfirmModal } from "./dedupe/modals";
 import { writingReportOverview } from "./report-logic";
 import { latestWritingReport } from "./report-storage";
-import { overview as dedupeOverview } from "./dedupe/core/summary";
-import { groupItem } from "./dedupe/core/plan";
+import { overview as dedupeOverview, significantPairs } from "./dedupe/core/summary";
 import {
   TrendMetric,
   TrendRange,
@@ -25,6 +24,7 @@ import {
 } from "./dashboard-logic";
 import { GroupStat, Hint, TaskInfo, VaultStats, addDays, dayKey, isCheckinDay, pad2, startOfDay } from "./stats";
 import { Agenda, MAX_ITEM_CHARS, addAgendaItem, itemsOn, monthGrid, removeAgendaItem, shiftMonth, toggleAgendaItem } from "./agenda";
+import { DayContext, achievementText, achievements, alertText, computeAlerts, greetingTitle, pruneCelebrated } from "./moments";
 import { COLS, GAP, GridItem, rowsToPx } from "./grid";
 import { GestureHost, GridGesture, setPlace } from "./grid-edit";
 import { Box, HeroDensity, activityDensity, calendarDensity, innerW, bodyH, densityDensity, densityKey, foldersDensity, heatDensity, heroDensity, isTight, kpiDensity, rhythmDensity, trendDensity } from "./density";
@@ -120,6 +120,9 @@ export class DashboardView extends ItemView {
   /** 热力图选中某天后，当天修改的笔记是否全部展开 */
   private dayExpanded = false;
   private bodyEl!: HTMLElement;
+  private greetingEl: HTMLElement | null = null;
+  /** 页首问候最近一次是按几点画的：过了整点要换成新的问候 */
+  private greetHour = -1;
   private statusEl!: HTMLElement;
   private refreshBtn!: HTMLElement;
   private stats: VaultStats | null = null;
@@ -175,10 +178,12 @@ export class DashboardView extends ItemView {
     const shell = root.createDiv({ cls: "vp-shell" });
 
     const header = shell.createDiv({ cls: "vp-header" });
+    this.greetingEl = header.createDiv({ cls: "vp-greeting" });
     const actions = header.createDiv({ cls: "vp-header-actions" });
     this.statusEl = actions.createSpan({ cls: "vp-status" });
     // 手机上只看不改：电脑上的布局会自动同步过来
     if (!Platform.isMobile) this.editBtn = this.iconButton(actions, "pencil", L("编辑看板", "Edit dashboard"), () => this.toggleEditing());
+    if (!Platform.isMobile) this.fullscreenBtn = this.iconButton(actions, "maximize", L("全屏", "Full screen"), () => this.toggleFullscreen());
     this.refreshBtn = this.iconButton(actions, "refresh-cw", L("刷新数据", "Refresh data"), () => void this.plugin.requestRefresh(true));
     this.iconButton(actions, "settings", L("看板设置", "Dashboard settings"), () => this.plugin.openSettings());
 
@@ -187,6 +192,7 @@ export class DashboardView extends ItemView {
     this.registerInterval(
       window.setInterval(() => {
         if (this.renderedDay && this.renderedDay !== dayKey(Date.now()) && this.isVisible()) void this.plugin.requestRefresh(false);
+        else if (this.stats && this.greetHour >= 0 && new Date().getHours() !== this.greetHour && this.isVisible()) this.renderGreeting(this.stats, this.computeCheckin(this.stats));
       }, 60000)
     );
 
@@ -197,6 +203,22 @@ export class DashboardView extends ItemView {
     });
 
     if (Platform.isMobile) this.installTapGuard(root);
+
+    // 切回看板时，看有没有刚达成、还没庆祝过的目标
+    this.registerEvent(
+      this.app.workspace.on("active-leaf-change", (leaf) => {
+        if (leaf?.view === this) this.celebrateSoon();
+      })
+    );
+    // 全屏：按钮的图标和提示跟着状态换
+    this.registerDomEvent(root.ownerDocument, "fullscreenchange", () => {
+      const on = root.ownerDocument.fullscreenElement === this.containerEl;
+      this.containerEl.toggleClass("vp-fullscreen", on);
+      if (this.fullscreenBtn) {
+        setIcon(this.fullscreenBtn, on ? "minimize" : "maximize");
+        this.fullscreenBtn.setAttr("aria-label", on ? L("退出全屏", "Exit full screen") : L("全屏", "Full screen"));
+      }
+    });
 
     // 编辑看板时 Cmd / Ctrl + Z 撤销
     this.registerDomEvent(root.ownerDocument, "keydown", (e: KeyboardEvent) => {
@@ -313,6 +335,7 @@ export class DashboardView extends ItemView {
     this.motionTimers = [];
     this.tapGuardCleanup?.();
     this.tapGuardCleanup = null;
+    window.clearTimeout(this.celebrateTimer);
     if (this.resizeFrame) window.cancelAnimationFrame(this.resizeFrame);
     this.resizeFrame = 0;
     this.disconnectObservers();
@@ -401,6 +424,7 @@ export class DashboardView extends ItemView {
     this.keepScroll(() => this.renderNow(stats));
     // 之后的局部重绘（悬停读数恢复、展开收起）不再按首次打开处理
     this.motionMode = "update";
+    this.celebrateSoon();
     if (hold > 0) {
       const win = this.contentEl.ownerDocument.defaultView;
       win?.requestAnimationFrame(() => {
@@ -426,6 +450,7 @@ export class DashboardView extends ItemView {
 
     const body = this.bodyEl;
     body.empty();
+    this.greetingEl?.empty();
 
     if (stats.totalNotes === 0) {
       const e = body.createDiv({ cls: "vp-card vp-fullempty" });
@@ -439,7 +464,8 @@ export class DashboardView extends ItemView {
     const ck = this.computeCheckin(stats);
     this.bodyHost = body;
     this.define("hints", body, (h) => this.renderHints(h, stats));
-    this.define("headline", body, (h) => this.renderHeadline(h, stats, ck));
+    this.renderGreeting(stats, ck);
+    this.define("alerts", body, (h) => this.renderAlerts(h, stats, ck));
     if (this.editing && !this.narrow) this.renderEditBar(body);
     const grid = body.createDiv({ cls: "vp-grid" });
     this.gridEl = grid;
@@ -1200,36 +1226,145 @@ export class DashboardView extends ItemView {
     }
   }
 
-  /* ---------- 1. 页首一句话 ---------- */
+  /* ---------- 1. 页首：问候、本周小结、需要留意的提醒 ---------- */
 
-  private renderHeadline(parent: HTMLElement, s: VaultStats, ck: Checkin) {
-    const goal = this.plugin.settings.dailyWordGoal;
-    const h = headline(s, goal, new Date(s.generatedAt));
-    const el = parent.createDiv({ cls: "vp-headline" });
-    const lead = el.createDiv({ cls: "vp-headline-lead" });
-    lead.createSpan({ text: L("本周已写 ", "") });
-    lead.createSpan({ cls: "vp-grad-text", text: fmtFull(h.weekWords) });
-    lead.createSpan({ text: L(" 字", ` ${unit("words", h.weekWords)} this week`) });
-    if (h.changePct !== null && h.changePct !== 0) {
-      const pct = Math.abs(h.changePct);
-      lead.createSpan({ text: L(`，比上周同期${h.changePct > 0 ? "多" : "少"} ${pct}%`, `, ${pct}% ${h.changePct > 0 ? "more" : "less"} than this point last week`) });
-    } else if (h.changePct === 0) lead.createSpan({ text: L("，和上周同期持平", ", the same as this point last week") });
-    lead.createSpan({ text: L("。", ".") });
+  /** 今天的情况：问候语、提醒、庆祝都从这里取数 */
+  private dayContext(s: VaultStats, ck: Checkin): DayContext {
+    const set = this.plugin.settings;
+    const now = new Date();
+    const h = headline(s, set.dailyWordGoal, now);
+    const today = startOfDay(now);
+    const tomorrowKey = dayKey(addDays(today, 1));
+    const active = ck.isActive(ck.todayKey);
+    return {
+      now,
+      todayKey: ck.todayKey,
+      todayWords: ck.todayWords,
+      goal: set.dailyWordGoal,
+      todayDone: active,
+      streak: ck.current,
+      // 今天已打卡：连续段从今天往回数 current 天；今天还没打卡：从昨天往回数
+      streakStart: ck.current > 0 ? dayKey(addDays(today, -(ck.current - (active ? 1 : 0)))) : null,
+      weekWords: h.weekWords,
+      weeklyGoal: set.weeklyWordGoal,
+      weekStartKey: dayKey(weekStart(now)),
+      changePct: h.changePct,
+      overdue: s.tasks.overdue.length,
+      dueToday: s.tasks.dueSoon.filter((t) => t.due === ck.todayKey).length,
+      dueTomorrow: s.tasks.dueSoon.filter((t) => t.due === tomorrowKey).length,
+    };
+  }
+
+  /** 页首左边：一句问候加今天的状态，下面一行本周小结。和右边的按钮在同一行 */
+  private renderGreeting(s: VaultStats, ck: Checkin) {
+    const el = this.greetingEl;
+    if (!el) return;
+    el.empty();
+    const c = this.dayContext(s, ck);
+    this.greetHour = c.now.getHours();
+    const box = el.createDiv({ cls: "vp-headline" });
+    box.createDiv({ cls: "vp-headline-lead", text: greetingTitle(c, L) });
+    const sub = box.createDiv({ cls: "vp-headline-sub" });
+    sub.createSpan({ text: L("本周已写 ", "This week: ") });
+    sub.createSpan({ cls: "vp-grad-text", text: fmtFull(c.weekWords) });
+    sub.createSpan({ text: L(" 字", ` ${unit("words", c.weekWords)}`) });
+    if (c.changePct !== null && c.changePct !== 0) {
+      const pct = Math.abs(c.changePct);
+      sub.createSpan({ text: L(`，比上周同期${c.changePct > 0 ? "多" : "少"} ${pct}%`, `, ${pct}% ${c.changePct > 0 ? "more" : "less"} than this point last week`) });
+    } else if (c.changePct === 0) sub.createSpan({ text: L("，和上周同期持平", ", the same as this point last week") });
     const bits: string[] = [];
-    if (ck.current > 0) bits.push(L(`连续写作第 ${ck.current} 天`, `Day ${ck.current} of your streak`));
-    const left = Math.max(0, goal - h.todayWords);
-    bits.push(
-      h.todayDone
-        ? L("今天已达成目标", "Today's goal reached")
-        : goal > 0
-          ? L(`今天还差 ${fmtFull(left)} 字`, `${fmtFull(left)} ${unit("words", left)} to go today`)
-          : L("今天还没动笔", "Nothing written yet today")
-    );
-    if (h.dueToday > 0) bits.push(L(`${h.dueToday} 项任务今天到期`, `${count(h.dueToday, "tasks")} due today`));
-    if (h.overdue > 0) bits.push(L(`${h.overdue} 项已逾期`, `${h.overdue} overdue`));
+    if (c.streak > 0) bits.push(L(`连续写作第 ${c.streak} 天`, `Day ${c.streak} of your streak`));
     const tidy = this.tidyCount(s);
     if (tidy > 0) bits.push(L(`库里有 ${fmtFull(tidy)} 项可整理`, `${fmtFull(tidy)} to tidy up in the vault`));
-    el.createDiv({ cls: "vp-headline-sub", text: bits.join(" · ") });
+    if (bits.length) sub.createSpan({ text: ` · ${bits.join(" · ")}` });
+  }
+
+  /** 需要留意的事（逾期、今天或明天到期、连续打卡快断了、本周目标快到期）：醒目的色块，点一下跳到相关的卡片 */
+  private renderAlerts(parent: HTMLElement, s: VaultStats, ck: Checkin) {
+    const alerts = computeAlerts(this.dayContext(s, ck));
+    const wrap = parent.createDiv({ cls: "vp-alerts" });
+    if (alerts.length) {
+      wrap.setAttr("role", "region");
+      wrap.setAttr("aria-label", L("需要留意", "Needs attention"));
+    }
+    for (const a of alerts) {
+      const icon = a.kind === "overdue" ? "alert-triangle" : a.kind === "streak" ? "flame" : a.kind === "weekly" ? "target" : "clock";
+      const target = a.kind === "streak" || a.kind === "weekly" ? "hero" : "tasks";
+      const b = wrap.createEl("button", { cls: `vp-alert is-${a.severity}`, attr: { type: "button", "data-fid": `alert:${a.kind}` } });
+      setIcon(b.createSpan({ cls: "vp-alert-icon", attr: { "aria-hidden": "true" } }), icon);
+      b.createSpan({ cls: "vp-alert-text", text: alertText(a, L) });
+      setIcon(b.createSpan({ cls: "vp-alert-go", attr: { "aria-hidden": "true" } }), "chevron-right");
+      b.addEventListener("click", () => {
+        if (this.parts.has(target)) this.revealCard(target);
+        else if (target === "tasks") this.plugin.openSearch("task-todo:\"\"");
+      });
+    }
+  }
+
+  /* ---------- 庆祝：达成目标后第一次回到看板，撒花 ---------- */
+
+  private celebrateTimer = 0;
+
+  /** 稍等一下再看有没有该庆祝的：切到看板的瞬间先让页面画好 */
+  private celebrateSoon() {
+    window.clearTimeout(this.celebrateTimer);
+    this.celebrateTimer = window.setTimeout(() => this.maybeCelebrate(), 450);
+  }
+
+  private maybeCelebrate() {
+    if (!this.stats || !this.isVisible() || this.editing || this.stats.totalNotes === 0) return;
+    const set = this.plugin.settings;
+    const ck = this.computeCheckin(this.stats);
+    const found = achievements(this.dayContext(this.stats, ck), new Set(set.celebrated));
+    if (found.length === 0) return;
+    set.celebrated = pruneCelebrated([...set.celebrated, ...found.map((a) => a.key)]);
+    void this.plugin.saveViewSetting();
+    this.celebrate(found.map((a) => achievementText(a, L)));
+  }
+
+  /** 撒花加一条祝贺。动效关了或系统要求减弱动态效果时，只出祝贺，不撒花 */
+  private celebrate(lines: string[]) {
+    const host = this.containerEl;
+    host.querySelector(".vp-celebrate")?.remove();
+    // 带上 vp-root：设计令牌（颜色、阴影）都定义在它上面；层自己 position: fixed，盖在整个看板面板上
+    const layer = host.createDiv({ cls: "vp-celebrate vp-root", attr: { role: "status" } });
+    // 只盖住看得见的那部分（面板被滚出窗口的部分不算）
+    const r = host.getBoundingClientRect();
+    const win = host.ownerDocument.defaultView;
+    const top = Math.max(0, r.top);
+    const bottom = Math.min(win?.innerHeight ?? r.bottom, r.bottom);
+    layer.setCssProps({ "--vp-cel-left": `${r.left}px`, "--vp-cel-top": `${top}px`, "--vp-cel-w": `${r.width}px`, "--vp-cel-h": `${Math.max(0, bottom - top)}px` });
+    const toast = layer.createDiv({ cls: "vp-celebrate-toast" });
+    setIcon(toast.createSpan({ cls: "vp-celebrate-icon", attr: { "aria-hidden": "true" } }), "party-popper");
+    const text = toast.createDiv({ cls: "vp-celebrate-text" });
+    for (const l of lines) text.createDiv({ text: l });
+    if (this.motionOn()) {
+      const colors = ["accent", "rose", "peach", "success", "accent-2"];
+      for (let i = 0; i < 72; i++) {
+        const p = layer.createSpan({ cls: `vp-confetti is-${colors[i % colors.length]}`, attr: { "aria-hidden": "true" } });
+        p.setCssProps({
+          "--vp-cx": `${Math.round(Math.random() * 100)}%`,
+          "--vp-cdx": `${Math.round((Math.random() - 0.5) * 160)}px`,
+          "--vp-cd": `${(Math.random() * 0.7).toFixed(2)}s`,
+          "--vp-ct": `${(1.8 + Math.random() * 1.4).toFixed(2)}s`,
+          "--vp-cr": `${Math.round(Math.random() * 720 - 360)}deg`,
+          "--vp-cw": `${6 + Math.round(Math.random() * 6)}px`,
+        });
+      }
+    }
+    window.setTimeout(() => layer.remove(), 5200);
+  }
+
+  /* ---------- 全屏 ---------- */
+
+  private fullscreenBtn: HTMLElement | null = null;
+
+  private toggleFullscreen() {
+    const el = this.containerEl;
+    const doc = el.ownerDocument;
+    if (doc.fullscreenElement) void doc.exitFullscreen();
+    else if (el.requestFullscreen) el.requestFullscreen().catch(() => new Notice(L("这个窗口不能全屏", "Can't go full screen here")));
+    else new Notice(L("这个窗口不能全屏", "Can't go full screen here"));
   }
 
   /* ---------- 2. 焦点：今日写作 ---------- */
@@ -1336,7 +1471,9 @@ export class DashboardView extends ItemView {
     );
 
     const row = box.createDiv({ cls: "vp-week" });
-    const max = Math.max(goal, ...days.map((d) => d.words), 1);
+    // 柱子的高度按“目标的 3 倍”封顶：某天写了几万字，其它天的柱子就不会都压成一条线，虚线（每日目标）也始终在看得清的高度上
+    const peak = Math.max(...days.map((d) => d.words), 1);
+    const max = goal > 0 ? Math.max(goal, Math.min(peak, goal * 3)) : peak;
     for (const d of days) {
       const c = row.createDiv({ cls: "vp-week-day" + (d.done ? " is-active" : "") + (d.isToday ? " is-today" : "") + (d.future ? " is-future" : "") });
       const w = count(fmtFull(d.words), "words");
@@ -1355,7 +1492,7 @@ export class DashboardView extends ItemView {
       } else {
         const lane = c.createDiv({ cls: "vp-week-lane", attr: { role: "img", "aria-label": `${dayName} ${desc}` } });
         const bar = lane.createDiv({ cls: "vp-week-bar" });
-        bar.setCssProps({ "--vp-week-h": `${d.future ? 0 : Math.max(4, (d.words / max) * 100)}%` });
+        bar.setCssProps({ "--vp-week-h": `${d.future ? 0 : Math.min(100, Math.max(4, (d.words / max) * 100))}%` });
       }
       c.createDiv({ cls: "vp-week-label", text: d.isToday ? L("今", "Today") : d.label });
     }
@@ -2172,7 +2309,7 @@ export class DashboardView extends ItemView {
     const c = checkupModel(s);
     const dd = this.plugin.dedupe;
     const dupOn = this.plugin.settings.dedupeEnabled && this.plugin.settings.dedupeCard;
-    const dup = dupOn && dd.analysis ? dedupeOverview(dd.analysis, dd.ignoredSet()).groups.length : 0;
+    const dup = dupOn && dd.analysis ? significantPairs(dd.analysis, dd.ignoredSet()).length : 0;
     return c.unresolvedCount + c.orphans.length + c.empty.length + c.big.length + c.sameName.length + c.unusedAttachments.length + dup;
   }
 
@@ -2306,36 +2443,46 @@ export class DashboardView extends ItemView {
     k.done();
   }
 
+  /**
+   * 重复内容：列出“大面积重复”的笔记对（一篇笔记至少 70% 的内容在另一篇里也有）。
+   * 零散的一两个句子、一两段话在别处出现过，不算重复内容，不在这里列；那些要逐段看，在“重复内容清理”页里。
+   */
   private renderDupes(grid: HTMLElement) {
     const dd = this.plugin.dedupe;
     const set = this.plugin.settings;
     const dupOn = set.dedupeEnabled && set.dedupeCard;
-    const dup = dupOn && dd.analysis ? dedupeOverview(dd.analysis, dd.ignoredSet()) : null;
-    const n = dup ? dup.groups.length : 0;
+    const pairs = dupOn && dd.analysis ? significantPairs(dd.analysis, dd.ignoredSet()) : [];
+    const n = pairs.length;
     const k = this.checkupCard(
       grid,
       "dupes",
       "files",
-      L("不同笔记里重复出现的段落，来自最近一次扫描（扫描只读，不会改动笔记）。", "Passages repeated across notes, from the last scan (scanning is read-only and changes nothing)."),
+      L(
+        "内容大面积重复的笔记：一篇笔记至少 70% 的内容在另一篇里也有（比如同一篇文章剪藏了两次）。零散的一两句、一两段话重复不算。来自最近一次扫描，扫描只读，不会改动笔记。",
+        "Notes that largely repeat each other: at least 70% of one note also appears in another (say, the same article clipped twice). A sentence or paragraph shared here and there doesn't count. From the last scan; scanning is read-only and changes nothing."
+      ),
       n,
       true,
-      dupOn ? (dd.scanning ? L("正在扫描…", "Scanning…") : dd.analysis ? L("没有重复内容", "No duplicates") : L("还没扫描过", "Not scanned yet")) : L("重复内容清理没有打开", "Duplicate cleanup is off")
+      dupOn ? (dd.scanning ? L("正在扫描…", "Scanning…") : dd.analysis ? L("没有内容大面积重复的笔记", "No notes largely repeat each other") : L("还没扫描过", "Not scanned yet")) : L("重复内容清理没有打开", "Duplicate cleanup is off")
     );
     if (!dupOn) {
       k.add(L("在设置里打开“重复内容清理”和它的看板卡片", "Turn on Duplicate cleanup and its dashboard card in settings"), "", null, L("打开设置", "Settings"), () => this.plugin.openSettings());
     } else if (!dd.analysis && !dd.scanning) {
       k.add(L("扫描只读，不会改动笔记", "Read-only, changes nothing"), "", null, L("开始扫描", "Scan"), () => void dd.openReport(true));
     }
-    if (dup) {
-      for (const g of dup.groups.slice(0, 50)) {
-        const first = g.occs[0];
-        const base = first?.path.split("/").pop()?.replace(/\.md$/, "");
-        const name = base ? L(`${base} 等 ${g.occs.length} 篇`, `${base} and ${g.occs.length - 1} more`) : count(g.occs.length, "notes");
-        k.add(name, name, () => void dd.openReport(false), L("保留最早", "Keep oldest"), () => dd.startCleanup([groupItem(g, 0)], "mark"));
-      }
+    for (const p of pairs.slice(0, 50)) {
+      const newer = baseName(p.newer);
+      const older = baseName(p.older);
+      const pct = Math.round(Math.max(p.newerRatio, p.olderRatio) * 100);
+      const name = L(`${newer} 和 ${older} 重复 ${pct}%`, `${newer} and ${older} overlap ${pct}%`);
+      k.add(name, newer, () => void dd.openNote(p.newer), L("对比", "Compare"), () => void dd.openBoth(p.older, p.newer));
     }
     k.done();
-    if (n > 0) this.moreLink(k.foot, L(`全部 ${fmtFull(n)} 段`, `All ${count(fmtFull(n), "passages")}`), () => void dd.openReport(false));
+    if (n > 0) this.moreLink(k.foot, L("逐段查看和清理", "Review and clean up"), () => void dd.openReport(false));
+    if (dupOn && dd.analysis && n === 0) {
+      const scattered = dedupeOverview(dd.analysis, dd.ignoredSet()).groups.length;
+      if (scattered > 0) k.body.createDiv({ cls: "vp-checkup-note is-quiet", text: L(`另有 ${fmtFull(scattered)} 处零散重复的段落，没有计入`, `${count(fmtFull(scattered), "passages")} shared here and there are not counted`) });
+    }
     if (dupOn && dd.stale && dd.analysis) k.body.createDiv({ cls: "vp-checkup-note", text: L("笔记有改动，建议重新扫描", "Notes changed since the scan. Scan again.") });
   }
 

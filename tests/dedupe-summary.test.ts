@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { analyze, FileRecord } from "../src/dedupe/core/group";
-import { groupKey, noteDay, overview, readablePreview } from "../src/dedupe/core/summary";
+import { groupKey, noteDay, overview, readablePreview, significantPairs } from "../src/dedupe/core/summary";
 import { tokenize } from "../src/dedupe/core/tokenize";
 import { OPTS } from "./dedupe/fixtures";
 
@@ -45,4 +45,32 @@ test("readablePreview strips Markdown markers and table pipes", () => {
   assert.equal(readablePreview("| 1 | @me | hello |"), "1 · @me · hello");
   assert.equal(readablePreview("- [ ] **task** text ^cd-abc"), "task text");
   assert.equal(readablePreview("x".repeat(20), 10).length, 10);
+});
+
+test("看板上的重复内容：只有大面积重复的笔记才算，零散共用的段落不算", () => {
+  const para3 = (s: string) => `${s} ${"padding words to make the block long enough for the threshold. ".repeat(4)}`;
+  const A = para3("Alpha paragraph."), B = para3("Beta paragraph."), C = para3("Gamma paragraph."), X = para3("Shared once.");
+  const own = (n: string) => para3(`Only in ${n}.`);
+  const fs = [
+    // a 和 b：三段里有三段一样，几乎是同一篇
+    rec("a.md", `${A}\n\n${B}\n\n${C}\n`, 1),
+    rec("b.md", `${A}\n\n${B}\n\n${C}\n`, 2),
+    // c 和 d 只共用一段，各自还有一大堆别的内容
+    rec("c.md", `${X}\n\n${own("c1")}\n\n${own("c2")}\n\n${own("c3")}\n\n${own("c4")}\n`, 3),
+    rec("d.md", `${X}\n\n${own("d1")}\n\n${own("d2")}\n\n${own("d3")}\n\n${own("d4")}\n`, 4),
+  ];
+  const a = analyze(fs);
+  assert.ok(a.groups.length >= 4, "分段层面一共有好几处重复");
+  const pairs = significantPairs(a, new Set());
+  assert.equal(pairs.length, 1);
+  assert.deepEqual([pairs[0].older, pairs[0].newer], ["a.md", "b.md"]);
+  // 这一对的段落全被忽略了，就不再显示
+  const ignoredAll = new Set(a.groups.filter((g) => g.occs.some((o) => o.path === "a.md")).map((g) => groupKey(g)));
+  assert.equal(significantPairs(a, ignoredAll).length, 0);
+});
+
+test("看板上的重复内容：共同部分太短的整篇相同也不算（比如两条一句话笔记）", () => {
+  const short = "x".repeat(81);
+  const a = analyze([rec("s1.md", `${short}\n`, 1), rec("s2.md", `${short}\n`, 2)]);
+  assert.equal(significantPairs(a, new Set()).length, 0);
 });

@@ -1,5 +1,5 @@
 import { nameDate } from "./group";
-import type { Analysis, DupGroup, FileRecord } from "./group";
+import type { Analysis, DupGroup, FileRecord, OverlapPair } from "./group";
 
 /** A key that stays the same across scans for "the same repeated content", used to remember ignored items. */
 export function groupKey(g: DupGroup): string {
@@ -67,4 +67,20 @@ export function readablePreview(raw: string, max = 600): string {
     .filter((l) => l.length > 0 && !/^[-:· ]+$/.test(l));
   const s = lines.join("\n");
   return s.length > max ? s.slice(0, max - 1) + "…" : s;
+}
+
+/** 共同部分至少这么长（加权长度，一个汉字算 2）才算“大面积重复”：大约 120 个汉字，或 240 个英文字符 */
+export const MIN_SHARED_W = 240;
+
+/**
+ * 看板上“重复内容”算的是笔记和笔记之间大面积重复的组合：一篇笔记至少 70% 的内容在另一篇里也有，
+ * 而且共同部分不太少。零散的一两个句子、一两段话在别处出现过，不算。
+ * 用户在“重复内容清理”里已经忽略的段落不计入：这一对的共同段落全被忽略了，就不再显示。
+ */
+export function significantPairs(a: Analysis, ignored: ReadonlySet<string>): OverlapPair[] {
+  const byId = new Map(a.groups.map((g) => [g.id, g]));
+  return a.pairs.filter((p) => p.sharedW >= MIN_SHARED_W && p.groupIds.some((id) => {
+    const g = byId.get(id);
+    return !!g && !ignored.has(groupKey(g));
+  }));
 }
