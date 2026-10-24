@@ -16,6 +16,8 @@ export interface TourHost {
   apply(state: TourState): void;
   /** 找这一步要高亮的元素 */
   find(target: TourTarget): HTMLElement | null;
+  /** 看板所在的面板（窗口坐标）：没有目标的步骤，提示卡在它中间 */
+  bounds(): Rect | null;
   /** 引导结束：completed 为 true 是看完了，false 是中途跳过；看板据此恢复进入引导前的状态、记下已看过 */
   end(completed: boolean): void;
 }
@@ -26,12 +28,13 @@ export class Tour {
   private layer: HTMLElement | null = null;
   private card: HTMLElement | null = null;
   private cursor: HTMLElement | null = null;
+  private ghost: HTMLElement | null = null;
   private index = -1;
   private step: TourStep | null = null;
   private skipped = new Set<string>();
-  private demoEl: HTMLElement | null = null;
-  private placed = false;
-  private timer = 0;
+  /** 上一次摆好的位置：没变就不再写样式，免得白白触发重绘 */
+  private lastPlace = "";
+  private settle: number[] = [];
   private raf = 0;
   private dirs: { next: HTMLButtonElement; prev: HTMLButtonElement } | null = null;
   private counter!: HTMLElement;
@@ -54,6 +57,8 @@ export class Tour {
     this.layer = layer;
     for (const side of ["top", "bottom", "left", "right"]) layer.createDiv({ cls: `vp-tour-dim is-${side}`, attr: { "aria-hidden": "true" } });
     layer.createDiv({ cls: "vp-tour-spot", attr: { "aria-hidden": "true" } });
+    // 演示时跟着光标动的虚线框（代表被拖动、被拉大的卡片）：真实的卡片不动，高亮框和提示卡的位置才稳定
+    this.ghost = layer.createDiv({ cls: "vp-tour-ghost", attr: { "aria-hidden": "true" } });
     this.cursor = layer.createDiv({ cls: "vp-tour-cursor", attr: { "aria-hidden": "true" } });
     const arrow = svgEl("svg", { viewBox: "0 0 24 24", width: 26, height: 26 }, this.cursor);
     svgEl("path", { d: "M5 3l14 8-6 2-3 6z", class: "vp-tour-cursor-shape" }, arrow);
@@ -80,7 +85,6 @@ export class Tour {
     doc.addEventListener("keydown", this.onKey, true);
     win.addEventListener("resize", this.schedulePlace);
     win.addEventListener("scroll", this.schedulePlace, true);
-    this.timer = win.setInterval(this.place, 250);
     this.show(0, 1);
   }
 
@@ -91,12 +95,12 @@ export class Tour {
     win?.removeEventListener("resize", this.schedulePlace);
     win?.removeEventListener("scroll", this.schedulePlace, true);
     if (win) {
-      win.clearInterval(this.timer);
+      this.settle.forEach((t) => win.clearTimeout(t));
       win.cancelAnimationFrame(this.raf);
     }
-    this.clearDemo();
+    this.settle = [];
     this.layer?.remove();
-    this.layer = this.card = this.cursor = null;
+    this.layer = this.card = this.cursor = this.ghost = null;
   }
 
   private finish(completed: boolean) {
@@ -139,7 +143,6 @@ export class Tour {
   }
 
   private setStep(s: TourStep, el: HTMLElement | null) {
-    this.clearDemo();
     this.step = s;
     const vis = this.visibleSteps();
     const n = vis.indexOf(s) + 1;
@@ -162,19 +165,34 @@ export class Tour {
       if (r.top < 70 || r.bottom > vh - 70) el.scrollIntoView({ block: r.height > vh * 0.7 ? "start" : "center", inline: "nearest" });
     }
     this.startDemo(s, el);
+    // 先同步摆好一次（提示卡的内容已经换好，量出来的大小是对的），之后看板可能还在重画、卡片还在滑动，
+    // 隔几段时间再校正几次；校正完就不再自己动，不然提示卡会在用户要点的时候跑掉
+    this.place(true);
+    const win = this.host.doc.defaultView;
+    if (win) {
+      this.settle.forEach((t) => win.clearTimeout(t));
+      this.settle = [60, 200, 450, 900].map((ms) => win.setTimeout(() => this.place(false), ms));
+    }
+    // 提示卡淡入（只动透明度和位移，不触发布局）
+    const card = this.card;
+    if (card) {
+      card.removeClass("is-in");
+      void card.offsetWidth;
+      card.addClass("is-in");
+    }
     this.dirs?.next.focus({ preventScroll: true });
-    // 状态切换后卡片重画了：等布局稳定再量
-    this.schedulePlace();
-    this.host.doc.defaultView?.setTimeout(this.place, 120);
   }
 
-  /** 当前步骤的演示动画：光标在目标上做一遍操作，拖动卡片、拖角调大小的步骤里真实的卡片也跟着动 */
+  /** 当前步骤的演示动画：光标在目标上做一遍操作；拖动、调大小的步骤里，一个虚线框代表被拖动、被拉大的卡片跟着光标走（真实的卡片不动） */
   private startDemo(s: TourStep, el: HTMLElement | null) {
+    this.ghost?.removeClass("is-drag");
+    this.ghost?.removeClass("is-grow");
     if (!s.demo || !el || !this.cursor) {
       this.cursor?.removeClass("is-on");
       return;
     }
     const r = el.getBoundingClientRect();
+    const vw = this.host.doc.defaultView?.innerWidth ?? 1200;
     let sx = r.left + r.width / 2;
     let sy = r.top + r.height / 2;
     let dx = 0;
@@ -182,32 +200,23 @@ export class Tour {
     if (s.demo === "drag") {
       sx = r.left + Math.min(60, r.width / 3);
       sy = r.top + 22;
-      dx = Math.min(110, (this.host.doc.defaultView?.innerWidth ?? 1200) - sx - 40);
+      dx = Math.max(24, Math.min(110, vw - sx - 40));
       dy = 18;
-      el.setCssProps({ "--vp-tour-dx": `${dx}px`, "--vp-tour-dy": `${dy}px` });
-      el.addClass("vp-tour-drag");
-      this.demoEl = el;
+      this.ghost?.addClass("is-drag");
     } else if (s.demo === "resize") {
       dx = 34;
       dy = 26;
-      const card = el.closest<HTMLElement>(".vp-w");
-      card?.addClass("vp-tour-grow");
-      this.demoEl = card;
+      this.ghost?.addClass("is-grow");
     } else {
       sx -= 46;
       sy += 30;
       dx = 46;
       dy = -30;
     }
-    this.cursor.setCssProps({ "--vp-tour-x": `${sx}px`, "--vp-tour-y": `${sy}px`, "--vp-tour-dx": `${dx}px`, "--vp-tour-dy": `${dy}px` });
+    const props = { "--vp-tour-x": `${sx}px`, "--vp-tour-y": `${sy}px`, "--vp-tour-dx": `${dx}px`, "--vp-tour-dy": `${dy}px` };
+    this.cursor.setCssProps(props);
+    this.ghost?.setCssProps(props);
     this.cursor.addClass("is-on");
-  }
-
-  private clearDemo() {
-    this.demoEl?.removeClass("vp-tour-drag");
-    this.demoEl?.removeClass("vp-tour-grow");
-    this.demoEl = null;
-    this.cursor?.removeClass("is-on");
   }
 
   private schedulePlace = () => {
@@ -215,17 +224,22 @@ export class Tour {
     if (!win || this.raf) return;
     this.raf = win.requestAnimationFrame(() => {
       this.raf = 0;
-      this.place();
+      this.place(false);
     });
   };
 
-  /** 高亮框和提示卡跟着目标走（页面滚动、窗口缩放、卡片重画之后目标的位置都会变） */
-  private place = () => {
+  /**
+   * 高亮框和提示卡摆到目标上。只在这些时候调用：换步骤时、窗口缩放或滚动时、换步骤后的几次校正；
+   * 位置没变就什么都不写；鼠标正悬在提示卡上（用户正要点按钮）时不动它，除非是换步骤。
+   */
+  private place = (force: boolean | Event = false) => {
     const layer = this.layer;
     const card = this.card;
     const s = this.step;
     const win = this.host.doc.defaultView;
     if (!layer || !card || !s || !win) return;
+    const forced = force === true;
+    if (!forced && card.matches(":hover")) return;
     const vp = { w: win.innerWidth, h: win.innerHeight };
     const el = s.target ? this.host.find(s.target) : null;
     const b = el?.getBoundingClientRect();
@@ -235,15 +249,13 @@ export class Tour {
       if (v.w > 0 && v.h > 0) spot = v;
     }
     const hole = spot ?? { x: vp.w / 2, y: vp.h / 2, w: 0, h: 0 };
-    layer.setCssProps({ "--vp-sx": `${hole.x}px`, "--vp-sy": `${hole.y}px`, "--vp-sw": `${hole.w}px`, "--vp-sh": `${hole.h}px` });
+    const pos = placeCard(spot, { w: card.offsetWidth || 340, h: card.offsetHeight || 200 }, vp, 14, this.host.bounds() ?? undefined);
+    const key = [hole.x, hole.y, hole.w, hole.h, pos.x, pos.y].map((n) => Math.round(n)).join(",");
+    if (key === this.lastPlace && !forced) return;
+    this.lastPlace = key;
+    layer.setCssProps({ "--vp-sx": `${Math.round(hole.x)}px`, "--vp-sy": `${Math.round(hole.y)}px`, "--vp-sw": `${Math.round(hole.w)}px`, "--vp-sh": `${Math.round(hole.h)}px` });
     layer.toggleClass("has-spot", !!spot);
-    const pos = placeCard(spot, { w: card.offsetWidth || 340, h: card.offsetHeight || 200 }, vp);
-    card.setCssProps({ "--vp-cx": `${pos.x}px`, "--vp-cy": `${pos.y}px` });
-    // 第一次摆好之前不要过渡动画，不然提示卡会从角落飞进来
-    if (!this.placed) {
-      this.placed = true;
-      win.requestAnimationFrame(() => layer.addClass("is-ready"));
-    }
+    card.setCssProps({ "--vp-cx": `${Math.round(pos.x)}px`, "--vp-cy": `${Math.round(pos.y)}px` });
   };
 
   private onKey = (e: KeyboardEvent) => {

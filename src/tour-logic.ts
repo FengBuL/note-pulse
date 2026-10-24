@@ -156,13 +156,18 @@ export interface Rect {
 const clampN = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v));
 
 /**
- * 提示卡放在哪（左上角）：没有目标时放在屏幕中间；否则优先放目标下面，放不下放上面，
+ * 提示卡放在哪（左上角）：没有目标时放在看板面板（anchor）中间；否则优先放目标下面，放不下放上面，
  * 再不行放右边、左边；水平方向对齐目标中心，夹在屏幕里。都放不下（目标很大）时压在屏幕下部。
  */
-export function placeCard(target: Rect | null, card: { w: number; h: number }, vp: { w: number; h: number }, gap = 14): { x: number; y: number; side: "center" | "below" | "above" | "right" | "left" | "over" } {
+export function placeCard(target: Rect | null, card: { w: number; h: number }, vp: { w: number; h: number }, gap = 14, anchor?: Rect): { x: number; y: number; side: "center" | "below" | "above" | "right" | "left" | "over" } {
   const maxX = Math.max(gap, vp.w - card.w - gap);
   const maxY = Math.max(gap, vp.h - card.h - gap);
-  if (!target) return { x: clampN((vp.w - card.w) / 2, gap, maxX), y: clampN((vp.h - card.h) / 2, gap, maxY), side: "center" };
+  // 没有目标：居中。有 anchor（看板所在的面板）就在面板里居中，不然在整个窗口里居中（侧边栏开着时窗口中心不是看板中心）
+  if (!target) {
+    const a = anchor ? visibleRect(anchor, vp) : { x: 0, y: 0, w: vp.w, h: vp.h };
+    const box = a.w > 0 && a.h > 0 ? a : { x: 0, y: 0, w: vp.w, h: vp.h };
+    return { x: clampN(box.x + (box.w - card.w) / 2, gap, maxX), y: clampN(box.y + (box.h - card.h) / 2, gap, maxY), side: "center" };
+  }
   const cx = clampN(target.x + target.w / 2 - card.w / 2, gap, maxX);
   const cy = clampN(target.y + target.h / 2 - card.h / 2, gap, maxY);
   const below = target.y + target.h + gap;

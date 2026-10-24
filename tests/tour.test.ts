@@ -78,3 +78,14 @@ test("高亮框只取屏幕里看得见的部分", () => {
   assert.deepEqual(visibleRect({ x: 10, y: 10, w: 50, h: 50 }, VP), { x: 10, y: 10, w: 50, h: 50 });
   assert.equal(visibleRect({ x: 2000, y: 10, w: 50, h: 50 }, VP).w, 0);
 });
+
+test("提示卡定位：没有目标时在 anchor（看板面板）中间居中，不是窗口中间；面板在屏幕外时回到窗口居中", () => {
+  const pane = { x: 300, y: 40, w: 800, h: 700 };
+  const p = placeCard(null, CARD, VP, 14, pane);
+  assert.equal(p.side, "center");
+  assert.equal(p.x, 300 + (800 - 340) / 2);
+  assert.equal(p.y, 40 + (700 - 200) / 2);
+  assert.deepEqual(placeCard(null, CARD, VP, 14, { x: 5000, y: 0, w: 100, h: 100 }), placeCard(null, CARD, VP), "面板不在屏幕里：按窗口居中");
+  const edge = placeCard(null, CARD, VP, 14, { x: 900, y: 0, w: 600, h: 800 });
+  assert.ok(edge.x + CARD.w <= VP.w - 14, "面板伸出窗口时也不出屏幕");
+});

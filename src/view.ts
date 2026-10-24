@@ -561,6 +561,10 @@ export class DashboardView extends ItemView {
       doc: this.contentEl.ownerDocument,
       apply: (state) => this.tourApply(state),
       find: (target) => this.tourFind(target),
+      bounds: () => {
+        const r = this.contentEl.getBoundingClientRect();
+        return r.width > 0 ? { x: r.left, y: r.top, w: r.width, h: r.height } : null;
+      },
       end: () => {
         this.tour = null;
         const back = this.tourRestore;

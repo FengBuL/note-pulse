@@ -355,9 +355,6 @@
   left: calc(var(--vp-sx, 50%) + var(--vp-sw, 0px));
   height: var(--vp-sh, 0px);
 }
-.vp-tour.is-ready .vp-tour-dim {
-  transition: top var(--vp-t-base) var(--vp-ease), left var(--vp-t-base) var(--vp-ease), width var(--vp-t-base) var(--vp-ease), height var(--vp-t-base) var(--vp-ease);
-}
 .vp-tour-spot {
   position: absolute;
   top: var(--vp-sy, 50%);
@@ -374,22 +371,19 @@
   opacity: 1;
   animation: vp-tour-pulse var(--vp-t-live) ease-in-out infinite;
 }
-.vp-tour.is-ready .vp-tour-spot {
-  transition: top var(--vp-t-base) var(--vp-ease), left var(--vp-t-base) var(--vp-ease), width var(--vp-t-base) var(--vp-ease), height var(--vp-t-base) var(--vp-ease), opacity var(--vp-t-base) var(--vp-ease);
-}
 @keyframes vp-tour-pulse {
   0%,
   100% {
-    border-color: var(--vp-accent);
+    opacity: 1;
   }
   50% {
-    border-color: color-mix(in srgb, var(--vp-accent) 40%, white);
+    opacity: 0.45;
   }
 }
 .vp-tour-card {
   position: absolute;
-  top: 0;
-  left: 0;
+  top: var(--vp-cy, 0px);
+  left: var(--vp-cx, 0px);
   display: flex;
   flex-direction: column;
   gap: var(--vp-s2);
@@ -402,13 +396,22 @@
   background: var(--vp-surface);
   box-shadow: var(--vp-shadow-pop);
   color: var(--text-normal);
-  transform: translate(var(--vp-cx, 0px), var(--vp-cy, 0px));
+}
+.vp-tour-card.is-in {
+  animation: vp-tour-in var(--vp-t-base) var(--vp-ease);
+}
+@keyframes vp-tour-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 .vp-tour-card.is-centered {
   width: 420px;
-}
-.vp-tour.is-ready .vp-tour-card {
-  transition: transform var(--vp-t-base) var(--vp-ease);
 }
 .vp-tour-top {
   display: flex;
@@ -507,6 +510,7 @@
   height: 26px;
   opacity: 0;
   pointer-events: none;
+  will-change: transform;
 }
 .vp-tour-cursor.is-on {
   opacity: 1;
@@ -536,54 +540,79 @@
     transform: translate(0, 0) scale(1);
   }
 }
-.vp-grid > .vp-w.vp-tour-drag {
-  z-index: 8;
+/* 演示用的虚线框：代表被拖动、被拉大的卡片，位置和大小跟高亮框一样，只用 transform 动（不触发布局） */
+.vp-tour-ghost {
+  position: absolute;
+  top: var(--vp-sy, 50%);
+  left: var(--vp-sx, 50%);
+  box-sizing: border-box;
+  width: var(--vp-sw, 0px);
+  height: var(--vp-sh, 0px);
+  border: 1.5px dashed var(--vp-accent);
+  border-radius: var(--vp-r-m);
+  background: color-mix(in srgb, var(--vp-accent) 10%, transparent);
+  opacity: 0;
+  pointer-events: none;
+  transform-origin: top left;
+  will-change: transform, opacity;
+}
+.vp-tour-ghost.is-drag {
   animation: vp-tour-drag var(--vp-t-tour) ease-in-out infinite;
+}
+.vp-tour-ghost.is-grow {
+  animation: vp-tour-grow var(--vp-t-tour) ease-in-out infinite;
 }
 @keyframes vp-tour-drag {
   0%,
-  14% {
+  22% {
+    opacity: 0;
     transform: none;
   }
-  24% {
-    transform: scale(1.02);
-  }
-  68% {
-    transform: translate(var(--vp-tour-dx, 0px), var(--vp-tour-dy, 0px)) scale(1.02);
-  }
-  80% {
-    transform: translate(var(--vp-tour-dx, 0px), var(--vp-tour-dy, 0px));
-  }
-  100% {
-    transform: none;
-  }
-}
-.vp-grid > .vp-w.vp-tour-grow {
-  z-index: 8;
-  transform-origin: top left;
-  animation: vp-tour-grow var(--vp-t-tour) ease-in-out infinite;
-}
-@keyframes vp-tour-grow {
-  0%,
-  24% {
+  26% {
+    opacity: 1;
     transform: none;
   }
   68%,
   80% {
-    transform: scale(1.06);
+    opacity: 1;
+    transform: translate(var(--vp-tour-dx, 0px), var(--vp-tour-dy, 0px));
   }
+  88%,
   100% {
+    opacity: 0;
+    transform: translate(var(--vp-tour-dx, 0px), var(--vp-tour-dy, 0px));
+  }
+}
+@keyframes vp-tour-grow {
+  0%,
+  22% {
+    opacity: 0;
     transform: none;
+  }
+  26% {
+    opacity: 1;
+    transform: none;
+  }
+  68%,
+  80% {
+    opacity: 1;
+    transform: scale(1.1);
+  }
+  88%,
+  100% {
+    opacity: 0;
+    transform: scale(1.1);
   }
 }
 @media (prefers-reduced-motion: reduce) {
   .vp-tour-cursor,
-  .vp-tour.has-spot .vp-tour-spot,
-  .vp-grid > .vp-w.vp-tour-drag,
-  .vp-grid > .vp-w.vp-tour-grow {
+  .vp-tour-ghost,
+  .vp-tour-card.is-in,
+  .vp-tour.has-spot .vp-tour-spot {
     animation: none;
   }
-  .vp-tour-cursor {
+  .vp-tour-cursor,
+  .vp-tour-ghost {
     display: none;
   }
 }
