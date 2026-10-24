@@ -2,7 +2,7 @@
 
 The full history (English and 中文) is in the README. Highlights:
 
-## 未发布
+## 2.1.1
 
 - 修复社区插件目录 CSS 审查的两条警告：去掉重复的 `max-height`（报告预览窗口只保留 `dvh` 那一条），去掉 `:has`（本周圆点里“带百分比的天”改成在 JS 里加类 `has-pct`，外观不变）。`npm run check:css` 现在也会检查这两类问题。
 
