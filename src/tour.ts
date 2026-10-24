@@ -55,8 +55,8 @@ export class Tour {
     // 带上 vp-root 是为了拿到设计令牌（颜色、圆角、阴影）
     const layer = doc.body.createDiv({ cls: "vp-tour vp-root", attr: { role: "dialog", "aria-modal": "true", "aria-label": L("新版本引导", "What is new") } });
     this.layer = layer;
-    for (const side of ["top", "bottom", "left", "right"]) layer.createDiv({ cls: `vp-tour-dim is-${side}`, attr: { "aria-hidden": "true" } });
-    layer.createDiv({ cls: "vp-tour-spot", attr: { "aria-hidden": "true" } });
+    const spot = layer.createDiv({ cls: "vp-tour-spot", attr: { "aria-hidden": "true" } });
+    spot.createDiv({ cls: "vp-tour-ring" });
     // 演示时跟着光标动的虚线框（代表被拖动、被拉大的卡片）：真实的卡片不动，高亮框和提示卡的位置才稳定
     this.ghost = layer.createDiv({ cls: "vp-tour-ghost", attr: { "aria-hidden": "true" } });
     this.cursor = layer.createDiv({ cls: "vp-tour-cursor", attr: { "aria-hidden": "true" } });
@@ -248,7 +248,7 @@ export class Tour {
       const v = visibleRect({ x: b.left - PAD, y: b.top - PAD, w: b.width + PAD * 2, h: b.height + PAD * 2 }, vp);
       if (v.w > 0 && v.h > 0) spot = v;
     }
-    const hole = spot ?? { x: vp.w / 2, y: vp.h / 2, w: 0, h: 0 };
+    const hole = spot ?? { x: vp.w / 2, y: vp.h / 2, w: 1, h: 1 };
     const pos = placeCard(spot, { w: card.offsetWidth || 340, h: card.offsetHeight || 200 }, vp, 14, this.host.bounds() ?? undefined);
     const key = [hole.x, hole.y, hole.w, hole.h, pos.x, pos.y].map((n) => Math.round(n)).join(",");
     if (key === this.lastPlace && !forced) return;

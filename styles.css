@@ -65,6 +65,7 @@
   --vp-shadow: 0 1px 2px rgba(40, 20, 60, 0.04), 0 8px 24px color-mix(in srgb, var(--vp-accent) 7%, transparent);
   --vp-shadow-raise: 0 2px 4px rgba(40, 20, 60, 0.05), 0 14px 32px color-mix(in srgb, var(--vp-accent) 11%, transparent);
   --vp-shadow-pop: 0 8px 24px rgba(20, 10, 30, 0.2);
+  --vp-shadow-dim: 0 0 0 100vmax rgba(18, 10, 40, 0.58);
   --vp-shadow-press: 0 1px 2px rgba(0, 0, 0, 0.12);
   --vp-ring-today: 0 0 0 2px var(--vp-surface), 0 0 0 3.5px color-mix(in srgb, var(--vp-accent) 55%, transparent);
   --vp-halo-dot: 0 0 0 4px color-mix(in srgb, var(--vp-accent) 18%, transparent);
@@ -327,47 +328,29 @@
   z-index: 70;
   background: none;
 }
-.vp-tour-dim {
-  position: absolute;
-  background: rgba(18, 10, 40, 0.58);
-}
-.vp-tour-dim.is-top {
-  top: 0;
-  right: 0;
-  left: 0;
-  height: var(--vp-sy, 50%);
-}
-.vp-tour-dim.is-bottom {
-  top: calc(var(--vp-sy, 50%) + var(--vp-sh, 0px));
-  right: 0;
-  bottom: 0;
-  left: 0;
-}
-.vp-tour-dim.is-left {
-  top: var(--vp-sy, 50%);
-  left: 0;
-  width: var(--vp-sx, 50%);
-  height: var(--vp-sh, 0px);
-}
-.vp-tour-dim.is-right {
-  top: var(--vp-sy, 50%);
-  right: 0;
-  left: calc(var(--vp-sx, 50%) + var(--vp-sw, 0px));
-  height: var(--vp-sh, 0px);
-}
+/* 遮罩：高亮框自己的超大阴影就是遮罩，所以挖出来的洞和高亮框一样是圆角的 */
 .vp-tour-spot {
   position: absolute;
   top: var(--vp-sy, 50%);
   left: var(--vp-sx, 50%);
   box-sizing: border-box;
-  width: var(--vp-sw, 0px);
-  height: var(--vp-sh, 0px);
+  width: var(--vp-sw, 1px);
+  height: var(--vp-sh, 1px);
+  border-radius: var(--vp-r-m);
+  box-shadow: var(--vp-shadow-dim);
+  pointer-events: none;
+}
+.vp-tour-ring {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
   border: 2px solid var(--vp-accent);
   border-radius: var(--vp-r-m);
   opacity: 0;
-  pointer-events: none;
 }
-.vp-tour.has-spot .vp-tour-spot {
+.vp-tour.has-spot .vp-tour-ring {
   opacity: 1;
   animation: vp-tour-pulse var(--vp-t-live) ease-in-out infinite;
 }
@@ -608,7 +591,7 @@
   .vp-tour-cursor,
   .vp-tour-ghost,
   .vp-tour-card.is-in,
-  .vp-tour.has-spot .vp-tour-spot {
+  .vp-tour.has-spot .vp-tour-ring {
     animation: none;
   }
   .vp-tour-cursor,
